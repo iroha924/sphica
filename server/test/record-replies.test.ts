@@ -316,9 +316,12 @@ test("record_check and record_save: a record with many errors is refused with th
   }
 });
 
-test("glean_fetch: everything is kept, the count comes first, and the list of sources is read on without fetching again", async () => {
-  const gh = fakeIssueGh(9, 300, "の".repeat(120));
-  const w = await recordWorld("fetch-pages", { PATH: gh.path });
+test("glean_fetch: everything is kept, the count comes first, and the list names refs only, read on without fetching again", async () => {
+  const gh = fakeIssueGh(9, 1500, `SECRET ${"の".repeat(120)}`);
+  const w = await recordWorld("fetch-pages", { PATH: gh.path }, () => ({
+    action: "accept",
+    content: { confirm: "1" },
+  }));
   try {
     message(w.db, w.p, { id: "m1", text: "Look at issue 9." });
     const run = /^run: (\S+)/.exec((await w.reply("glean_begin", { session: "s1" })).text)?.[1] ?? "";
@@ -326,25 +329,36 @@ test("glean_fetch: everything is kept, the count comes first, and the list of so
     assert.ok(!first.isError, first.text.slice(0, 300));
     assert.match(
       first.text,
-      /^301 sources kept\. Read them with read s<id>, then cite the refs:\n<past-records id="[0-9a-f]+">\n/,
+      /^1501 sources kept\. Read each with read s<id>, then cite the refs:\n<past-records id="[0-9a-f]+">\n/,
     );
     const pages = await result(w, first);
     assert.ok(pages.length >= 2, `${pages.length} pages`);
-    // Every source kept is listed once, by the id read takes, and each page frames what the commenters wrote
+    // Every source kept is listed once, by the id read takes, and each page frames what comes from the commenters (their names)
     const listed = pages.flatMap((p) =>
-      [...p.matchAll(/^- s(\d+) (issue_body|issue_comment) by someone: /gm)].map((m) => Number(m[1])),
+      [...p.matchAll(/^- s(\d+) (issue_body|issue_comment) by someone$/gm)].map((m) => Number(m[1])),
     );
-    assert.equal(new Set(listed).size, 301);
+    assert.equal(new Set(listed).size, 1501);
     assert.equal(
       Number(w.db.owner.prepare("select count(*) as n from source where kind like 'issue%'").get()?.n),
-      301,
+      1501,
     );
     for (const p of pages)
       assert.match(p, /<past-records id="[0-9a-f]+">\n[\s\S]*\n<\/past-records id="[0-9a-f]+">/);
+    // No word of a source is in the list: what a server keeps for record_more outlives a forget made from another session
+    assert.doesNotMatch(pages.join("\n"), /SECRET|の/);
     // Reading the pages asked gh for nothing more
     const calls = fs.readFileSync(gh.calls, "utf8").trim().split("\n").length;
     assert.deepEqual(await result(w, first), pages);
     assert.equal(fs.readFileSync(gh.calls, "utf8").trim().split("\n").length, calls);
+    // A forget in this session clears what it kept: the list's cursor is gone with it
+    const cursor = /cursor: "([^"]+)"$/.exec(first.text)?.[1] ?? "";
+    assert.ok(!(await w.reply("forget_apply", { sources: [`s${listed.at(-1)}`] })).isError);
+    const stale = await w.reply("record_more", { cursor });
+    assert.ok(stale.isError);
+    assert.match(
+      stale.text,
+      /no longer kept .*sources were forgotten since.*The sources were kept; do not fetch again/,
+    );
   } finally {
     await w.done();
   }
@@ -417,6 +431,12 @@ test("forget: every source and the count are always shown, and the records affec
     must(applied.text);
     assert.match(applied.text, /^The deleted text was cleared from the database file\.$/m);
     assert.equal(new Set(records(await result(w, applied))).size, 300);
+    // What was kept before the forget is gone with it: a kept line may quote a source
+    const stale = await w.reply("record_more", {
+      cursor: /cursor: "([^"]+)"$/.exec(preview.text)?.[1] ?? "",
+    });
+    assert.ok(stale.isError);
+    assert.match(stale.text, /no longer kept .*sources were forgotten since/);
     assert.equal(Number(w.db.owner.prepare("select count(*) as n from source").get()?.n), 0);
   } finally {
     await w.done();

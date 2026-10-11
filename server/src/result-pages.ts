@@ -27,11 +27,14 @@ const COMMITTED: ResultKind[] = ["save", "fetch", "forget_apply"];
 /** Results kept in each of the two pools. Not a promise: a restart forgets them all */
 const KEPT = 20;
 
+/** Bytes of lines kept in each pool. The newest result is kept whatever its size: a cursor just given must work */
+const POOL_BYTES = 4 * 1024 * 1024;
+
 /** Bytes of one kept line. A longer line is split when it is kept, so every page can carry at least one */
 const PIECE = 4096;
 
 /** frame is the id of the frame around every page, drawn when the lines are kept: null for lines that are Sphica's own */
-type Result = { projectId: number; frame: string | null; lines: string[]; given: Set<number> };
+type Result = { projectId: number; frame: string | null; lines: string[]; given: Set<number>; bytes: number };
 const pools = { redo: new Map<string, Result>(), committed: new Map<string, Result>() };
 
 export const CURSOR = /^([crsfpa][0-9a-f]{12})\.(\d{1,15})$/;
@@ -86,7 +89,9 @@ export function firstPage(o: {
     frame: o.framed ? frameId() : null,
     lines: o.lines.flatMap(pieces),
     given: new Set(),
+    bytes: 0,
   };
+  r.bytes = r.lines.reduce((n, l) => n + bytes(l), 0);
   const pool = COMMITTED.includes(o.kind) ? pools.committed : pools.redo;
   let id = "";
   do id = `${KINDS[o.kind]}${crypto.randomBytes(6).toString("hex")}`;
@@ -94,9 +99,11 @@ export function firstPage(o: {
   const first = page(r, id, 0, o.lead.map(inline));
   if (first.left === 0) return first.text;
   pool.set(id, r);
-  for (const old of pool.keys()) {
-    if (pool.size <= KEPT) break;
+  let held = [...pool.values()].reduce((n, x) => n + x.bytes, 0);
+  for (const [old, x] of pool) {
+    if (old === id || (pool.size <= KEPT && held <= POOL_BYTES)) break;
     pool.delete(old);
+    held -= x.bytes;
   }
   return first.text;
 }
@@ -111,6 +118,15 @@ const GONE: Record<string, string> = {
   a: "The sources were forgotten; nothing is left to do for them.",
 };
 
+/**
+ * Drops every result kept for a project. A kept line may repeat a source's words (an error quoting what a record cited), and what
+ * the owner forgets must not be read again from here. Other sessions' servers keep their own, so no line is built from a source's text.
+ */
+export function forgetKept(projectId: number): void {
+  for (const pool of [pools.redo, pools.committed])
+    for (const [id, r] of pool) if (r.projectId === projectId) pool.delete(id);
+}
+
 /** The page of a kept result a cursor names. The same cursor gives the same page. */
 export function morePage(cursor: string, projectId: number): string {
   const m = CURSOR.exec(cursor);
@@ -119,7 +135,7 @@ export function morePage(cursor: string, projectId: number): string {
   const r = pools.redo.get(id) ?? pools.committed.get(id);
   if (!r)
     throw new Error(
-      `This result is no longer kept (the record server restarted, or newer results took its place). ${GONE[id.charAt(0)] ?? ""}`,
+      `This result is no longer kept (the record server restarted, newer results took its place, or sources were forgotten since). ${GONE[id.charAt(0)] ?? ""}`,
     );
   if (r.projectId !== projectId) throw new Error("This result belongs to another project");
   const from = Number(at);

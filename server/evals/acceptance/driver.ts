@@ -35,6 +35,8 @@ import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { liveOverview, lookOverview } from "../../src/overview.ts";
 import { readRefs, readUnit } from "../../src/read.ts";
+import { READ_BUDGET } from "../../src/reply-budget.ts";
+import { morePage } from "../../src/result-pages.ts";
 import { type Applicable, parseDiff, reviewBatch } from "../../src/review.ts";
 import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
@@ -265,6 +267,8 @@ export async function createDriver(world: World): Promise<Driver> {
   let checked = "";
   /** What the last trace or harvest save reported, for expectations about why a record waits. */
   let savedText = "";
+  /** The pages the last check and save came in, each as the server sent it */
+  const resultPages: { check: string[]; save: string[] } = { check: [], save: [] };
   /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
   const quotes = new Map<string, Set<string>>();
   const missing = (kind: string, s: Step) =>
@@ -443,10 +447,53 @@ export async function createDriver(world: World): Promise<Driver> {
       await call?.("record_context");
       page = await contextText(writer(), run, pid, repo, next);
     }
-    const translated = await translate(record);
-    checked = (await checkText(writer(), run, pid, repo, translated, await call?.("record_check"))).text;
-    savedText = await saveText(writer(), run, pid, repo, translated, undefined, await call?.("record_save"));
+    const translated = await translate(withMissingAnchors(record));
+    checked = whole(
+      "check",
+      (await checkText(writer(), run, pid, repo, translated, await call?.("record_check"))).text,
+      pid,
+    );
+    savedText = whole(
+      "save",
+      await saveText(writer(), run, pid, repo, translated, undefined, await call?.("record_save")),
+      pid,
+    );
     remember(prefix, record);
+  }
+
+  /** A reply read to its end as the Skills read it, by the cursor on each page's last line. The pages are kept for the size checks */
+  function whole(of: "check" | "save", first: string, pid: number): string {
+    const pages = [first];
+    for (;;) {
+      const cursor = /call record_more with cursor: "([^"]+)"$/.exec(pages.at(-1) ?? "")?.[1];
+      if (!cursor) break;
+      pages.push(morePage(cursor, pid));
+    }
+    resultPages[of] = pages;
+    return pages.join("\n");
+  }
+
+  /** A unit's `anchors_missing: n` as n anchors on paths the working tree does not hold: many warnings without a long case */
+  function withMissingAnchors(record: Record<string, unknown>): Record<string, unknown> {
+    if (!Array.isArray(record.units)) return record;
+    const units = record.units as (Record<string, unknown> & { key: string; anchors_missing?: number })[];
+    return {
+      ...record,
+      units: units.map(({ anchors_missing: n, ...u }) =>
+        n
+          ? {
+              ...u,
+              anchors: [
+                ...((u.anchors as unknown[] | undefined) ?? []),
+                ...Array.from({ length: n }, (_, i) => ({
+                  path: `missing/${u.key}/file-${i}.ts`,
+                  role: "applies_to",
+                })),
+              ],
+            }
+          : u,
+      ),
+    };
   }
 
   /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
@@ -1413,6 +1460,23 @@ export async function createDriver(world: World): Promise<Driver> {
           savedText.includes(e.save_notes_contain),
           `save did not say "${e.save_notes_contain}"\n${savedText}`,
         );
+        return;
+      }
+      if (e.result_pages && typeof e.result_pages === "object") {
+        const want = e.result_pages as { of: "check" | "save"; min: number };
+        const pages = resultPages[want.of];
+        assert.ok(pages.length >= want.min, `${want.of} came in ${pages.length} pages`);
+        for (const page of pages)
+          assert.ok(
+            Buffer.byteLength(page) <= READ_BUDGET,
+            `a ${want.of} page of ${Buffer.byteLength(page)} bytes`,
+          );
+        return;
+      }
+      if (e.result_lines && typeof e.result_lines === "object") {
+        const want = e.result_lines as { of: "check" | "save"; containing: string; count: number };
+        const lines = resultPages[want.of].join("\n").split("\n");
+        assert.equal(lines.filter((l) => l.includes(want.containing)).length, want.count, want.containing);
         return;
       }
       if (typeof e.check_problem_absent === "string") {

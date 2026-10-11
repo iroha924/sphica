@@ -20,7 +20,7 @@ const PER_LAYER = {
   overview: 6,
   export: 1,
   fields: 3,
-  paging: 2,
+  paging: 3,
   reconcile: 10,
   agent: 15,
 };

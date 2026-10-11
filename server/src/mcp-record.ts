@@ -34,7 +34,7 @@ import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
 import { withinBudget } from "./reply-budget.ts";
-import { CURSOR, firstPage, morePage } from "./result-pages.ts";
+import { CURSOR, firstPage, forgetKept, morePage } from "./result-pages.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { stopOnOverflow } from "./stdio-limit.ts";
 import { head, plural, reason } from "./text.ts";
@@ -188,7 +188,7 @@ server.registerTool(
   {
     title: "Keep an issue or pull request the owner named",
     description:
-      "Reads a GitHub issue or pull request URL of this repository through gh (read only), keeps it as sources, says how many, and lists their refs. Refs that do not fit the reply are read with record_more; everything is kept either way.",
+      "Reads a GitHub issue or pull request URL of this repository through gh (read only), keeps it as sources, says how many, and lists their refs with who wrote each (read a source with read). Refs that do not fit the reply are read with record_more; everything is kept either way.",
     inputSchema: z.object({ run: RUN, url: z.string().url().max(500), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
@@ -341,6 +341,8 @@ server.registerTool(
           throw refused(`The number typed does not match ${n}`);
       }
       const done = await applyForget(dbFile(), p.projectId, ids, seen, extra.signal);
+      // Results kept from earlier calls may quote what was just forgotten
+      forgetKept(p.projectId);
       const w = forgetWords(done.outcome, dbFile());
       // Whether the bytes are gone is said with what was forgotten, before the records: a reply that carries only some still says it
       return firstPage({

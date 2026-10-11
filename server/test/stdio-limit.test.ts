@@ -12,19 +12,22 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { stopOnOverflow } from "../src/stdio-limit.ts";
-import { tmpEnv } from "./temp-dir.ts";
+import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const LIMIT = 10 * 1024 * 1024;
 
 /** A server process, what it wrote, and how it ended */
 function server(entry: string) {
+  // A home and a database path of its own: nothing the server reads or writes is the owner's, on any platform
+  const home = tempDir("sphica-stdio-home-");
   const child = spawn(process.execPath, [path.join(SRC, entry)], {
     env: {
       ...tmpEnv(),
       PATH: process.env.PATH ?? "",
-      HOME: "/nonexistent",
-      SPHICA_DB: "/nonexistent/sphica.db",
+      HOME: home,
+      USERPROFILE: home,
+      SPHICA_DB: path.join(home, "sphica.db"),
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

@@ -20,7 +20,7 @@ test("record_more refuses a cursor no reply gave, and says so when the result is
     assert.ok(gone.isError);
     assert.match(
       gone.text,
-      /^Sphica: This result is no longer kept \(the record server restarted, or newer results took its place\)\. The record was saved; do not save it again\./,
+      /^Sphica: This result is no longer kept \(the record server restarted, newer results took its place, or sources were forgotten since\)\. The record was saved; do not save it again\./,
     );
   } finally {
     await w.done();
@@ -254,7 +254,7 @@ test("record_context: a call the host gave up on shows nothing, so the save afte
       assert.ok(!(await w.reply("record_save", { run, record: { units: [] } })).isError);
       assert.deepEqual(looked(w), [], `after cancelled call ${i}`);
     }
-    // A call that is answered counts, as before
+    // A call that is answered marks the messages it showed as looked at
     const run = await w.trace();
     await w.context(run);
     assert.ok(!(await w.reply("record_save", { run, record: { units: [] } })).isError);

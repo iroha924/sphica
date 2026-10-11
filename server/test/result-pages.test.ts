@@ -8,7 +8,7 @@ import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { READ_BUDGET } from "../src/reply-budget.ts";
-import { firstPage, morePage, pieces } from "../src/result-pages.ts";
+import { firstPage, forgetKept, morePage, pieces } from "../src/result-pages.ts";
 
 const size = (s: string) => Buffer.byteLength(s);
 const next = (text: string) => /call record_more with cursor: "([^"]+)"$/.exec(text)?.[1];
@@ -165,4 +165,52 @@ test("checks push out only other results that can be run again, and a cursor who
     () => morePage(applied, 1),
     /no longer kept .*The sources were forgotten; nothing is left to do for them\./,
   );
+});
+
+test("kept results are bounded by their size too: the newest stays, and older ones make room", () => {
+  // About 3 MiB of lines each: two do not fit the pool together
+  const big = () =>
+    next(
+      firstPage({
+        kind: "forget_preview",
+        projectId: 1,
+        lead: ["lead"],
+        lines: Array.from({ length: 30_000 }, (_, i) => `${i} ${"r".repeat(95)}`),
+      }),
+    ) ?? "";
+  const first = big();
+  assert.match(morePage(first, 1), /^\d+ r{95}\n/);
+  const second = big();
+  assert.throws(() => morePage(first, 1), /no longer kept/);
+  assert.match(morePage(second, 1), /^\d+ r{95}\n/);
+  // One result larger than the pool is still read: a cursor just given is never useless
+  const huge =
+    next(
+      firstPage({
+        kind: "forget_preview",
+        projectId: 1,
+        lead: ["lead"],
+        lines: Array.from({ length: 60_000 }, (_, i) => `${i} ${"r".repeat(95)}`),
+      }),
+    ) ?? "";
+  assert.match(morePage(huge, 1), /^\d+ r{95}\n/);
+  assert.throws(() => morePage(second, 1), /no longer kept/);
+});
+
+test("forgetting sources clears every result kept for that project, since a kept line may quote what was forgotten", () => {
+  const lines = Array.from({ length: 900 }, (_, i) => `- s${i} comment by someone: ${"t".repeat(100)}`);
+  const kept = (kind: Parameters<typeof firstPage>[0]["kind"], projectId: number) =>
+    next(firstPage({ kind, projectId, lead: ["lead"], lines, framed: kind === "fetch" })) ?? "";
+  const fetched = kept("fetch", 1);
+  const checked = kept("check", 1);
+  const saved = kept("save", 1);
+  const other = kept("fetch", 2);
+  forgetKept(1);
+  for (const c of [fetched, checked, saved])
+    assert.throws(
+      () => morePage(c, 1),
+      /no longer kept \(the record server restarted, newer results took its place, or sources were forgotten since\)/,
+    );
+  // Another project's results are its own
+  assert.match(morePage(other, 2), /- s\d+ comment by someone: /);
 });

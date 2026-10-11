@@ -3117,7 +3117,7 @@ test("trace: a context call the host cancelled counts nothing as shown, so a sav
         .all()
         .map((r) => Number(r.source_id));
     assert.deepEqual(looked(), []);
-    // A call that is answered counts as before
+    // A call that is answered marks the messages it showed as looked at
     const next = await beginTrace(db.ingest, p, "s1");
     await contextText(db.ingest, next, p, null, undefined, false, new AbortController().signal);
     await saveText(db.ingest, next, p, null, { units: [] });

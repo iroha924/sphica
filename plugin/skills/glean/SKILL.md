@@ -46,7 +46,7 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 2. **Ask for the source** (above). Have the owner state it in this session: the owner's words are captured and become citable
 3. **Begin**: `glean_begin` with this session (`${CLAUDE_SESSION_ID}` in Claude Code; in Codex, `CODEX_THREAD_ID` from your shell). It returns a `run`
 4. **Bring in the source**: for a GitHub issue or pull request URL of this repository, `glean_fetch` with the run and URL; it keeps the text as sources,
-   says how many, and lists their refs (when its reply ends with `call record_more with cursor: "..."`, the rest of the list is read with
+   says how many, and lists their refs with who wrote each (read a source with `read s<id>`; when its reply ends with `call record_more with cursor: "..."`, the rest of the list is read with
    `record_more`; everything is already kept, so never fetch again for it). For a file, cite it in the record (`file`); Sphica reads it from git itself. For anything else (meeting notes, chat), cite
    the owner's message that quotes it
 5. **Read**: `record_context` with the run: the owner's messages in this session with their refs. When a page's last line says

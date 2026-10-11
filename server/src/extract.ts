@@ -277,15 +277,13 @@ export async function gleanFetch(
     return stored;
   });
   const kept = items.flatMap((it, i) => (ids[i] == null ? [] : [{ it, id: ids[i] }]));
-  // Everything is kept whatever the reply carries. The lines hold what others wrote, so they are framed on every page
+  // Everything is kept whatever the reply carries. The lines name refs and who wrote each, never a source's words: what is kept
+  // for record_more lives in this process, and a forget made from another session cannot clear it
   return firstPage({
     kind: "fetch",
     projectId: place.projectId,
-    lead: [`${plural(kept.length, "source")} kept. Read them with read s<id>, then cite the refs:`],
-    lines: kept.map(
-      ({ it, id }) =>
-        `- s${id} ${it.kind} by ${preview(it.author?.login ?? "unknown", 100)}: ${preview(it.text, 120)}`,
-    ),
+    lead: [`${plural(kept.length, "source")} kept. Read each with read s<id>, then cite the refs:`],
+    lines: kept.map(({ it, id }) => `- s${id} ${it.kind} by ${preview(it.author?.login ?? "unknown", 100)}`),
     framed: true,
   });
 }
