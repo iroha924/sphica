@@ -35,7 +35,7 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { checkedText } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { fakeCodex } from "./fake-codex.ts";
-import { at, hash, insert, message, project, tempDb } from "./temp-db.ts";
+import { at, run as extractionRun, hash, insert, message, project, tempDb } from "./temp-db.ts";
 import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -1458,7 +1458,7 @@ test("search keeps its reply within the reply budget, and every hit it leaves ou
   try {
     const found = await w.reply("search", { query: "budgetword", limit: 20 });
     const shown = [
-      ...found.text.matchAll(/^## trace:e+\.\.\. \[key cut\] \(u(\d+)\): decision dont, active/gm),
+      ...found.text.matchAll(/^## trace:e+… \[key cut\] \(u(\d+)\): decision dont, active/gm),
     ].map((x) => x[1]);
     const calls = readCallsIn(found.text);
     const left = calls.flat();
@@ -1478,12 +1478,12 @@ test("search keeps its reply within the reply budget, and every hit it leaves ou
     assert.match(
       found.text,
       new RegExp(
-        `\\n\\n${left.length} more hits left out to keep this reply within 32 KiB: read with refs \\[`,
+        `</past-records id="[0-9a-f]+">\\n${left.length} more hits left out to keep this reply within 32 KiB: read with refs \\[`,
       ),
     );
     // Options past the eighth are counted, with the ref that shows them
     assert.match(found.text, new RegExp(`/ and 4 more options \\(read u${shown[0]}\\)\\n`));
-    assert.match(found.text, /Read a record by its key before relying on it\.\n<\/past-records/);
+    assert.match(found.text, /\nRead a record by its key before relying on it\.$/);
     // What it says is enough to reach a hit it left out
     const first = await w.reply("read", { refs: calls[0] });
     assert.match(first.text, /^trace:e+\/hit\d{2}\b/m);
@@ -1494,6 +1494,283 @@ test("search keeps its reply within the reply budget, and every hit it leaves ou
     // Twenty sources fit once each one's artifact and author are clipped
     assert.equal(seen.length, 20);
     assert.deepEqual(readCallsIn(sources.text), []);
+  } finally {
+    await w.done();
+  }
+});
+
+test("review_check keeps its reply within the reply budget and still says, record by record, which lack a finding", async () => {
+  const w = await budgetWorld("check-budget");
+  const quote = "Not this one.";
+  const m = message(w.db, w.p, { id: "m1", text: quote });
+  const option = (i: number) => `checkedoption${String(i).padStart(3, "0")}`;
+  // A key's session part comes from the host and has no length limit
+  for (let i = 0; i < 50; i += 25)
+    await w.save(
+      `trace:${"e".repeat(1000)}/`,
+      Array.from({ length: 25 }, (_, k) => ({
+        key: `rec${String(i + k).padStart(3, "0")}`,
+        kind: "decision",
+        stance: "dont",
+        text: quote,
+        evidence: [{ source: `s${m}`, quote, role: "states" }],
+        adoption: [{ source: `s${m}`, quote }],
+        options: [{ text: option(i + k), outcome: "rejected" }],
+      })),
+    );
+  const lines = Array.from({ length: 50 }, (_, i) => `use(${option(i)});`);
+  const diff = ["--- a/src/x.ts", "+++ b/src/x.ts", "@@ -0,0 +1,50 @@", ...lines.map((l) => `+${l}`)].join(
+    "\n",
+  );
+  const units = w.db.owner.prepare("select id, key from unit order by id").all() as {
+    id: number;
+    key: string;
+  }[];
+  await w.connect();
+  try {
+    const selected = await w.reply("review_select", { diff });
+    const selection = /selection ([0-9a-f]{16})/.exec(selected.text)?.[1] ?? "";
+    const check = (findings: unknown[]) => w.reply("review_check", { diff, selection, findings });
+    const perRecord = (text: string) =>
+      /^Findings per record of this batch: (.*)\.$/m.exec(text)?.[1]?.split(", ") ?? [];
+
+    // No finding at all: fifty lines naming keys of about a thousand bytes
+    const none = await check([]);
+    assert.match(none.text, /^50 problems:\n/);
+    assert.deepEqual(
+      perRecord(none.text),
+      units.map((u) => `u${u.id} no finding`),
+    );
+    assert.equal([...none.text.matchAll(/^- trace:e{190,200}…: no verdict; /gm)].length, 50);
+
+    // Fifty findings with fifty wrong places each: far more problem lines than fit
+    const wrong = await check(
+      units.map((u) => ({
+        outcome: "violation",
+        unit: u.key,
+        reason: "a test",
+        evidence: Array.from({ length: 50 }, (_, i) => ({ path: `${"p".repeat(300)}${i}.ts`, line: 1 })),
+      })),
+    );
+    assert.match(wrong.text, /^2500 problems:\n/);
+    assert.deepEqual(
+      perRecord(wrong.text),
+      units.map((u) => `u${u.id} 1 finding`),
+    );
+    const left = Number(/\nand (\d+) more problems; fix these and check again$/.exec(wrong.text)?.[1]);
+    const listed = [
+      ...wrong.text.matchAll(
+        /^- findings\.\d+ \(violation trace:e+…\): evidence path p+… is not in the diff$/gm,
+      ),
+    ].length;
+    assert.ok(listed > 0 && left > 0 && listed + left === 2500, `${listed} listed, ${left} left`);
+
+    // A finding the check cannot read at all, with a property name of 40 KB
+    const unreadable = await check([{ ["k".repeat(40_000)]: 1 }]);
+    assert.match(unreadable.text, /^\d+ problems:\n- findings\.0/);
+
+    // The whole key is still what a finding names: every record judged, the batch is backed
+    const backed = await check(units.map((u) => ({ outcome: "unrelated", unit: u.key, reason: "a test" })));
+    assert.match(backed.text, /^Batch 1 of 1 backed/);
+  } finally {
+    await w.done();
+  }
+});
+
+test("export hands over a document only when one reply can carry it whole, and its refusals stay within the budget too", async () => {
+  const w = await budgetWorld("export-budget");
+  // About 3.5 KB of the owner's words quoted per decision
+  const long = `${"a long reason ".repeat(250)}Decided.`;
+  const m = message(w.db, w.p, { id: "m1", text: long });
+  const decided = (key: string) => ({
+    key,
+    kind: "decision",
+    stance: "do",
+    text: `Decided ${key}.`,
+    evidence: [{ source: `s${m}`, quote: long, role: "states" }],
+    adoption: [{ source: `s${m}`, quote: long }],
+  });
+  await w.save(
+    "trace:ext-s1/",
+    Array.from({ length: 12 }, (_, i) => decided(`big${i}`)),
+  );
+  const keys = Array.from({ length: 12 }, (_, i) => `trace:ext-s1/big${i}`);
+  await w.connect();
+  try {
+    // Six of them make a document of about 44 KB, more than one reply carries: refused, not handed over for a host to cut
+    const six = await w.reply("export", { records: keys.slice(0, 6), path: "docs/decisions.md" });
+    assert.ok(six.isError);
+    assert.match(
+      six.text,
+      /^Nothing was exported: the document would be over \d+ bytes\. Choose fewer decisions\.$/,
+    );
+    // Fewer fit, and the reply is the whole document after its first line, with a path as long as the tool takes
+    const path500 = `docs/${"d".repeat(490)}.md`;
+    const few = await w.reply("export", { records: keys.slice(0, 4), path: path500 });
+    assert.ok(!few.isError, few.text.slice(0, 200));
+    assert.match(few.text, /^Write to docs\/d+\.md, a new file\./);
+    assert.equal([...few.text.matchAll(/^## Decision \d+$/gm)].length, 4);
+    // Fifty refs that are not records, each as long as the tool takes
+    const unknown = await w.reply("export", {
+      records: Array.from({ length: 50 }, (_, i) => `trace:${"x".repeat(280)}/${i}`),
+      path: "docs/decisions.md",
+    });
+    assert.ok(unknown.isError);
+    assert.match(
+      unknown.text,
+      /^Nothing was exported\. Only active decisions of this project can be:\n- trace:x+/,
+    );
+  } finally {
+    await w.done();
+  }
+});
+
+test("fields returns its table a page at a time, each within the reply budget, and the pages together hold every field", async () => {
+  const w = await budgetWorld("fields-budget");
+  const m = message(w.db, w.p, { id: "m1", text: "Track these." });
+  // english-exempt: multibyte cells, as a Japanese label and description hold
+  const [label, description] = ["説".repeat(100), "説明".repeat(250)];
+  const runId = extractionRun(w.db, w.p);
+  w.db.owner.exec("begin");
+  for (let i = 0; i < 60; i++)
+    insert(w.db, "field_def", {
+      project_id: w.p,
+      name: `field_${String(i).padStart(3, "0")}`,
+      type: "text",
+      label,
+      description,
+      enum_values: null,
+      kinds: "[]",
+      source_id: m,
+      span_start: 0,
+      span_end: 12,
+      run_id: runId,
+      added_at: at("2026-09-10T00:00:00Z"),
+    });
+  w.db.owner.exec("commit");
+  await w.connect();
+  try {
+    const seen: string[] = [];
+    let after: number | undefined;
+    for (let page = 0; page < 60; page++) {
+      const r = await w.reply("fields", after === undefined ? {} : { after });
+      const names = [...r.text.matchAll(/^\| (field_\d{3}) \|/gm)].map((x) => x[1] ?? "");
+      assert.ok(names.length > 0, r.text.slice(0, 300));
+      seen.push(...names);
+      const next =
+        /<\/past-records id="[0-9a-f]+">\n(\d+) more fields: call fields with after: (\d+)\.$/.exec(r.text);
+      if (!next) break;
+      assert.equal(Number(next[1]), 60 - seen.length);
+      after = Number(next[2]);
+    }
+    assert.deepEqual(
+      seen,
+      Array.from({ length: 60 }, (_, i) => `field_${String(i).padStart(3, "0")}`),
+    );
+    assert.ok(after !== undefined, "more than one page");
+  } finally {
+    await w.done();
+  }
+});
+
+test("an asked search keeps its reply within the reply budget, with every message it leaves out named for read", async () => {
+  const w = await budgetWorld("asked-budget");
+  // english-exempt: multibyte text, as Japanese sessions hold
+  const jp = (n: number) => "質問の本文".repeat(Math.ceil(n / 5)).slice(0, n);
+  // The same matter raised in many sessions whose ids are long, as a host may make them, and never decided
+  for (let i = 0; i < 300; i++) {
+    const text = `askedword ${jp(700)} ${i}`;
+    const session = `${"s".repeat(80)}-${String(i).padStart(3, "0")}`;
+    insert(w.db, "session", {
+      id: session,
+      project_id: w.p,
+      host: "claude-code",
+      external_id: session,
+      started_at: at("2026-09-10T00:00:00Z"),
+    });
+    insert(w.db, "source", {
+      project_id: w.p,
+      kind: "session_message",
+      artifact: `session:${session}`,
+      external_id: `asked${i}`,
+      revision: 1,
+      session_id: session,
+      author_kind: "owner",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(),
+      indexed: 1,
+    });
+  }
+  // Another matter: twenty messages, each quoted by ten records whose keys are long
+  const led: number[] = [];
+  for (let i = 0; i < 20; i++)
+    led.push(message(w.db, w.p, { id: `led${i}`, text: `ledword ${jp(700)} ${i}` }));
+  for (const [i, source] of led.entries())
+    await w.save(
+      `trace:${"e".repeat(600)}-${i}/`,
+      Array.from({ length: 10 }, (_, k) => ({
+        key: `found${k}`,
+        kind: "finding",
+        text: `Found ${i} ${k}.`,
+        evidence: [{ source: `s${source}`, quote: "ledword", role: "states" }],
+      })),
+    );
+  await w.connect();
+  try {
+    const search = (query: string) =>
+      w.reply("search", { query, asked: true, limit: 20, session: "another-session" });
+    // Twenty messages with nothing tied to them fit; the sessions the matter came up in are counted whole and named up to a number
+    const asked = await search("askedword");
+    assert.equal([...asked.text.matchAll(/^## s\d+: session:s+/gm)].length, 20);
+    assert.match(
+      asked.text,
+      /\nAsked in 300 sessions with no recorded decision:\n- not traced yet: (s{80}-\d{3}, ){20}and 280 more \(run \/sphica:trace with each\)\n/,
+    );
+    // With ten long keys under each message they do not all fit: the rest are named for read
+    const tied = await search("ledword");
+    const shown = [...tied.text.matchAll(/^## s(\d+): session:/gm)].map((x) => `s${x[1]}`);
+    const left = readCallsIn(tied.text).flat();
+    assert.ok(shown.length > 0 && left.length > 0, `${shown.length} shown, ${left.length} left out`);
+    assert.equal(new Set([...shown, ...left]).size, 20);
+    assert.match(
+      tied.text,
+      new RegExp(
+        `</past-records id="[0-9a-f]+">\\n${left.length} more messages left out to keep this reply within 32 KiB: read with refs \\[`,
+      ),
+    );
+    assert.equal(
+      [...tied.text.matchAll(/^- trace:e{190,200}… \(finding, active\)$/gm)].length,
+      shown.length * 10,
+    );
+    const first = await w.reply("read", { refs: readCallsIn(tied.text)[0] });
+    assert.match(first.text, /ledword/);
+  } finally {
+    await w.done();
+  }
+});
+
+test("an error the SDK builds itself, repeating what the caller sent, stays within the reply budget and stays an error", async () => {
+  const w = await budgetWorld("error-budget");
+  await w.connect();
+  try {
+    // A tool name the server does not have, and a property a tool's schema refuses, each 40 KB: no tool runs for either
+    const unknownTool = await w.reply("x".repeat(40_000), {});
+    assert.ok(unknownTool.isError);
+    assert.match(unknownTool.text, /x{1000}/);
+    assert.match(unknownTool.text, /\n\(This error was cut to keep the reply within 32 KiB\.\)$/);
+    const unknownKey = await w.reply("search", { query: "a", ["k".repeat(40_000)]: 1 });
+    assert.ok(unknownKey.isError);
+    assert.match(unknownKey.text, /\n\(This error was cut to keep the reply within 32 KiB\.\)$/);
+    // A short error and a reply that is not an error pass as they are
+    const short = await w.reply("no-such-tool", {});
+    assert.ok(short.isError);
+    assert.doesNotMatch(short.text, /This error was cut/);
+    const fine = await w.reply("status", {});
+    assert.ok(!fine.isError);
   } finally {
     await w.done();
   }

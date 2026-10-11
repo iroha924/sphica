@@ -19,8 +19,9 @@ on them, filled only when the conversation says it: trace saves a value only wit
 
 ## Flow
 
-1. Call `fields` with the repository root as `cwd`
-2. Show the table as it is. Do not add, drop, or reword rows
+1. Call `fields` with the repository root as `cwd`. A long table comes a page at a time: while a reply ends with a line that
+   names an `after`, call `fields` again with that `after`, until a reply ends without one
+2. Show the table as it is, every page's rows under one header. Do not add, drop, or reword rows
 3. When the owner asks how to add a field: they say it in a session (for example, "record the affected tenant as tenant on decisions"), and
    the next `/sphica:trace` of that session saves it with their words. A field cannot be defined again or changed while fields are a trial
 

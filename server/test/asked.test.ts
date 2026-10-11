@@ -178,7 +178,7 @@ test("earlier owner messages show what quotes them, the live record after replac
     assert.equal(d?.reply, w.ids.d2);
     assert.equal(r.repeats, null, "session A recorded a decision");
     const text = askedText(r);
-    assert.match(text, /^Earlier owner messages matching: /);
+    assert.match(text, /^<past-records id="[0-9a-f]+">\n[^\n]+\nEarlier owner messages matching: /);
     assert.doesNotMatch(text, /question/i);
     assert.match(text, /- trace:A\/pnpm \(decision, superseded; now trace:A\/bun \(active\)\)/);
     const block = (id: number) => text.split("\n\n").find((b) => b.startsWith(`## s${id}:`)) ?? "";
@@ -224,14 +224,14 @@ test("a matter asked in several sessions with no recorded decision lists them, c
     );
     // Without the current session known, nothing is called earlier and the count may include it
     const unknown = askedText(r, false);
-    assert.match(unknown, /^Owner messages matching: /);
+    assert.match(unknown, /^<past-records id="[0-9a-f]+">\n[^\n]+\nOwner messages matching: /);
     assert.match(
       unknown,
       /Matching messages in 2 sessions with no recorded decision \(current session may be included\):/,
     );
     assert.match(
       unknown,
-      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\.$/,
+      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\.\n<\/past-records id="[0-9a-f]+">$/,
     );
     // The current session is left out
     assert.ok(r.messages.every((e) => !["A", "D"].includes(e.message.session ?? "")));
@@ -426,4 +426,70 @@ test("the reply is the turn's last assistant message, and tied records are bound
   } finally {
     await db.done();
   }
+});
+
+test("an asked reply keeps what it says about the whole result when messages give way, and marks an id it had to cut", () => {
+  const led = (i: number) => ({
+    id: i,
+    key: `trace:${"k".repeat(400)}/${i}`,
+    kind: "finding",
+    lifecycle: "active",
+    now: Array.from({ length: 5 }, (_, n) => ({
+      id: 1000 + n,
+      key: `trace:${"n".repeat(400)}/${n}`,
+      lifecycle: "active",
+    })),
+  });
+  const message = (id: number) => ({
+    message: {
+      id,
+      kind: "session_message",
+      artifact: "session:A",
+      author: "owner",
+      created_at: "2026-09-10T00:00:00.000Z",
+      text: "t".repeat(2000),
+      matched: ["word"],
+      session: "A",
+      turn: null,
+    },
+    led: Array.from({ length: 10 }, (_, i) => led(i)),
+    hidden: 0,
+    context: [],
+    direct: new Set<number>(),
+    decided: true,
+    traced: true,
+    reply: null,
+  });
+  const longId = "i".repeat(150);
+  const text = askedText(
+    {
+      messages: Array.from({ length: 20 }, (_, i) => message(i + 1)),
+      repeats: { untraced: [longId, "short-id"], traced: ["B"] },
+      terms: ["word"],
+      weaker: 0,
+      stopped: true,
+      read: 600,
+    } as never,
+    false,
+  );
+  assert.ok(Buffer.byteLength(text) <= 32 * 1024, `${Buffer.byteLength(text)} bytes`);
+  const [inside, outside] = text.split(/^<\/past-records id="[0-9a-f]+">$/m) as [string, string];
+  // Messages were left out, and what covers the whole result is still there
+  assert.match(
+    outside,
+    /^\n\d+ more messages left out to keep this reply within 32 KiB: read with refs \["s\d+"/,
+  );
+  assert.match(
+    inside,
+    /\nMatching messages in 3 sessions with no recorded decision \(current session may be included\) \(within the first 600 candidates by rank\):\n/,
+  );
+  assert.match(inside, /\nStopped after 600 candidates by rank; more may match\.\n/);
+  assert.match(inside, /\nCurrent session unknown; /);
+  // An id too long to show whole is not passed off as one trace takes; a short one is shown as it is
+  assert.match(inside, /\n- not traced yet: i{100}… \[id cut\], short-id \(run \/sphica:trace with each\)\n/);
+  // A tied record names three of its live successors and counts the rest
+  assert.match(
+    inside,
+    /^- trace:k{194}… \(finding, active; now trace:n{194}… \(active\), trace:n{194}… \(active\), trace:n{194}… \(active\), and 2 more\)$/m,
+  );
 });

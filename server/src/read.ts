@@ -506,11 +506,24 @@ export function readCalls(refs: string[]): string {
   return calls.join(", then ");
 }
 
-/** What a reply says about the parts it left out to stay within READ_BUDGET; empty when it left none */
+/**
+ * What a reply says about the parts it left out to stay within READ_BUDGET; empty when it left none. It goes after the frame's closing
+ * line, where only Sphica writes: inside the frame a record's own text could spell the same sentence.
+ */
 export const leftOut = (refs: string[], what: string): string =>
   refs.length
-    ? `\n\n${refs.length} more ${what} left out to keep this reply within ${READ_BUDGET / 1024} KiB: ${readCalls(refs)}.`
+    ? `${refs.length} more ${what} left out to keep this reply within ${READ_BUDGET / 1024} KiB: ${readCalls(refs)}.`
     : "";
+
+/**
+ * Text from a record or from the caller as a reply shows it, within n bytes and marked when cut. It is made plain before it is cut: a cut
+ * that drops the end of a terminal control sequence would leave the frame stripping everything after it. lines keeps line breaks.
+ */
+export function preview(s: string, n: number, lines = false): string {
+  const clean = lines ? plain(s) : inline(s);
+  const cut = head(clean, n);
+  return cut === clean ? cut : `${cut}…`;
+}
 /** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
 const HEADER_FIELD = 300;
 

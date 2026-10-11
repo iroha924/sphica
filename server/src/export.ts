@@ -10,10 +10,15 @@ import { AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
-import { cut, speaker } from "./read.ts";
+import { cut, fitCount, preview, READ_BUDGET, speaker } from "./read.ts";
 import { instructionFile } from "./rule-files.ts";
 
-export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
+/**
+ * bytes: the document's own size, which leaves the reply's first line (a path of up to 500 characters) its room inside READ_BUDGET. A
+ * document is handed over whole in one reply or not at all, and a host that drops the middle of a longer reply would leave a file that
+ * reads as complete.
+ */
+export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: READ_BUDGET - 3 * 1024 } as const;
 
 type Unit = Selectable<DB["unit"]>;
 
@@ -191,22 +196,26 @@ export async function exportDecisions(
   const problems: string[] = [];
   for (const ref of wanted) {
     const u = await chosen(db, projectId, ref);
-    if (typeof u === "string") problems.push(`- ${inline(ref)}: ${u}`);
+    if (typeof u === "string") problems.push(`- ${preview(ref, 200)}: ${preview(u, 400)}`);
     else if (!units.some((x) => x.id === u.id)) units.push(u);
   }
   const chains: { newer: string; unit: Unit }[][] = [];
   for (const u of units) {
     const chain = await replaced(db, u);
-    if (typeof chain === "string") problems.push(`- ${inline(u.key)}: ${chain}`);
+    if (typeof chain === "string") problems.push(`- ${preview(u.key, 200)}: ${preview(chain, 400)}`);
     else chains.push(chain);
   }
-  if (problems.length)
-    return {
-      error: `Nothing was exported. Only active decisions of this project can be:\n${problems.join("\n")}`,
-    };
+  if (problems.length) {
+    const error = (kept: number) =>
+      `Nothing was exported. Only active decisions of this project can be:\n${problems.slice(0, kept).join("\n")}${kept < problems.length ? `\nand ${problems.length - kept} more that cannot be exported` : ""}`;
+    return { error: error(fitCount(problems, READ_BUDGET, error)) };
+  }
 
   const tooBig = {
-    error: `Nothing was exported: the document would be over ${EXPORT_LIMITS.bytes} bytes. Choose fewer decisions.`,
+    error:
+      units.length === 1
+        ? `Nothing was exported: this one decision, with the decisions it replaced, would be over ${EXPORT_LIMITS.bytes} bytes, so choosing fewer does not help. Read it with read.`
+        : `Nothing was exported: the document would be over ${EXPORT_LIMITS.bytes} bytes. Choose fewer decisions.`,
   };
   const parts: string[] = [];
   let bytes = 0;

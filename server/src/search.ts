@@ -10,9 +10,9 @@ import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
-import { fitCount, leftOut, READ_BUDGET } from "./read.ts";
+import { fitCount, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { repoPath } from "./record.ts";
-import { ftsQuery, head, identTerm, queryTerms, terms } from "./text.ts";
+import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
 const UNIT_PAGE = 200;
@@ -452,76 +452,77 @@ const SHOWN = {
   matched: 300,
 } as const;
 
-/** s within n bytes, and whether it was cut */
-const clip = (s: string, n: number): [string, boolean] => {
-  const cut = head(s, n);
-  return [cut, cut !== s];
-};
-
 function hitText(h: UnitHit): string {
-  const [key, keyCut] = clip(h.key, SHOWN.key);
+  const key = preview(h.key, SHOWN.key);
   const more = (n: number, what: string) => `and ${n} more ${what} (read u${h.id})`;
   const options = h.options
     .slice(0, SHOWN.options)
     .map(
-      (o) => `${head(o.text, SHOWN.option)} (${o.outcome}${o.why ? `: ${head(o.why, SHOWN.option)}` : ""})`,
+      (o) =>
+        `${preview(o.text, SHOWN.option)} (${o.outcome}${o.why ? `: ${preview(o.why, SHOWN.option)}` : ""})`,
     );
   if (h.options.length > SHOWN.options) options.push(more(h.options.length - SHOWN.options, "options"));
   const anchors = h.anchors
     .slice(0, SHOWN.anchors)
     .map(
-      (a) => `${head(a.path, SHOWN.path)}${a.symbol ? ` ${head(a.symbol, SHOWN.symbol)}` : ""} (${a.role})`,
+      (a) =>
+        `${preview(a.path, SHOWN.path)}${a.symbol ? ` ${preview(a.symbol, SHOWN.symbol)}` : ""} (${a.role})`,
     );
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
   return [
     // A key cut for display is not one read takes: the id beside it is
-    `## ${key}${keyCut ? "... [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
-    head(h.text, SHOWN.text),
-    ...(h.why ? [`Why: ${head(h.why, SHOWN.why)}`] : []),
-    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, SHOWN.revisit)}`] : []),
+    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    preview(h.text, SHOWN.text, true),
+    ...(h.why ? [`Why: ${preview(h.why, SHOWN.why, true)}`] : []),
+    ...(h.revisit_when ? [`Revisit when: ${preview(h.revisit_when, SHOWN.revisit, true)}`] : []),
     ...(options.length ? [`Options: ${options.join(" / ")}`] : []),
     ...(anchors.length ? [`Code: ${anchors.join(", ")}`] : []),
     h.successorOf
-      ? `Replaces ${head(h.successorOf, SHOWN.key)}, which matched`
-      : `Matched: ${head(h.matched.join(", "), SHOWN.matched)}${h.aliasOnly ? " (search aliases only)" : ""}`,
+      ? `Replaces ${preview(h.successorOf, SHOWN.key)}, which matched`
+      : `Matched: ${preview(h.matched.join(", "), SHOWN.matched)}${h.aliasOnly ? " (search aliases only)" : ""}`,
   ].join("\n");
 }
 
+/** The frame around what was found, then Sphica's own lines after it, one to a line */
+const withNotes = (body: string, notes: string[]) => [framed(body), ...notes.filter(Boolean)].join("\n");
+
 /**
- * search's whole reply for record hits, framed, within READ_BUDGET, with Sphica's words for an AI's decision when one is shown. Hits
- * that do not fit are named by u<id> for read; after is what follows them (where the search stopped).
+ * search's whole reply for record hits within READ_BUDGET: the hits in the frame, with Sphica's words for an AI's decision when one is
+ * shown, then outside it the hits that did not fit, named by u<id> for read, and after (where the search stopped).
  */
 export function hitsReply(hits: UnitHit[], after: string): string {
   const parts = hits.map(hitText);
   const reply = (kept: number) =>
-    framed(
+    withNotes(
       [
         ...parts.slice(0, kept),
         ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
-      ].join("\n\n") +
+      ].join("\n\n"),
+      [
         leftOut(
           hits.slice(kept).map((h) => `u${h.id}`),
           "hits",
-        ) +
-        `${after}\n\nRead a record by its key before relying on it.`,
+        ),
+        after,
+        "Read a record by its key before relying on it.",
+      ],
     );
   return reply(fitCount(parts, READ_BUDGET, reply));
 }
 
-/** search's whole reply for source hits, framed, within READ_BUDGET; hits that do not fit are named by s<id> for read */
+/** search's whole reply for source hits within READ_BUDGET; hits that do not fit are named by s<id> for read, outside the frame */
 export function sourcesReply(hits: SourceHit[], after: string): string {
   const parts = hits.map(
     (h) =>
-      `## s${h.id}: ${h.kind} ${head(h.artifact, SHOWN.path)}, ${head(h.author, SHOWN.symbol)}, ${h.created_at}\n${head(h.text, 800)}\nMatched: ${head(h.matched.join(", "), SHOWN.matched)}`,
+      `## s${h.id}: ${h.kind} ${preview(h.artifact, SHOWN.path)}, ${preview(h.author, SHOWN.symbol)}, ${h.created_at}\n${preview(h.text, 800, true)}\nMatched: ${preview(h.matched.join(", "), SHOWN.matched)}`,
   );
   const reply = (kept: number) =>
-    framed(
-      parts.slice(0, kept).join("\n\n") +
-        leftOut(
-          hits.slice(kept).map((h) => `s${h.id}`),
-          "hits",
-        ) +
-        after,
-    );
+    withNotes(parts.slice(0, kept).join("\n\n"), [
+      leftOut(
+        hits.slice(kept).map((h) => `s${h.id}`),
+        "hits",
+      ),
+      after,
+    ]);
   return reply(fitCount(parts, READ_BUDGET, reply));
 }

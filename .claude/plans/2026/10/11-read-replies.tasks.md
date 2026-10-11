@@ -80,16 +80,18 @@ base: main
   - コミット: `fix(search): keep search replies within the reply budget`
   - 結果: `node --import ./test/isolate-home.ts --test test/cli.test.ts` → `existsSync` に戻すと足したケースが失敗、`lstat` で見る形では pass
 
-- [ ] T04: `review_check` の返答を収め、バッチの全記録の状況を先頭に必ず出す
+- [x] T04: `review_check` の返答を収め、バッチの全記録の状況を先頭に必ず出す
   - 種別: 修正
   - 計画: S6
   - 依存: T03（予算の計算の関数が要る）
-  - 変更: `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/test/review.test.ts`
+  - 変更: `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/test/plugin.test.ts`
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 約 1 KB のキー 50 件の未判定で、`review_check` の返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(review): keep review_check replies within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前の `review-findings.ts` では「review_check: 54462 bytes」で失敗、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T05: `export` を、返答全体が 32 KiB に収まるときだけ成功にし、拒否の返答も収める
+- [x] T05: `export` を、返答全体が 32 KiB に収まるときだけ成功にし、拒否の返答も収める
   - 種別: 修正
   - 計画: S7
   - 依存: T03（予算の計算の関数が要る）
@@ -97,8 +99,10 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 40 KiB の文書になる選び方で、`export` の返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(export): refuse a document the reply budget cannot carry whole`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前の `export.ts` では「export: 44274 bytes」で失敗、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T06: `fields` に `after` を足し、ページで返す
+- [x] T06: `fields` に `after` を足し、ページで返す
   - 種別: 修正
   - 計画: S8
   - 依存: T03（予算の計算の関数が要る）
@@ -106,8 +110,10 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 定義を多数持つプロジェクトで、`fields` の返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(fields): page the fields table within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前の `fields.ts` と `mcp.ts` では「fields: 60006 bytes」で失敗、直した後は pass（60 件が複数ページに分かれ、全ページで 60 件そろう）
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T07: `asked` の返答を、セッションの一覧と案内も含めて収める
+- [x] T07: `asked` の返答を、セッションの一覧と案内も含めて収める
   - 種別: 修正
   - 計画: S9
   - 依存: T03（予算の計算の関数が要る）
@@ -115,8 +121,10 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 繰り返しのセッションが多い質問で、`asked` の返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(asked): keep asked replies within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前の `asked.ts` と `mcp.ts` では「search: 43521 bytes」で失敗、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T08: SDK が作るエラーの返答を、transport の `send` を包んで収める
+- [x] T08: SDK が作るエラーの返答を、transport の `send` を包んで収める
   - 種別: 修正
   - 計画: S10
   - 依存: T03（予算の計算の関数が要る）
@@ -124,18 +132,33 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 未知のツール名 40 KB と、未知のプロパティ名 40 KB の呼び出しで、エラーの返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(mcp): keep the read server's error replies within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前の `mcp.ts` では、40 KB のツール名のエラー返答が 32 KiB を超えて失敗、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
 
 ## P3: 文書を合わせる
 
 ツールの説明、Skill、README が、新しい返答の形と読み方を言う。
 
-- [ ] T09: description・`fields` と `export` の Skill・README を新しい返答に合わせる
+- [x] T09: description・`fields` と `export` の Skill・README を新しい返答に合わせる
   - 種別: 変更
   - 計画: S11
   - 依存: T05（`export` の上限が決まっている）, T06（`fields` の `after` がある）
   - 変更: `server/src/mcp.ts`, `plugin/skills/fields/SKILL.md`, `plugin/skills/export/SKILL.md`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `docs(read): describe the reply budget, fields paging, and the export limit`
+  - 結果: `bun run check` → 終了コード 0
+  - 結果: `bun run verify` → 終了コード 0
+
+- [x] T12: 検索結果の表示を、切る前に無害化し、切ったら印を付け、Sphica 自身の案内を枠の外に出す
+  - 種別: 修正
+  - 計画: S5, S6, S7, S8, S9
+  - 依存: T03（直す対象の表示が要る）
+  - 変更: `server/src/read.ts`, `server/src/search.ts`, `server/src/asked.ts`, `server/src/fields.ts`, `server/src/review-findings.ts`, `server/src/export.ts`, `server/src/mcp.ts`, `server/test/search.test.ts`, `server/test/plugin.test.ts`
+  - red: `node probe/codex-f123.ts` → `73dcb115` の `hitsReply` は、タイトルの制御文字列を途中で切った option の後ろの hit（u2）を返答から落とし、切った option に印を付けない
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 全件 pass
+  - コミット: `fix(read): keep every read server reply within the reply budget`
+  - 結果: `node probe/codex-f123.ts` → 直す前は「F1 names u2: false」「F3 cut option is marked: false」、直した後はどちらも true
+  - 結果: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 24 件 pass
 
 ## 記録
 
@@ -152,3 +175,11 @@ base: main
 - 2026-10-11 / T03 / 予定外の発見: `sources: true` は、artifact と作者を切ると 20 件でも収まる（1 件あたり約 1.5 KB） / 省略の案内は残すが、テストは「20 件が全部出て、省略なし」を見る
 - 2026-10-11 / T03 / コミットの前の review-shipping が 4 件指摘（出荷は可の判定。32,768 バイトを超える search の返答は作れなかった。最大は実 DB 経由で 32,442 バイト）: (1) option の本文などの切り詰めを外しても、テストが通る（収まるが、出る件数が減るだけ） (2) `fitCount` の最初の見積もりは枠が落とす文字（ゼロ幅や制御文字）を数えるので、そういう本文だと早く止まる (3) 0 件の返答自体が上限を超えるときは 0 を返し、呼ぶ側が上限を超えた返答を送る（search では起きないが、次のタスクで同じ関数を使う） (4) sources の省略の案内は、20 件が必ず収まるので通らない / (1) は「6 件以上が表示される」をテストに足した。(2) は見積もりから増やす方向にも試すようにした。(3) は関数の説明に「0 件の返答は呼ぶ側の上限で収める」と書き、次のタスクで各ツールの 0 件の返答を固定の長さにする。(4) は直さない
 - 2026-10-11 / T03 / review-shipping が測った bundle の余裕: `deliver.js` 1,694、`cli.js` 2,555、`git-worker.js` 112 バイト。`mcp.js` は 104,652 / 残りのタスクで `deliver.js` と `git-worker.js` は触らない
+- 2026-10-11 / T03 / Codex のレビュー（`73dcb115`、指摘 3 件、どれも P2、どれも自分で再現）: (1) option を 160 バイトで切ると、タイトルの制御文字列の終端が落ち、枠の `plain` がそこから返答の終わりまで消す。後ろの hit が参照も残さず消える (2) 記録の本文が、省略の案内と同じ行を書ける（案内が枠の中にあるので区別できない） (3) 切った option に印が無く、全文に見える / 全部採用。T12 を足した。表示する文字列は先に無害化（`plain` / `inline`）してから切り、切ったら「…」を付ける関数（`preview`）にまとめた。省略の案内・検索が止まった場所・「Read a record by its key」は、枠の閉じる行の後（Sphica だけが書く場所）に出す。同じ形を asked・fields・review_check・export の表示にも入れた
+- 2026-10-11 / T04 / 未完了の T04 の変更欄を変えた。前: `server/test/review.test.ts` あり。後: なし / 短いキーでは問題文が変わらない形にしたので、既存のテストに変更が要らなかった
+- 2026-10-11 / T04〜T09・T12 / 1 つのコミットにまとめた / 持ち主の「まとめて一気に進めて」に合わせ、検査と独立レビューを 1 回で通すため。各タスクの red は個別に確かめて結果欄に残した
+- 2026-10-11 / T07 / 予定外の発見: セッションの id を 100 バイトで切ると、`/sphica:trace` に渡せない id を使えるように見せてしまう / 100 バイト以内はそのまま、超えるものは「[id cut]」と印を付ける
+- 2026-10-11 / T08 / SDK 1.31.0 の `StdioServerTransport.send` は引数が 1 つ（options を取らない） / 包む関数も 1 引数にした
+- 2026-10-11 / T04〜T09・T12 / コミットの前の review-shipping（出荷は可の判定。読み取りサーバーで 32,768 バイトを超える返答は作れず、最大は `review_check` の 32,682 バイト。bundle した `mcp.js` でも、40 KB の未知のツール名のエラーがちょうど 32,768 バイトに収まる。名指しした 7 通りの弱め方は全部テストが落とす）が 7 件指摘: (1) asked で、1 件の発言の部品だけで上限を超えると、その発言は表示されない（ひも付く記録それぞれに後継が 30 件、キー 300 文字のとき。関数を直接呼んで再現） (2) `[id cut]` の印を外してもテストが通る (3) 記録の検索が途中で止まったときの案内を、サーバー経由で通すテストが無い (4) 発言を省略するときに、セッションの一覧や注意書きを落としてもテストが通る (5) エラーでない返答まで切るようにしてもテストが通る (6) export の拒否の一覧の 2 つの守りは、片方ずつ外してもテストが通る (7) sources の省略の案内は通らない（T03 と同じ） / (1) は、ひも付く記録が名指しする後継を 3 件までにして残りを数える形にした（1 件の発言の部品が上限を超えなくなる）。(2)(4) は、手で組んだ結果を `askedText` に渡すテストを足した。採らない: (3) は 2,000 件を超える候補が要り、案内そのものは `hitsReply` のテストで固定している。(5) は、上限を超える成功の返答が存在しないので、切っても切らなくても同じ結果になる。(6) の 2 つ目は、参照を 200 バイトに切った後は 50 件で約 12 KB にしかならず、スキーマの範囲では届かない念のための守り。(7) は T03 と同じ
+- 2026-10-11 / 全体 / review-shipping が見つけた、この変更によらない事実: 10 MiB を超える 1 行の JSON-RPC の要求で、サーバーが返答なしに終了コード 0 で終わる（SDK の stdio の上限。main の `mcp.ts`・bundle した `mcp.js`・`mcp-record.js` で再現） / この PR では直さない。record サーバーの計画（issue #324）に足す
+- 2026-10-11 / T05 / review-shipping が持ち主の DB の写しで測った大きさ: 有効な決定 190 件、1 件の文書は 897〜4,519 バイト（中央値 1,568）。新しい上限では 1 ファイルに 14〜23 件入る。1 件だけで拒否されるものは無い

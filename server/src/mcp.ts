@@ -8,6 +8,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
@@ -26,7 +27,7 @@ import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
-import { head, reason } from "./text.ts";
+import { bytes, head, reason } from "./text.ts";
 
 requireRuntime();
 const db = openReader();
@@ -59,7 +60,7 @@ async function projectOf(
 const among = (r: { stopped: boolean; read: number }) =>
   r.stopped ? `among the first ${r.read} candidates by rank ` : "";
 const stoppedAfter = (r: { stopped: boolean; read: number }) =>
-  r.stopped ? `\n\nStopped after ${r.read} candidates by rank; more may match.` : "";
+  r.stopped ? `Stopped after ${r.read} candidates by rank; more may match.` : "";
 
 const server = new McpServer(
   { name: "sphica", version: VERSION ?? "unknown" },
@@ -119,7 +120,8 @@ server.registerTool(
       "Finds records (decisions, constraints, implementations, findings, dead ends, questions) whose text holds most of the query's words, " +
       "active ones first. Use short queries of the subject's words (identifiers, option names, the domain terms). sources: true searches the " +
       "captured conversation and pull request text instead. asked: true finds the owner's earlier messages like the query in other sessions, " +
-      "with the records that quote each and whether a decision was recorded. An empty result also says how many weaker matches were left out.",
+      "with the records that quote each and whether a decision was recorded. An empty result also says how many weaker matches were left out. " +
+      `Each hit is a preview, and a reply stays within ${READ_BUDGET / 1024} KiB: hits that do not fit are named after the results, by u<id> or s<id>, for read.`,
     inputSchema: z
       .object({
         query: z.string().min(1).max(500).describe("Words for the subject, in Japanese or English"),
@@ -177,7 +179,7 @@ server.registerTool(
           return text(
             `No ${known ? "earlier " : ""}owner message ${r.stopped ? `among the first ${r.read} candidates by rank ` : ""}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out.${r.stopped ? " Search with more specific words." : ""}${known ? "" : ` ${UNKNOWN_SESSION}`}`,
           );
-        return text(framed(askedText(r, known)));
+        return text(askedText(r, known));
       }
       if (a.sources) {
         if (a.path !== undefined) return text("sources cannot be combined with path.", true);
@@ -288,15 +290,26 @@ server.registerTool(
     title: "Fields this project tracks",
     description:
       "Only for the fields Skill. The fields the owner defined for this project's records, as a Markdown table: type, allowed values, " +
-      "the record kinds each applies to, how many records carry a value, and the owner's words that defined it.",
-    inputSchema: z.object({ cwd: CWD }).strict(),
+      "the record kinds each applies to, how many records carry a value, and the owner's words that defined it. " +
+      "A long table comes a page at a time: when a reply ends by naming an after, call again with it for the next page.",
+    inputSchema: z
+      .object({
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("The after a reply gave for its next page; leave out for the first page"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a, extra) => {
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p, true);
-      return text(await fieldsText(db, p.id));
+      return text(await fieldsText(db, p.id, a.after));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }
@@ -474,4 +487,31 @@ server.registerTool(
   },
 );
 
-await server.connect(new StdioServerTransport());
+const CUT = `\n(This error was cut to keep the reply within ${READ_BUDGET / 1024} KiB.)`;
+
+/**
+ * An error reply whose text is over READ_BUDGET, cut. The SDK builds some errors itself, before any tool runs (a tool name it does not
+ * know, input its schema refuses), and they repeat what the caller sent. Replies that are not errors pass as they are: each tool
+ * completes its own within the budget.
+ */
+function withinBudget(message: JSONRPCMessage): JSONRPCMessage {
+  if (!("result" in message)) return message;
+  const result = message.result as { isError?: unknown; content?: unknown };
+  if (result.isError !== true || !Array.isArray(result.content)) return message;
+  const whole = (result.content as { type?: unknown; text?: unknown }[])
+    .flatMap((c) => (c.type === "text" && typeof c.text === "string" ? [c.text] : []))
+    .join("\n");
+  if (bytes(whole) <= READ_BUDGET) return message;
+  return {
+    ...message,
+    result: {
+      ...message.result,
+      content: [{ type: "text", text: `${head(whole, READ_BUDGET - bytes(CUT))}${CUT}` }],
+    },
+  };
+}
+
+const transport = new StdioServerTransport();
+const send = transport.send.bind(transport);
+transport.send = (message) => send(withinBudget(message));
+await server.connect(transport);

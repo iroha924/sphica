@@ -5,7 +5,7 @@
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fieldsTable, fieldsText } from "../src/fields.ts";
+import { fieldsText } from "../src/fields.ts";
 import { sha256 } from "../src/text.ts";
 import { at, insert, message, project, run, tempDb } from "./temp-db.ts";
 
@@ -28,7 +28,7 @@ test("the table lists each field with its values, kinds, record count, and the o
   try {
     const p = project(db);
     const other = project(db, "git:github.com/o/other", "o/other");
-    assert.match(await fieldsTable(db.reader, p), /No fields are defined in this project/);
+    assert.match(await fieldsText(db.reader, p), /No fields are defined in this project/);
     const said = message(db, p, { id: "m1", text: "Track the tenant | and severity\nplease." });
     const r = run(db, p);
     const define = (name: string, v: Record<string, string | null>) =>
@@ -73,9 +73,15 @@ test("the table lists each field with its values, kinds, record count, and the o
         added_at: now,
       });
     }
-    const table = await fieldsTable(db.reader, p);
-    const lines = table.split("\n");
+    const table = await fieldsText(db.reader, p);
+    // Inside the frame: the header's two lines and one row a field
+    const lines = table.split("\n").filter((l) => l.startsWith("|"));
     assert.equal(lines.length, 4, table);
+    // The second page starts after the definition named, and a page past the last says so
+    const ids = db.owner.prepare("select id from field_def order by id").all() as { id: number }[];
+    const second = (await fieldsText(db.reader, p, ids[0]?.id)).split("\n").filter((l) => l.startsWith("|"));
+    assert.deepEqual(second.slice(2), [lines[3]]);
+    assert.match(await fieldsText(db.reader, p, ids.at(-1)?.id), /No field is defined after \d+\./);
     assert.equal(
       lines[0],
       "| Name | Type | Label | Description | Values | Applies to | Records with a value | Defined by the owner |",
@@ -93,7 +99,7 @@ test("the table lists each field with its values, kinds, record count, and the o
       lines[3] ?? "",
       /^\| severity \| enum \| severity \| severity \| low, high \| finding \| 0 \|/,
     );
-    assert.match(await fieldsTable(db.reader, other), /No fields are defined/);
+    assert.match(await fieldsText(db.reader, other), /No fields are defined/);
     // The reply wraps the table as past records, so a label cannot pass for an instruction
     const reply = await fieldsText(db.reader, p);
     assert.match(reply, /^<past-records id="[0-9a-f]+">\n/);

@@ -5,8 +5,10 @@
 // the same matter asked across sessions with none. Only direct quotes tie a record to a message; the rest of its turn is context.
 
 import type { Reads } from "./db.ts";
+import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
+import { fitCount, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
 import { head } from "./text.ts";
 
@@ -192,55 +194,91 @@ async function sameTurn(
 export const UNKNOWN_SESSION =
   "Current session unknown; results and session counts may include its messages. Pass session to exclude it.";
 
+/** How many live successors a tied record names: one message's part then has a size it cannot pass, and fits a reply alone */
+const NOW = 3;
+
+/** How many sessions a list names before it counts the rest: a matter raised in hundreds of sessions is still one line */
+const SESSIONS = 20;
+
+/** A key, artifact, or session id from the database as a line shows it: one line, marked when cut. The whole value is one read away */
+const shown = (s: string, n = 200) => preview(s, n);
+
 /**
- * The result as the read MCP server returns it. Record keys and message text are data from the database, kept on single lines.
- * `known` says whether the current session was left out; if not, nothing is called earlier.
+ * The result as the read MCP server returns it, framed, within READ_BUDGET. Record keys and message text are data from the database, kept
+ * on single lines. Messages that do not fit are named by s<id> for read. `known` says whether the current session was left out; if not,
+ * nothing is called earlier.
  */
 export function askedText(r: Asked, known = true): string {
   const parts = r.messages.map((e) => {
     const m = e.message;
     // The message is kept on one line, so its own words cannot pass for a heading or a verdict
-    const lines = [`## s${m.id}: ${inline(m.artifact)}, ${m.created_at}`, inline(head(m.text, 600))];
+    const lines = [`## s${m.id}: ${shown(m.artifact)}, ${m.created_at}`, preview(m.text, 600)];
     if (e.led.length) {
       lines.push("Led to:");
       for (const u of e.led.slice(0, PER_MESSAGE))
         lines.push(
-          `- ${inline(u.key)} (${u.kind}, ${u.lifecycle}${u.now.length ? `; now ${u.now.map((n) => `${inline(n.key)} (${n.lifecycle})`).join(", ")}` : ""})`,
+          `- ${shown(u.key)} (${u.kind}, ${u.lifecycle}${
+            u.now.length
+              ? `; now ${u.now
+                  .slice(0, NOW)
+                  .map((n) => `${shown(n.key)} (${n.lifecycle})`)
+                  .join(", ")}${u.now.length > NOW ? `, and ${u.now.length - NOW} more` : ""}`
+              : ""
+          })`,
         );
     }
     if (e.led.length > PER_MESSAGE) lines.push(`and ${e.led.length - PER_MESSAGE} more tied records`);
     if (e.hidden) lines.push(`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters.`);
     if (!e.decided)
       lines.push(
-        `No recorded decision.${e.traced ? "" : ` Not traced yet: run /sphica:trace ${inline(m.session ?? "")}.`}`,
+        `No recorded decision.${e.traced ? "" : ` Not traced yet: run /sphica:trace ${shown(m.session ?? "", 100)}.`}`,
       );
     if (e.context.length) {
       lines.push("Same turn (context, not necessarily the answer):");
       for (const c of e.context.slice(0, PER_MESSAGE))
-        lines.push(`- ${inline(c.key)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`);
+        lines.push(`- ${shown(c.key)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`);
       if (e.context.length > PER_MESSAGE)
         lines.push(`and ${e.context.length - PER_MESSAGE} more in the same turn`);
     }
     if (e.reply !== null) lines.push(`Reply: s${e.reply} (read it with read)`);
     return lines.join("\n");
   });
-  const out = [`${known ? "Earlier owner" : "Owner"} messages matching: ${r.terms.join(", ")}`, ...parts];
+  const sessions = (ids: string[]) =>
+    `${ids
+      .slice(0, SESSIONS)
+      // An id is what /sphica:trace takes, so one too long to show whole is marked, not passed off as usable
+      .map((id) => (shown(id, 100) === inline(id) ? inline(id) : `${shown(id, 100)} [id cut]`))
+      .join(", ")}${ids.length > SESSIONS ? `, and ${ids.length - SESSIONS} more` : ""}`;
+  const after: string[] = [];
   if (r.repeats) {
     const n = r.repeats.untraced.length + r.repeats.traced.length;
     const within = r.stopped ? ` (within the first ${r.read} candidates by rank)` : "";
-    out.push(
+    after.push(
       [
         known
           ? `Asked in ${n} sessions with no recorded decision${within}:`
           : `Matching messages in ${n} sessions with no recorded decision (current session may be included)${within}:`,
         ...(r.repeats.untraced.length
-          ? [`- not traced yet: ${r.repeats.untraced.map(inline).join(", ")} (run /sphica:trace with each)`]
+          ? [`- not traced yet: ${sessions(r.repeats.untraced)} (run /sphica:trace with each)`]
           : []),
-        ...(r.repeats.traced.length ? [`- traced: ${r.repeats.traced.map(inline).join(", ")}`] : []),
+        ...(r.repeats.traced.length ? [`- traced: ${sessions(r.repeats.traced)}`] : []),
       ].join("\n"),
     );
   }
-  if (r.stopped) out.push(`Stopped after ${r.read} candidates by rank; more may match.`);
-  if (!known) out.push(UNKNOWN_SESSION);
-  return out.join("\n\n");
+  if (r.stopped) after.push(`Stopped after ${r.read} candidates by rank; more may match.`);
+  if (!known) after.push(UNKNOWN_SESSION);
+  const lead = `${known ? "Earlier owner" : "Owner"} messages matching: ${head(r.terms.join(", "), 400)}`;
+  // What is said about the whole result (the sessions, where the search stopped) is kept; the messages give way. The messages
+  // left out are named after the frame's closing line, where only Sphica writes
+  const reply = (kept: number) =>
+    [
+      framed([lead, ...parts.slice(0, kept), ...after].join("\n\n")),
+      leftOut(
+        r.messages.slice(kept).map((e) => `s${e.message.id}`),
+        "messages",
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  return reply(fitCount(parts, READ_BUDGET, reply));
 }
