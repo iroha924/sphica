@@ -3,7 +3,7 @@ name: glean
 description: Adds evidence and corrections to existing Sphica records, or keeps something the owner remembers, only from sources the owner points to (an issue or pull request, a file in the repository, the owner's own words now). Asks the owner for the source before saving anything. Use only when the user explicitly asks.
 argument-hint: "<what to add or correct>"
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_record__record_more, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # glean — add what was found later, with its source
@@ -38,21 +38,25 @@ owner says there is no source, save it unsourced and say so.
 
 ## Flow
 
-Everything goes through Sphica's `record` MCP server (`glean_begin`, `glean_fetch`, `record_context`, `record_check`, `record_save`) and the
+Everything goes through Sphica's `record` MCP server (`glean_begin`, `glean_fetch`, `record_context`, `record_check`, `record_save`,
+`record_more`) and the
 read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 
 1. **Find the records** the target concerns with `search`, and `read` each. Note each record's key and `revision` (read prints it)
 2. **Ask for the source** (above). Have the owner state it in this session: the owner's words are captured and become citable
 3. **Begin**: `glean_begin` with this session (`${CLAUDE_SESSION_ID}` in Claude Code; in Codex, `CODEX_THREAD_ID` from your shell). It returns a `run`
-4. **Bring in the source**: for a GitHub issue or pull request URL of this repository, `glean_fetch` with the run and URL; it keeps the text as sources
-   and lists their refs. For a file, cite it in the record (`file`); Sphica reads it from git itself. For anything else (meeting notes, chat), cite
+4. **Bring in the source**: for a GitHub issue or pull request URL of this repository, `glean_fetch` with the run and URL; it keeps the text as sources,
+   says how many, and lists their refs with who wrote each (read a source with `read s<id>`; when its reply ends with `call record_more with cursor: "..."`, the rest of the list is read with
+   `record_more`; everything is already kept, so never fetch again for it). For a file, cite it in the record (`file`); Sphica reads it from git itself. For anything else (meeting notes, chat), cite
    the owner's message that quotes it
-5. **Read**: `record_context` with the run: the owner's messages in this session with their refs. When a page ends with
-   `call record_context with after: "s<N>"`, call it again with that `after`
+5. **Read**: `record_context` with the run: the owner's messages in this session with their refs. When a page's last line says
+   `call record_context with after: "..."`, call it again with that `after`, exactly as written, until a page names none
 6. **Check**: `record_check` with the run and the record below. It runs the save in a transaction that rolls back, so it refuses what the
-   save would refuse and lists what would change (`would be active`, `would: <change>`) without writing it. Fix errors and check again. A
+   save would refuse and lists what would change (`would be active`, `would: <change>`) without writing it, the verdict and the counts first
+   (a reply that ends with `call record_more with cursor: "..."` goes on with `record_more`). Fix errors and check again. A
    note to ask the owner for a source means step 2 is not done
-7. **Save**: `record_save`. **Report** what changed, copying save's lines
+7. **Save**: `record_save`. A reply that starts with `✗` saved nothing: fix the record, check it, and save with the same run.
+   **Report** what changed, copying save's lines (all of them: read on with `record_more` when the reply names a cursor)
 
 ## The record
 

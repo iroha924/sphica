@@ -11,8 +11,9 @@ import type { Kysely } from "kysely";
 import { dbInit } from "../../src/admin.ts";
 import type { DB } from "../../src/db-types.ts";
 import { openWriter } from "../../src/db-write.ts";
-import { beginHarvest, checkText, contextText, saveText } from "../../src/extract.ts";
+import { beginHarvest, checkText, contextText, RecordRefused, saveText } from "../../src/extract.ts";
 import { gh } from "../../src/github.ts";
+import { morePage } from "../../src/result-pages.ts";
 
 const [command, file = "", ...rest] = process.argv.slice(2);
 
@@ -28,7 +29,18 @@ async function everyPage(db: Kysely<DB>, run: string, projectId: number): Promis
     pages.push(await contextText(db, run, projectId, null, next));
   return pages;
 }
-const cursor = (page = "") => /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
+const cursor = (page = "") =>
+  /call record_context with after: "(s\d+|t[0-9a-f]{8}\.\d+)"[^\n]*$/.exec(page)?.[1];
+
+/** A check's or a save's reply with every page that follows it, read by the cursor on each page's last line */
+function everyLine(first: string, projectId: number): string {
+  const pages = [first];
+  for (;;) {
+    const cursor = /call record_more with cursor: "([^"]+)"$/.exec(pages.at(-1) ?? "")?.[1];
+    if (!cursor) return pages.join("\n");
+    pages.push(morePage(cursor, projectId));
+  }
+}
 
 async function main() {
   if (command === "new") {
@@ -54,11 +66,18 @@ async function main() {
       const record = JSON.parse(fs.readFileSync(recordFile, "utf8")) as unknown;
       // The pages shown are remembered only inside one process: show them again here, as harvest printed them, before saving
       await everyPage(db, run, p.id);
-      console.log(
+      // A reply names a cursor for the lines it left out, and only this process holds them: read to the end before it exits
+      let refused = false;
+      const first =
         command === "check"
           ? (await checkText(db, run, p.id, null, record)).text
-          : await saveText(db, run, p.id, null, record),
-      );
+          : await saveText(db, run, p.id, null, record).catch((e: unknown) => {
+              if (!(e instanceof RecordRefused)) throw e;
+              refused = true;
+              return e.message;
+            });
+      console.log(everyLine(first, p.id));
+      if (refused) process.exitCode = 1;
     } else throw new Error(`unknown command ${command}`);
   } finally {
     await db.destroy();

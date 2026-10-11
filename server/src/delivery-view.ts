@@ -8,7 +8,7 @@ import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { READ_BUDGET } from "./read.ts";
+import { READ_BUDGET } from "./reply-budget.ts";
 import { bytes, head } from "./text.ts";
 
 export const DELIVERY_DAYS = { min: 1, max: 90, default: 7 } as const;

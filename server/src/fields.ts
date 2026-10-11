@@ -7,7 +7,7 @@
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { fitCount, READ_BUDGET } from "./read.ts";
+import { fitCount, READ_BUDGET } from "./reply-budget.ts";
 
 /**
  * One table cell: a single line cut to 200 characters, then backslashes doubled and pipes escaped. GFM splits a row at a pipe after an

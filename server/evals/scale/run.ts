@@ -14,8 +14,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { inTransaction } from "../../src/db.ts";
 import { deliverablePaths } from "../../src/deliver.ts";
 import { deliveryOverview } from "../../src/delivery-view.ts";
-import { READ_BUDGET } from "../../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../../src/record.ts";
+import { READ_BUDGET } from "../../src/reply-budget.ts";
 import { bytes } from "../../src/text.ts";
 import { openRun } from "../../src/trace.ts";
 import {

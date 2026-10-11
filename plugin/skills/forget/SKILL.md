@@ -3,7 +3,7 @@ name: forget
 description: Removes sources the owner chooses from Sphica (a message, a pull request item, a file excerpt), with their search index entries and the bytes left in the database file, and judges the records that cited them again. The owner confirms in a dialog before anything is removed. Use only when the user explicitly asks to forget or delete something Sphica captured.
 argument-hint: "<what to forget>"
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply, mcp__plugin_sphica_sphica__status
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply, mcp__plugin_sphica_record__record_more, mcp__plugin_sphica_sphica__status
 ---
 
 # forget — remove what should not have been kept
@@ -32,10 +32,15 @@ Pass the repository root as `cwd` to every tool.
    **Never repeat a secret in your replies**: describe each source by its ref, kind, and where it is (`s12`, a message of 2026-09-20 in
    this project, `file:config.md` lines 1-3)
 2. **Confirm the list** with the owner (AskUserQuestion in Claude Code; in Codex, ask in the conversation and wait). Forget only what the owner picks
-3. **Preview**: `forget_preview` with the refs. It lists what will be removed, which records lose citations, and which leave active. Show it to the owner
-4. **Apply**: `forget_apply` with the same refs. The host shows the owner a dialog asking to type the number of sources; nothing is removed
+3. **Preview**: `forget_preview` with the refs. It lists every source that will be removed, how many records are affected and what becomes
+   of them (leave active, become active, change otherwise, keep their state), and then the records, those leaving active first. When the
+   reply ends with `call record_more with cursor: "..."`, read the rest of the records with `record_more` until a reply names no cursor.
+   Show the owner the sources, the counts, and the records that leave active
+4. **Apply**: `forget_apply` with the same refs. The host shows the owner a dialog with every source and the counts (and as many of the
+   records as fit), asking to type the number of sources; nothing is removed
    without that answer. Answering it is the owner's act: never ask the owner to tell you the number so you can answer for them
-5. **Report** what `forget_apply` returned, as it says it
+5. **Report** what `forget_apply` returned, as it says it: what was forgotten and whether the deleted text was cleared come first, and
+   `record_more` reads on when the records did not fit
 
 When `forget_apply` says the host cannot ask directly, the host has no confirmation dialog (some Codex versions): tell the owner to run
 `/sphica:forget` in Claude Code. When it says clearing did not finish (usually another session reading the database): run `forget_apply` with

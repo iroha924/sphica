@@ -10,7 +10,8 @@ import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { READ_BUDGET, UNSUPPORTED } from "./read.ts";
+import { UNSUPPORTED } from "./read.ts";
+import { READ_BUDGET } from "./reply-budget.ts";
 import { pathHash, ruleFiles } from "./rule-files.ts";
 import { bytes, head } from "./text.ts";
 

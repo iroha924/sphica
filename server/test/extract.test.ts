@@ -21,12 +21,15 @@ import {
   contextText,
   gleanFetch,
   pendingText,
+  RecordRefused,
   saveText,
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
+import { framed } from "../src/frame.ts";
 import { type Get, gh } from "../src/github.ts";
 import { checkGlean, saveGlean } from "../src/glean.ts";
 import { readRefs, readUnit } from "../src/read.ts";
+import { READ_BUDGET } from "../src/reply-budget.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { searchUnits } from "../src/search.ts";
 import { dump, insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
@@ -2902,7 +2905,7 @@ test("trace: context comes in pages, and saving marks as looked at only the mess
     // Reading only the first page and saving leaves the unread messages waiting for the next trace
     const first = await beginTrace(db.ingest, p, "s1");
     const page = await contextText(db.ingest, first, p, null);
-    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
     assert.match(page, /\d+ more sources follow: call record_context with after: "s\d+"/);
     assert.doesNotMatch(page, /Live records of this project/);
     assert.doesNotMatch(page, /発言 39:/);
@@ -2938,11 +2941,11 @@ test("trace: one message longer than a page is cut with a pointer to read the re
   const db: TempDb = tempDb();
   try {
     const p = project(db);
-    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(30_000)} 終わり` });
+    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(18_000)} 終わり` });
     const other = message(db, p, { id: "m2", text: "Postgres は使わない。", sent: "2026-09-10T00:01:00Z" });
     const run = await beginTrace(db.ingest, p, "s1");
     const page = await contextText(db.ingest, run, p, null);
-    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
     const rest = new RegExp(`read (s${long}@\\d+) for the rest`).exec(page)?.[1] ?? "";
     assert.ok(rest, page.slice(-200));
     assert.doesNotMatch(page, /終わり/);
@@ -2977,7 +2980,9 @@ test("trace: the live records go on a page of their own when they do not fit bes
     message(db, p, { id: "m1", text: "う".repeat(19_900) });
     const run = await beginTrace(db.ingest, p, "s1");
     const first = await contextText(db.ingest, run, p, null);
-    const next = /The live records follow: call record_context with after: "(s\d+)"/.exec(first)?.[1];
+    const next = /2 more lines of the closing part: call record_context with after: "(t[0-9a-f]{8}\.0)"/.exec(
+      first,
+    )?.[1];
     assert.ok(next, first.slice(-300));
     assert.doesNotMatch(first, /Live records of this project/);
     const last = await contextText(db.ingest, run, p, null, next);
@@ -3004,20 +3009,20 @@ test("trace: a page stays within its size for emoji text, and every edit of a lo
       });
     const run = await beginTrace(db.ingest, p, "s1");
     const first = await contextText(db.ingest, run, p, null);
-    assert.ok(first.length < 21_000, `a page of ${first.length} characters`);
+    assert.ok(Buffer.byteLength(framed(first)) <= READ_BUDGET, `a page of ${Buffer.byteLength(first)} bytes`);
     assert.match(first, new RegExp(`read s${emoji}@\\d+ for the rest`));
     let page = first;
-    for (let m = /after: "(s\d+)"/.exec(page); m; m = /after: "(s\d+)"/.exec(page))
+    for (let m = /after: "([st][^"]+)"/.exec(page); m; m = /after: "([st][^"]+)"/.exec(page))
       page = await contextText(db.ingest, run, p, null, m[1]);
     // Every edit is listed: a long session edits more than a hundred times, and the anchors come from these paths
     assert.match(page, /- src\/file-0\.ts[\s\S]*- src\/file-149\.ts/);
-    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
   } finally {
     await db.done();
   }
 });
 
-test("trace: a tail too long for a page is cut, with the number of lines left out", async () => {
+test("trace: a closing part too long for a page goes on through the run's own cursor, with nothing left out", async () => {
   const db: TempDb = tempDb();
   try {
     const p = project(db);
@@ -3043,16 +3048,80 @@ test("trace: a tail too long for a page is cut, with the number of lines left ou
         added_at: "2026-09-10T00:00:00.000Z",
       });
     const run = await beginTrace(db.ingest, p, "s1");
-    let page = await contextText(db.ingest, run, p, null);
-    for (let m = /after: "(s\d+)"[^\n]*$/.exec(page); m; m = /after: "(s\d+)"[^\n]*$/.exec(page)) {
-      assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
-      page = await contextText(db.ingest, run, p, null, m[1]);
-    }
-    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
-    assert.match(
-      page,
-      /- and \d+ more lines left out: find records with search, and every field definition with the fields tool/,
+    const pages = [await contextText(db.ingest, run, p, null)];
+    for (
+      let m = /after: "(t[^"]+)"/.exec(pages.at(-1) ?? "");
+      m;
+      m = /after: "(t[^"]+)"/.exec(pages.at(-1) ?? "")
+    )
+      pages.push(await contextText(db.ingest, run, p, null, m[1]));
+    assert.ok(pages.length >= 2, `${pages.length} pages`);
+    for (const page of pages)
+      assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
+    // Nothing is left out: every definition is on one of the pages, whole
+    const all = pages.join("\n");
+    for (let i = 0; i < 60; i++)
+      assert.match(all, new RegExp(`^- field_${i} \\(text; every kind\\) Field ${i}: d{500}$`, "m"));
+    assert.doesNotMatch(all, /left out/);
+    // A cursor of the closing part is this run's alone
+    const other = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, other, p, null);
+    await assert.rejects(
+      contextText(db.ingest, other, p, null, /after: "(t[^"]+)"/.exec(pages[0] ?? "")?.[1]),
+      /not a page this run was given/,
     );
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: two reads of a run's first page at once both get cursors the run goes on from", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "あ".repeat(20_000) });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const both = await Promise.all([
+      contextText(db.ingest, run, p, null),
+      contextText(db.ingest, run, p, null),
+    ]);
+    for (const page of both) {
+      const next = /after: "(t[^"]+)"/.exec(page)?.[1];
+      assert.ok(next, page.slice(-200));
+      assert.match(await contextText(db.ingest, run, p, null, next), /Live records of this project/);
+    }
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: a context call the host cancelled counts nothing as shown, so a save marks no message its reply never carried", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const ids = Array.from({ length: 3 }, (_, i) =>
+      message(db, p, { id: `m${i}`, text: `Message ${i}`, sent: `2026-09-10T00:0${i}:00Z` }),
+    );
+    const run = await beginTrace(db.ingest, p, "s1");
+    // The host gave up on the call while it was reading: the SDK sends no reply for it
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await assert.rejects(
+      contextText(db.ingest, run, p, null, undefined, false, cancelled.signal),
+      /The call was cancelled, so nothing in it counts as shown/,
+    );
+    await saveText(db.ingest, run, p, null, { units: [] });
+    const looked = () =>
+      db.owner
+        .prepare("select distinct source_id from source_processing order by source_id")
+        .all()
+        .map((r) => Number(r.source_id));
+    assert.deepEqual(looked(), []);
+    // A call that is answered marks the messages it showed as looked at
+    const next = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, next, p, null, undefined, false, new AbortController().signal);
+    await saveText(db.ingest, next, p, null, { units: [] });
+    assert.deepEqual(looked(), ids);
   } finally {
     await db.done();
   }
@@ -3164,9 +3233,15 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
           },
         ],
       }),
-      /glean:duck: another record in this save already supersedes trace:ext-s1\/storage/,
+      // Turned down while writing, after part of it was written: the refusal is the reply, and the transaction took all of it back
+      (e: unknown) =>
+        e instanceof RecordRefused &&
+        /^✗ 1 error; nothing was saved\. Fix the record, check it, and save again\n✗ glean:duck: another record in this save already supersedes trace:ext-s1\/storage/.test(
+          e.message,
+        ),
     );
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
+    assert.equal(state("glean:duck"), undefined);
   } finally {
     await db.done();
   }
@@ -3226,6 +3301,8 @@ test("glean: two operations that report the same line are both reported in the s
       })),
     });
     assert.equal(out.match(/✓ glean:notes: anchor added/g)?.length, 2, out);
+    // A save that only changes records still says, first, how many changes it made
+    assert.match(out, /^✓ saved\nIn all: 3 changes\n/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

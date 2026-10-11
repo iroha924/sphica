@@ -9,7 +9,7 @@
   },
   "steps": {
     "capture": "send the session's hook events (prompt, edits, stop) through the capture hook for its host",
-    "trace": "issue a trace draft for the session, write the record, check, save",
+    "trace": "issue a trace draft for the session, write the record, check, save, and read each reply to its end with record_more (a unit's anchors_missing: n stands for n anchors on paths the working tree does not hold)",
     "harvest": "issue a harvest draft for the pull request (fake gh serves world.json), write the record, check, save",
     "glean": "issue a glean draft in the given session, write the record, check, save",
     "edit_file": "change a world file in the temp repository and commit",
@@ -4265,6 +4265,307 @@
             "outcome": "no_unit"
           }
         }
+      ]
+    },
+    {
+      "id": "paging-03",
+      "layer": "paging",
+      "lang": "en",
+      "summary": "A check and a save with more warnings than one reply carries are read to the end with record_more, and the records are saved once",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-pages",
+            "host": "claude-code",
+            "at": "2026-03-27T10:00:00+09:00",
+            "turns": [{ "owner": "Keep the retry in the client.", "assistant": "", "edits": [] }]
+          }
+        },
+        { "capture": "s-en-pages" }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-pages",
+          "record": {
+            "units": [
+              {
+                "key": "retry-00",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 0)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-01",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 1)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-02",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 2)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-03",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 3)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-04",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 4)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-05",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 5)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-06",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 6)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-07",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 7)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-08",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 8)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-09",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 9)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-10",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 10)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-11",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 11)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-12",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 12)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-13",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 13)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-14",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 14)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-15",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 15)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-16",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 16)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-17",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 17)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-18",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 18)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              },
+              {
+                "key": "retry-19",
+                "kind": "finding",
+                "text": "The retry stays in the client (part 19)",
+                "evidence": [
+                  {
+                    "source": "session:s-en-pages#1.owner",
+                    "quote": "Keep the retry in the client.",
+                    "role": "states"
+                  }
+                ],
+                "anchors_missing": 20
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        { "result_pages": { "of": "check", "min": 2 } },
+        {
+          "result_lines": {
+            "of": "check",
+            "containing": "would be active: trace:s-en-pages/retry-",
+            "count": 20
+          }
+        },
+        { "result_lines": { "of": "check", "containing": "is not in the working tree", "count": 400 } },
+        { "result_pages": { "of": "save", "min": 2 } },
+        { "result_lines": { "of": "save", "containing": "✓ trace:s-en-pages/retry-", "count": 20 } },
+        { "result_lines": { "of": "save", "containing": "is not in the working tree", "count": 400 } },
+        { "units_for_session": "s-en-pages", "count": 20 }
       ]
     },
     {

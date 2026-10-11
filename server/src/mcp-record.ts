@@ -24,15 +24,19 @@ import {
   contextText,
   gleanFetch,
   pendingText,
+  RecordRefused,
   saveText,
 } from "./extract.ts";
-import { applyForget, forgetText, previewForget } from "./forget.ts";
+import { applyForget, forgetQuestion, forgetWords, previewForget } from "./forget.ts";
 import { framed } from "./frame.ts";
 import { gh, repoOf } from "./github.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
+import { withinBudget } from "./reply-budget.ts";
+import { CURSOR, firstPage, forgetKept, morePage } from "./result-pages.ts";
 import { requireRuntime } from "./sqlite.ts";
+import { stopOnOverflow } from "./stdio-limit.ts";
 import { head, plural, reason } from "./text.ts";
 import { callSession, logCall } from "./trace.ts";
 
@@ -75,11 +79,11 @@ async function called(name: string, cwd: string | undefined, meta: unknown) {
   return { p, call: await logCall(conn(), p.projectId, name, callerOf(meta)) };
 }
 
-/** Runs a tool body, turning a failure into an error reply the agent can read. */
+/** Runs a tool body, turning a failure into an error reply the agent can read. A refused save is its own reply, already within size */
 const tool = (fn: () => Promise<string>) =>
   fn().then(
     (t) => reply(t),
-    (e) => reply(`Sphica: ${head(reason(e), 2000)}`, true),
+    (e) => reply(e instanceof RecordRefused ? e.message : `Sphica: ${head(reason(e), 2000)}`, true),
   );
 
 const server = new McpServer(
@@ -184,14 +188,14 @@ server.registerTool(
   {
     title: "Keep an issue or pull request the owner named",
     description:
-      "Reads a GitHub issue or pull request URL of this repository through gh (read only), keeps it as sources, and lists their refs.",
+      "Reads a GitHub issue or pull request URL of this repository through gh (read only), keeps it as sources, says how many, and lists their refs with who wrote each (read a source with read). Refs that do not fit the reply are read with record_more; everything is kept either way.",
     inputSchema: z.object({ run: RUN, url: z.string().url().max(500), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
   async (a, extra) =>
     tool(async () => {
       const { p } = await called("glean_fetch", a.cwd, extra._meta);
-      return framed(await gleanFetch(conn(), a.run, p, a.url, gh(repoOf(p.key) ?? "")));
+      return gleanFetch(conn(), a.run, p, a.url, gh(repoOf(p.key) ?? ""));
     }),
 );
 
@@ -201,16 +205,19 @@ server.registerTool(
     title: "What a run may cite",
     description:
       "Prints the run's sources with their refs (s<id>) and this project's live records, a page at a time. A page that ends with " +
-      "'call record_context with after' names the after to pass for the next one. Saving counts as looked at only the sources shown " +
-      "and those the record quotes.",
+      "'call record_context with after' names the after to pass for the next one, and the last page names none. A source too long " +
+      "for a page says where read goes on. Saving counts as looked at only the sources shown and those the record quotes.",
     inputSchema: z
       .object({
         run: RUN,
         after: z
           .string()
-          .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
+          .regex(
+            /^(s[1-9][0-9]{0,15}|t[0-9a-f]{8}\.[0-9]{1,15})$/,
+            "the after the previous page named, such as s12",
+          )
           .optional()
-          .describe("The ref the previous page named, to read the next page"),
+          .describe("The after the previous page named, to read the next page"),
         auto: AUTO,
         cwd: CWD,
       })
@@ -220,7 +227,7 @@ server.registerTool(
   async (a, extra) =>
     tool(async () => {
       const { p } = await called("record_context", a.cwd, extra._meta);
-      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto));
+      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto, extra.signal));
     }),
 );
 
@@ -229,7 +236,7 @@ server.registerTool(
   {
     title: "Check a record",
     description:
-      "Checks a record by running the save in a transaction that rolls back: it refuses what record_save would refuse and says what would become of each record (would be active, would stay a candidate, would be superseded), writing nothing.",
+      "Checks a record by running the save in a transaction that rolls back: it refuses what record_save would refuse and says what would become of each record (would be active, would stay a candidate, would be superseded), writing nothing. The verdict and the counts come first; lines that do not fit are read with record_more.",
     inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: READ,
   },
@@ -244,7 +251,8 @@ server.registerTool(
   "record_save",
   {
     title: "Save a record",
-    description: "Checks and saves a record for the run in one transaction. A run saves once.",
+    description:
+      "Checks and saves a record for the run in one transaction. A run saves once. The reply starts with the verdict: saved, or the number of errors when the record is refused (nothing is saved then). Lines that do not fit are read with record_more, which saves nothing again.",
     inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: WRITE,
   },
@@ -269,14 +277,15 @@ server.registerTool(
   {
     title: "What forgetting sources would do",
     description:
-      "Shows which sources would be removed and which records would lose citations or leave active. Changes nothing. Never shows the text.",
+      "Shows every source that would be removed, how many records are affected and what becomes of them, and then the records (those that do not fit are read with record_more). Changes nothing. Never shows the text.",
     inputSchema: z.object({ sources: SOURCES, cwd: CWD }).strict(),
     annotations: READ,
   },
   async (a, extra) =>
     tool(async () => {
       const { p } = await called("forget_preview", a.cwd, extra._meta);
-      return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)), dbFile());
+      const w = forgetWords(await previewForget(dbFile(), p.projectId, idsOf(a.sources)), dbFile());
+      return firstPage({ kind: "forget_preview", projectId: p.projectId, lead: w.must, lines: w.records });
     }),
 );
 
@@ -306,7 +315,7 @@ server.registerTool(
           answer = await server.server.elicitInput(
             {
               mode: "form",
-              message: `Forget ${plural(n, "source")} for good?\n${forgetText(seen, dbFile())}`,
+              message: forgetQuestion(seen, dbFile()),
               requestedSchema: {
                 type: "object",
                 properties: {
@@ -332,14 +341,50 @@ server.registerTool(
           throw refused(`The number typed does not match ${n}`);
       }
       const done = await applyForget(dbFile(), p.projectId, ids, seen, extra.signal);
-      return [
-        n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
-        forgetText(done.outcome, dbFile()),
-        done.cleanup === "done"
-          ? "The deleted text was cleared from the database file."
-          : "Clearing the deleted text from the database file did not finish (another session may be reading it), so it may stay there until you run forget_apply with the same sources again.",
-      ].join("\n");
+      // Results kept from earlier calls may quote what was just forgotten
+      forgetKept(p.projectId);
+      const w = forgetWords(done.outcome, dbFile());
+      // Whether the bytes are gone is said with what was forgotten, before the records: a reply that carries only some still says it
+      return firstPage({
+        kind: "forget_apply",
+        projectId: p.projectId,
+        lead: [
+          n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
+          done.cleanup === "done"
+            ? "The deleted text was cleared from the database file."
+            : "Clearing the deleted text from the database file did not finish (another session may be reading it), so it may stay there until you run forget_apply with the same sources again.",
+          ...w.must,
+        ],
+        lines: w.records,
+      });
     }),
 );
 
-await server.connect(new StdioServerTransport());
+server.registerTool(
+  "record_more",
+  {
+    title: "The rest of a result",
+    description:
+      "Reads on from where a reply of this server stopped to stay within its size: pass the cursor that reply named. Nothing is " +
+      "checked, saved, fetched, or forgotten again. The same cursor gives the same page.",
+    inputSchema: z
+      .object({
+        cursor: z.string().regex(CURSOR, "the cursor a reply named").describe("The cursor the reply named"),
+        cwd: CWD,
+      })
+      .strict(),
+    annotations: READ,
+  },
+  async (a, extra) =>
+    tool(async () => {
+      const { p } = await called("record_more", a.cwd, extra._meta);
+      return morePage(a.cursor, p.projectId);
+    }),
+);
+
+// An error the SDK builds itself repeats what the caller sent, so it is cut where the server sends
+const transport = new StdioServerTransport();
+const send = transport.send.bind(transport);
+transport.send = (message) => send(withinBudget(message));
+await server.connect(transport);
+stopOnOverflow(transport);

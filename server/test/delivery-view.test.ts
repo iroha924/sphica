@@ -16,7 +16,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { iso } from "../src/db.ts";
 import { DELIVERY_LIMITS, DELIVERY_LIMITS_TEXT, deliveryOverview, namesKey } from "../src/delivery-view.ts";
 import { framed } from "../src/frame.ts";
-import { READ_BUDGET } from "../src/read.ts";
+import { READ_BUDGET } from "../src/reply-budget.ts";
 import { bytes } from "../src/text.ts";
 import { hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 import { tmpEnv } from "./temp-dir.ts";

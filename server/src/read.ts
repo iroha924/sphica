@@ -11,6 +11,7 @@ import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { refusalText, renamesSince } from "./git.ts";
 import { inline, plain, STRING_SEQUENCE } from "./panel.ts";
+import { READ_BUDGET } from "./reply-budget.ts";
 import { bytes, head, sha256 } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
@@ -475,61 +476,6 @@ async function movedTo(
     : "";
 }
 
-/**
- * What one reply carries, its frame included. Codex keeps about 10,000 tokens it counts as bytes / 4 and drops the middle of a longer
- * reply without a word; Claude Code sets aside a reply over 25,000 tokens.
- */
-export const READ_BUDGET = 32 * 1024;
-
-/**
- * How many parts, from the first, a reply can carry within limit bytes. reply builds the whole text for a count, with its frame and what it
- * says about the parts left out, so what is measured is what is sent. The reply for no parts has to fit by the caller's own bounds.
- */
-export function fitCount(parts: string[], limit: number, reply: (kept: number) => string): number {
-  // A first guess from the parts' own sizes saves building every reply; the frame can drop characters, so the guess is tried both ways
-  let kept = 0;
-  let used = 0;
-  for (; kept < parts.length; kept++) {
-    used += bytes(parts[kept] ?? "");
-    if (used > limit) break;
-  }
-  while (kept > 0 && bytes(reply(kept)) > limit) kept--;
-  while (kept < parts.length && bytes(reply(kept + 1)) <= limit) kept++;
-  return kept;
-}
-
-/** Refs as calls to read, ten to a call as read takes them, so every one left out of a reply can still be reached from it */
-export function readCalls(refs: string[]): string {
-  const calls: string[] = [];
-  for (let i = 0; i < refs.length; i += 10)
-    calls.push(`read with refs ${JSON.stringify(refs.slice(i, i + 10))}`);
-  return calls.join(", then ");
-}
-
-/**
- * What a reply says about the parts it left out to stay within READ_BUDGET; empty when it left none. It goes after the frame's closing
- * line, where only Sphica writes: inside the frame a record's own text could spell the same sentence.
- */
-export const leftOut = (refs: string[], what: string): string =>
-  refs.length
-    ? `${refs.length} more ${what} left out to keep this reply within ${READ_BUDGET / 1024} KiB: ${readCalls(refs)}.`
-    : "";
-
-/** A record's key as a line shows it: whole, or cut with the id read takes in its place, so a record a reply names can always be opened */
-export function keyShown(key: string, id: number, n = 200): string {
-  const shown = preview(key, n);
-  return shown === inline(key) ? shown : `${shown} [key cut: read u${id}]`;
-}
-
-/**
- * Text from a record or from the caller as a reply shows it, within n bytes and marked when cut. It is made plain before it is cut: a cut
- * that drops the end of a terminal control sequence would leave the frame stripping everything after it. lines keeps line breaks.
- */
-export function preview(s: string, n: number, lines = false): string {
-  const clean = lines ? plain(s) : inline(s);
-  const cut = head(clean, n);
-  return cut === clean ? cut : `${cut}…`;
-}
 /** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
 const HEADER_FIELD = 300;
 
@@ -620,6 +566,29 @@ async function piece(
  * read's reply for refs, framed: whole while they fit in READ_BUDGET; then the ref that does not fit is cut at a character and the reply
  * names the refs to call read with for the rest, its continuation first. Every reply after the first shows at least one character more.
  */
+/**
+ * Where showing a stored text from `from` stops so that it fits room bytes: between characters, and not inside a sequence plain drops
+ * whole. A cut inside one moves before it, or past it when the text shown starts there (the sequence then shows nothing).
+ */
+function cutEnd(all: Buffer, hide: [number, number][], from: number, room: number): number {
+  const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
+  const inside = hide.find(([a, b]) => a < cut && cut < b);
+  const end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
+  return bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0) ? cut : end;
+}
+
+/**
+ * The start of a stored text that fits room bytes once made plain, and the byte of the stored text it ends at (the place read takes
+ * to go on). It is plain on its own, so a terminal sequence left open in it swallows nothing that comes after.
+ */
+export function shownStart(text: string, room: number): { text: string; end: number; whole: boolean } {
+  const whole = plain(text);
+  if (bytes(whole) <= room) return { text: whole, end: bytes(text), whole: true };
+  const all = Buffer.from(text, "utf8");
+  const end = cutEnd(all, sequences(all), 0, room);
+  return { text: plain(all.subarray(0, end).toString("utf8")), end, whole: false };
+}
+
 export async function readRefs(
   db: Reads,
   projectId: number,
@@ -664,11 +633,7 @@ export async function readRefs(
       bytes(p.head) -
       bytes(note(all.length, all.length)) -
       bytes(tail([p.resume(all.length), ...rest]));
-    const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
-    // A cut inside a sequence moves before it, or past it when the page starts there (the sequence then shows nothing)
-    const inside = hide.find(([a, b]) => a < cut && cut < b);
-    let end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
-    if (bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0)) end = cut;
+    const end = cutEnd(all, hide, from, room);
     const text = all.subarray(from, end).toString("utf8");
     if (!text) {
       next = refs.slice(i);

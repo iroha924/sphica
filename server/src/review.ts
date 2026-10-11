@@ -8,7 +8,7 @@ import { authorityOf } from "./authority.ts";
 import { byUnit, type Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { READ_BUDGET } from "./read.ts";
+import { READ_BUDGET } from "./reply-budget.ts";
 import { bytes, head, sha256 } from "./text.ts";
 
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */

@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import type { Reads } from "./db.ts";
-import { fitCount, keyShown, preview, READ_BUDGET } from "./read.ts";
+import { fitCount, keyShown, preview, READ_BUDGET } from "./reply-budget.ts";
 import { type Batch, type FileDiff, REVIEW_BATCH, reviewBatch } from "./review.ts";
 
 /** A place in the changed code: a path in the diff and a line added there (the path alone for a file that is gone) */

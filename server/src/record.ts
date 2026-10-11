@@ -19,6 +19,7 @@ import {
 import { locate, type OwnWords, ownWords, refused } from "./own-words.ts";
 import { inline } from "./panel.ts";
 import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
+import { preview } from "./reply-budget.ts";
 import {
   commitHeld,
   kindOf,
@@ -273,7 +274,10 @@ export async function checkRecord(
   const parsed = Record.safeParse(raw);
   if (!parsed.success)
     return {
-      errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
+      // What the caller sent is repeated in a schema error (an unknown key's name), so each part is shown within a size
+      errors: parsed.error.issues.map(
+        (i) => `${preview(i.path.join(".") || "record", 300)}: ${preview(i.message, 600)}`,
+      ),
       problems,
       units: [],
       work: null,

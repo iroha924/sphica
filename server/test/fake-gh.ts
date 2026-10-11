@@ -18,3 +18,48 @@ export function fakeGhPath(user?: { id: number; login: string }): string {
   );
   return `${bin}${path.delimiter}${process.env.PATH ?? ""}`;
 }
+
+/**
+ * PATH with a gh that answers for one issue of any repository: its body, and `comments` comments of `text` each. It counts its calls
+ * in the file it returns, one line each.
+ */
+export function fakeIssueGh(number: number, comments: number, text: string): { path: string; calls: string } {
+  const bin = tempDir("sphica-fake-gh-");
+  const calls = path.join(bin, "calls");
+  const person = { login: "someone", id: 7, type: "User" };
+  const issue = {
+    number,
+    title: "An issue",
+    body: "The body.",
+    user: person,
+    author_association: "CONTRIBUTOR",
+    html_url: `https://github.com/o/r/issues/${number}`,
+    created_at: "2026-09-10T00:00:00Z",
+  };
+  const comment = (i: number) => ({
+    id: 1000 + i,
+    body: `${i} ${text}`,
+    user: person,
+    author_association: "CONTRIBUTOR",
+    html_url: `https://github.com/o/r/issues/${number}#issuecomment-${1000 + i}`,
+    created_at: "2026-09-10T00:00:00Z",
+  });
+  fs.writeFileSync(
+    path.join(bin, "gh"),
+    [
+      `#!${process.execPath}`,
+      'const fs = require("node:fs");',
+      "const a = process.argv.slice(2);",
+      `fs.appendFileSync(${JSON.stringify(calls)}, a.join(" ") + "\\n");`,
+      `const issue = ${JSON.stringify(issue)};`,
+      `const comments = ${JSON.stringify(Array.from({ length: comments }, (_, i) => comment(i)))};`,
+      `if (a[0] !== "api") process.exit(1);`,
+      `if (a[1].endsWith("/issues/${number}")) process.stdout.write(JSON.stringify(issue));`,
+      `else if (a[1].includes("/issues/${number}/comments")) process.stdout.write(JSON.stringify([comments]));`,
+      "else process.exit(1);",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return { path: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, calls };
+}
