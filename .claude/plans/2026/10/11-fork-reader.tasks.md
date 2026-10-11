@@ -91,6 +91,18 @@ base: main
   - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
   - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 15 件 pass
 
+- [x] T07: コメントを行で読める形で書き出し、承認の前に題名と本文も取り直す
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T03（直す対象の手順が要る）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`, `.claude/agents/fork-reader.md`
+  - red: `wc -lc comments.json reviews.json review-comments.json` → 直す前の手順で書いた PR #314 の 3 ファイルは、どれも 1 行（9068・2447・4318 バイト）
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(fork-pr): write comments as lines the reader can page, and refresh title and body`
+  - 結果: `wc -lc comments.json reviews.json review-comments.json` → 直す前は 1 行ずつ（9068・2447・4318 バイト）
+  - 結果: `bash -e <Skill の手順 2 の gh api の 5 行を #314 向けに置き換えたもの>` → 終了コード 0。`comments.md` 43 行・`reviews.md` 26 行・`review-comments.md` 9 行で、最長の行は 520 文字。`## ` と `| ` 以外で始まる行は 0
+  - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
+
 ## 記録
 
 - 2026-10-11 / T01 / コミットの前の review-shipping が 1 件指摘: 設定ファイルが 0 バイトだと `check-ai-config.mjs` が検査を飛ばして通る（再現した。終了コード 0） / 読めた文字列の有無ではなく、ファイルの有無で検査に入るように直した。ほかの指摘は無し（検査を 11 通りに弱めるとテストが全部落ちること、評価・tarball・Biome・knip に影響が無いことをレビュアーが確認）
@@ -105,3 +117,5 @@ base: main
 - 2026-10-11 / T03 / 予定外の発見: 定義をコミットした直後は、このセッションの Agent ツールの一覧に `fork-reader` が出なかった（`Agent type 'fork-reader' not found`）。会話が要約された後に出た。それまでの実測は `claude --agent fork-reader -p` で流し、出てからセッションの中の委任でも #314 を通した
 - 2026-10-11 / 全体 / Codex の全差分レビュー（`main..5b2f6861`、指摘 2 件、どちらも P2、どちらも自分で再現）: (1) fence の外の文（``Use `codex review` instead.``）で別の起動を書いても検査を通る (2) frontmatter の値に NUL があると、ホストの YAML は失敗するのに検査を通る / 両方採用。T06 を足した。(1) は、目印のブロックの外に `codex` というコマンド名が、知っている書き方（別の Skill の名前、設定の場所、表示だけの 2 コマンド）以外で出たら落とす。(2) は、frontmatter の中の制御文字（Cc・Cf・行と段落の区切り）を落とす
 - 2026-10-11 / T06 / コミットの前の review-shipping が 4 件指摘（写しで再現済み）: (1) 目印のコマンドと同じ行をもう 1 回書いても通る（前の規則は拒否していた） (2) 知っている書き方と起動が同じ行にある場合のテストが無い (3) 一部の制御文字のテストが無い (4) `codex-review exec` のように、知っている書き方の中に `codex` が収まる行は通る / (1)〜(3) を直した。(4) は採らない: どれも Codex を起動する行ではなく、起動の形（`codex … exec`）が隣にあれば落ちることをレビュアーが確認している
+- 2026-10-11 / 全体 / Codex の修正の再レビュー（`5b2f6861..740b83e7`）: 指摘なし
+- 2026-10-11 / 全体 / GitHub の Codex のレビュー（PR #322、`740b83e7`、セキュリティのレビューは指摘なし、コードのレビューは 2 件、どちらも P2）: (1) コメント類を API の応答のまま書くと 1 ページが 1 行になり、行で読む読み手は長い PR で最後まで読めず、承認に進めなくなる (2) 題名と本文は head を変えずに書き換えられるのに、承認の前に取り直すのがコメントだけ / 両方採用。T07 を足した。(1) は、1 件ごとに `## ` の見出し行、本文の各行に `| ` を付けて書き出す（コメントの本文が別の件の見出しを装えない）。この PC の Read は 9,000 文字の 1 行を全部表示した（実測）ので、#314 の読み取り自体は欠けていない。持ち主の判断で、追加の `@codex review` は頼まない
