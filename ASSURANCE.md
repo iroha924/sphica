@@ -23,8 +23,9 @@ Out of scope: another process running as the same user. It can read and write `~
 
 - Pull request text, issue text, and recorded conversations are stored as sources and shown to the agent marked as past records, with the instruction that they are not instructions.
 - A decision takes effect only when adopted by someone entitled to decide: the owner in their own words, the repository's owner or a maintainer on GitHub, or the agent itself in an interactive session, marked as the agent's decision. A commit's author, which anyone can set, never adopts, and neither does a merge.
+- Wherever words carry authority (an adoption, the reason for retracting, withdrawing, resolving a conflict, or moving an anchor, a field definition, a condition for reconsidering, the grounds of a link from a pull request), one check passes them: they are in the stored text, their writer may speak there, and they are not only a quotation in it (a `>` line, fenced code, or words wholly inside quotation marks). The save writes the span that check passed, and a check in `bun run architecture` keeps other code from writing those rows.
 - A record that replaces or holds back the owner's decision takes effect only from a record the owner adopted.
-- A record carries quotes from its sources, and the save checks that each quote is in the stored text. That proves the words were said. It does not prove the record's own summary of them is right. A record whose quote is not there is quarantined: it is never delivered on its own, it does not appear in search, and reading it by key shows it as quarantined.
+- A record carries quotes from its sources, and the save checks that each quote is in the stored text. That proves the words were said. It does not prove the record's own summary of them is right. A record whose quote is not there is quarantined: it is never delivered on its own, it does not appear in search, reading it by key shows it as quarantined, and a conflict it names holds no other record back.
 
 ### Records are written through one narrow path
 
@@ -79,6 +80,7 @@ Out of scope: another process running as the same user. It can read and write `~
 ## What this does not claim
 
 - Showing a record does not make the agent follow it, and Sphica does not block the agent.
+- Sphica checks where an adoption's words sit, not what they mean. An agent can cite words the owner did say for a record they do not support, and the quotation rule reads markup only: a paste with no quotation marks, an indented code block, and nested marks pass. `sphica doctor --audit-quotes` lists the saved rows the rule refuses, for the owner to judge, and changes none of them.
 - Sphica sends nothing itself, but what it hands to the host (records and the quotes in them) becomes part of the host's context, and goes wherever the host sends that.
 - Masking catches secrets with a known shape only, and only in the text Sphica takes in. Anything else is stored as typed, and a record's own text is stored as the agent wrote it.
 - Forgetting removes sources from the database. It does not touch copies outside it: files still waiting in the capture queue, and backups of the database made before a migration. A record that repeated the text keeps its own words.

@@ -206,6 +206,7 @@ npm uninstall -g sphica
 |---|---|
 | `sphica init` | DB を作り、`gh` にログインしている GitHub アカウントを登録し、今のリポジトリを登録する |
 | `sphica doctor` | バージョン、DB、記録、登録したプロジェクトを確かめる |
+| `sphica doctor --audit-quotes` | 保存済みの採用や理由のうち、引用された言葉を根拠にしているものを一覧にする。読むだけで、何も変えない |
 | `sphica uninstall` | `~/.sphica` を消し、plugin と CLI の外し方を表示する |
 
 それ以外は Claude Code と Codex の中で、`/sphica:*` のコマンドと Sphica の MCP のツールを通して動きます。

@@ -468,3 +468,40 @@ test("doctor's word splitting line: this Node matches the shipped samples, and a
   );
   assert.doesNotMatch(off.text, /reindex/i);
 });
+
+test("doctor --audit-quotes reads the database without changing a byte of it, and does not go with --reindex", () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-")));
+  const dir = path.join(home, "Projects", "here");
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://github.com/o/here.git"], {
+    stdio: "ignore",
+  });
+  try {
+    assert.match(runIn(home, "init", "--cwd", dir).out, /registered/);
+    const file = path.join(home, ".sphica", "sphica.db");
+    const bytes = () => fs.readFileSync(file).toString("base64");
+    const before = bytes();
+    const audit = runIn(home, "doctor", "--audit-quotes");
+    assert.equal(audit.code, 0, audit.out);
+    assert.match(audit.out, /^sphica doctor --audit-quotes$/m);
+    assert.match(
+      audit.out,
+      /0 of 0 rows rest on words the quotation rule refuses\. Nothing was changed\./,
+      audit.out,
+    );
+    assert.match(audit.out, /Not checked, since their words are not kept/);
+    assert.equal(bytes(), before);
+
+    const both = runIn(home, "doctor", "--audit-quotes", "--reindex");
+    assert.notEqual(both.code, 0);
+    assert.match(both.out, /--audit-quotes only reads, so it cannot go with --reindex/);
+    assert.equal(bytes(), before);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  // Without a database it says so and fails, like any command that needs one
+  const none = run("doctor", "--audit-quotes");
+  assert.notEqual(none.code, 0);
+  assert.match(none.out, /No database at/, none.out);
+});

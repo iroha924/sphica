@@ -3,7 +3,7 @@
 
 // The full view of one record or source for MCP read: a record's text, options, the exact words cited as evidence and adoption with who
 // said them, its links and state history, and each anchor checked against the working tree now.
-import type { Selectable } from "kysely";
+import { type Selectable, type SqlBool, sql } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
@@ -189,6 +189,10 @@ async function describe(
         "b.id as to_id",
         "a.key as from_key",
         "b.key as to_key",
+        // Extraction and sources never change after a save, so these hold as of any time read
+        sql<SqlBool>`a.extraction = 'supported' and a.unsourced = 0 and b.extraction = 'supported' and b.unsourced = 0`.as(
+          "sound",
+        ),
         // A proposer's lifecycle as of the time read, shown beside a proposal that never took effect
         eb
           .selectFrom("unit_state as t")
@@ -348,7 +352,7 @@ async function describe(
     const other = l.from_id === u.id ? l.to_id : l.from_id;
     const held = mine !== "owner" || sides.get(other) === "owner";
     out.push(
-      `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : held ? " (unresolved: held back from automatic delivery until resolved, not withdrawn)" : " (unresolved: still delivered, since only the owner's words hold the owner's decision back)"}`,
+      `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : !l.sound ? " (unresolved, but it holds nothing back: one side is quarantined or unsourced, so it is never delivered)" : held ? " (unresolved: held back from automatic delivery until resolved, not withdrawn)" : " (unresolved: still delivered, since only the owner's words hold the owner's decision back)"}`,
     );
   }
   // The newest set bound to the record's words, as of the time read; search uses the same one
@@ -373,6 +377,8 @@ type Link = {
   from_key: string;
   to_key: string;
   from_lifecycle: string | null;
+  /** Whether both sides are supported and sourced: a conflict with a record that is never delivered holds nothing back */
+  sound: SqlBool;
 };
 
 /**

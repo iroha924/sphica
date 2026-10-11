@@ -130,11 +130,62 @@ for (const f of GIT_STARTERS) {
     fail.push(`${f} names no git to start where check-architecture.mjs looks; fix GIT_STARTERS`);
 }
 
+// Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords, and only AUTHORITY_WRITERS write the rows that
+// keep such words. The types ask each writer for one; this stops the plain ways around them. It does not see a table name held in a
+// variable, a cast through a type alias or in angle brackets, or SQL in a string that is never run.
+const OWN_WORDS = "server/src/own-words.ts";
+const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
+/** A source with each comment turned into a space: a note about a cast or a write is not one, and it still parts the words around it */
+const code = (source) =>
+  [...jsTokens(source)]
+    .map((t) => (t.type === "MultiLineComment" || t.type === "SingleLineComment" ? " " : t.value))
+    .join("");
+// A cast to the type, under its own name or one it was imported or exported as. Only a list in braces right after `import` or `export`
+// renames it, and that list is taken out before looking for the cast, since it reads `OwnWords as W` itself
+const CLAUSE = /\b(?:import|export)\s+(?:type\s+)?\{[^}]*\}/g;
+const forged = (text) => {
+  const names = [
+    "OwnWords",
+    ...(text.match(CLAUSE) ?? []).flatMap((c) =>
+      [...c.matchAll(/\bOwnWords\s+as\s+([\w$]+)/g)].map((m) => m[1].replaceAll("$", "\\$")),
+    ),
+  ];
+  return new RegExp(`\\bas\\s+(?:${names.join("|")})(?![\\w$])`).test(text.replace(CLAUSE, ""));
+};
+// A row written, changed, or removed through the query builder or as SQL: in any case, with the table's name quoted any way SQLite takes
+// or under its schema's name, and in any of the spellings of a write (insert or ignore, replace into, update or ignore, delete from).
+// Evidence is here too: an option's reconsider condition is evidence
+const TABLES = "(?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)";
+const AUTHORITY = new RegExp(
+  `(?:insertInto|updateTable|replaceInto|deleteFrom)\\s*\\(\\s*["'\`]${TABLES}["'\`]|\\b(?:(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into|update(?:\\s+or\\s+\\w+)?|delete\\s+from)\\s+(?:main\\s*\\.\\s*)?\\\\?["'\`[]?${TABLES}\\b`,
+  "i",
+);
+for (const f of sources) {
+  const text = code(fs.readFileSync(path.join(root, f), "utf8"));
+  if (f !== OWN_WORDS && forged(text))
+    fail.push(
+      `${f} casts a value to OwnWords or imports it under another name; only ${OWN_WORDS} makes one, by checking the words`,
+    );
+  if (!AUTHORITY_WRITERS.has(f) && AUTHORITY.test(text))
+    fail.push(
+      `${f} writes evidence, an adoption, a retraction, an anchor's reason, or a field definition; only ${[...AUTHORITY_WRITERS].join(" and ")} may, from an OwnWords`,
+    );
+}
+// If the patterns stopped matching, the check would pass while looking at nothing
+if (!sources.includes(OWN_WORDS) || !forged(code(fs.readFileSync(path.join(root, OWN_WORDS), "utf8"))))
+  fail.push(`${OWN_WORDS} makes no OwnWords where check-architecture.mjs looks; fix OWN_WORDS`);
+for (const f of AUTHORITY_WRITERS)
+  if (!sources.includes(f) || !AUTHORITY.test(code(fs.readFileSync(path.join(root, f), "utf8"))))
+    fail.push(`${f} writes no authority row where check-architecture.mjs looks; fix AUTHORITY_WRITERS`);
+
 if (fail.length) {
   console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
   process.exit(1);
 }
 console.log(`lifecycle writers: only ${RECONCILE} writes unit_state and unit_replacement`);
+console.log(
+  `authority rows: only ${[...AUTHORITY_WRITERS].join(" and ")} write them, from words ${OWN_WORDS} checked`,
+);
 console.log(
   `git starters: only ${[...GIT_STARTERS].join(" and ")} start git, among the ${SPAWNERS.size} modules that start processes`,
 );

@@ -16,6 +16,7 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
+import { locate, type OwnWords, ownWords, refused } from "./own-words.ts";
 import { inline } from "./panel.ts";
 import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
 import {
@@ -38,7 +39,6 @@ const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
 const FIELD_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 /** Sources are cited by the refs context prints (`s<id>`), never by URL or position the agent made up. */
 const SOURCE_REF = /^s[1-9][0-9]{0,15}$/;
-const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const Quote = z
@@ -173,8 +173,12 @@ type Planned = {
   /** Set by glean when nothing but the owner's present words backs the unit */
   unsourced?: boolean;
   evidence: EvidenceSpan[];
-  options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
-  adoption: (Span & { route: "owner_statement" | "explicit" | "agent" })[];
+  options: {
+    input: UnitInput["options"][number];
+    evidence: EvidenceSpan[];
+    reconsider: OwnWords<"owner_statement"> | null;
+  }[];
+  adoption: OwnWords<"owner_statement" | "explicit" | "agent">[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
   supersedes: number | null;
@@ -183,7 +187,7 @@ type Planned = {
 };
 
 type FieldType = (typeof FIELD_TYPES)[number];
-type PlannedDef = Span & Omit<z.infer<typeof FieldDef>, "quote">;
+type PlannedDef = OwnWords<"owner_statement"> & Omit<z.infer<typeof FieldDef>, "quote">;
 
 /** errors refuse the save; problems name parts left out or units that stay candidates or quarantined, and the save goes ahead. */
 export type Checked = {
@@ -197,45 +201,8 @@ export type Checked = {
   facts: RepoFacts;
 };
 
-/**
- * Whether every line the byte span [start, end) touches is quoted (starts with ">") or inside a fenced code block: words someone pasted, not
- * words their writer chose. A heuristic: a paste with no quote marks is not caught.
- */
-function quotedSpan(body: string, start: number, end: number): boolean {
-  const bytes = Buffer.from(body, "utf8");
-  let fenced = false;
-  let touched = false;
-  for (let at = 0; at <= bytes.length; ) {
-    const nl = bytes.indexOf(0x0a, at);
-    const stop = nl < 0 ? bytes.length : nl;
-    const line = bytes.subarray(at, stop).toString("utf8").trimStart();
-    const fence = /^(```|~~~)/.test(line);
-    if (stop >= start && at < end) {
-      touched = true;
-      if (!(fenced || fence || line.startsWith(">"))) return false;
-    }
-    if (fence) fenced = !fenced;
-    if (nl < 0) break;
-    at = nl + 1;
-  }
-  return touched;
-}
-
-/** Whether the byte span [start, end) sits right inside quotation marks on its line: words the writer reports, not words they chose */
-function inlineQuoted(body: string, start: number, end: number): boolean {
-  const bytes = Buffer.from(body, "utf8");
-  const before = bytes.subarray(0, start).toString("utf8").trimEnd().at(-1) ?? "";
-  const after = bytes.subarray(end).toString("utf8").trimStart()[0] ?? "";
-  // english-exempt: Japanese quotation brackets are quotation marks too
-  return /["“'‘`「『]/.test(before) && /["”'’`」』]/.test(after);
-}
-
-/** The byte span of quote in text, or null. The first occurrence is taken. */
-function locate(body: string, quote: string): [number, number] | null {
-  if (!quote.trim()) return null;
-  const at = Buffer.from(body, "utf8").indexOf(Buffer.from(quote, "utf8"));
-  return at < 0 ? null : [at, at + Buffer.byteLength(quote, "utf8")];
-}
+/** The byte span of a quote that holds words, or null: a quote of only white space cites nothing */
+const cited = (body: string, quote: string) => (quote.trim() ? locate(body, quote) : null);
 
 /**
  * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
@@ -414,21 +381,21 @@ export async function checkRecord(
     if (new Set(d.kinds).size !== d.kinds.length) errors.push(`${at}: kinds appear twice`);
     const s = sources.get(Number(d.quote.source.slice(1)));
     if (!s) continue;
-    // A field is the owner's choice of what to track: the AI proposing one is not a definition
-    if (s.author_kind !== "owner") {
+    // A field is the owner's choice of what to track: the AI proposing one, or words the owner passes on, is not a definition
+    const said = ownWords(s, d.quote.quote, "owner");
+    if (refused(said)) {
       errors.push(
-        `${at}: the quote must be the owner's; ${d.quote.source} is by ${s.author_login ?? s.author_kind}`,
+        said.refused === "author"
+          ? `${at}: the quote must be the owner's; ${d.quote.source} is by ${s.author_login ?? s.author_kind}`
+          : said.refused === "missing"
+            ? `${at}: quote not found in ${d.quote.source}: "${head(d.quote.quote, 80)}"`
+            : `${at}: the quote in ${d.quote.source} is quoted or in a code block, so it is someone else's words; quote the owner's own`,
       );
-      continue;
-    }
-    const span = locate(s.text, d.quote.quote);
-    if (!span) {
-      errors.push(`${at}: quote not found in ${d.quote.source}: "${head(d.quote.quote, 80)}"`);
       continue;
     }
     defined.set(d.name, { type: d.type, enum: d.enum ?? null, kinds: d.kinds });
     const { quote: _, ...rest } = d;
-    fieldDefs.push({ ...rest, source: s.id, start: span[0], end: span[1] });
+    fieldDefs.push({ ...rest, ...said });
   }
   const names = record.field_defs.map((d) => d.name);
   for (const n of new Set(names.filter((n, i) => names.indexOf(n) !== i)))
@@ -472,7 +439,7 @@ export async function checkRecord(
           );
           return [];
         }
-        const span = locate(s.text, e.quote);
+        const span = cited(s.text, e.quote);
         if (!span) {
           quarantine.push(`quote not found in ${e.source}: "${head(e.quote, 80)}"`);
           return [];
@@ -492,26 +459,23 @@ export async function checkRecord(
       });
     const evidence = spans(u.evidence);
     // Only the owner states a condition for reconsidering: the AI suggesting one, or someone else's words, is not the owner's condition
-    const reconsider = (o: UnitInput["options"][number]): Span | null => {
+    const reconsider = (o: UnitInput["options"][number]): OwnWords<"owner_statement"> | null => {
       const q = o.reconsider_quote;
       const s = q && sources.get(Number(q.source.slice(1)));
       if (!q || !s || o.reconsider_when === undefined) return null;
       cites.add(s.id);
-      if (s.author_kind !== "owner") {
-        errors.push(
-          `${key}: option "${head(o.text, 60)}": reconsider_quote must quote the owner; ${q.source} is by ${s.author_login ?? s.author_kind}`,
-        );
-        return null;
-      }
-      const span = locate(s.text, q.quote);
+      const said = ownWords(s, q.quote, "owner");
+      if (!refused(said)) return said;
+      const at = `${key}: option "${head(o.text, 60)}": reconsider_quote`;
       // Refused rather than quarantined: an optional condition whose words are not there should not hold back the record it sits on
-      if (!span) {
-        errors.push(
-          `${key}: option "${head(o.text, 60)}": reconsider_quote not found in ${q.source}: "${head(q.quote, 80)}"`,
-        );
-        return null;
-      }
-      return { source: s.id, start: span[0], end: span[1] };
+      errors.push(
+        said.refused === "author"
+          ? `${at} must quote the owner; ${q.source} is by ${s.author_login ?? s.author_kind}`
+          : said.refused === "missing"
+            ? `${at} not found in ${q.source}: "${head(q.quote, 80)}"`
+            : `${at} in ${q.source} is quoted or in a code block, so it is someone else's words; quote the owner's own`,
+      );
+      return null;
     };
     const options = u.options.map((o) => ({
       input: o,
@@ -531,16 +495,11 @@ export async function checkRecord(
     if (target.origin !== "trace" && (u.supersedes || u.conflicts.length)) {
       const trusted = [...u.evidence, ...u.adoption].some((q) => {
         const s = sources.get(Number(q.source.slice(1)));
-        return (
-          s &&
-          (s.kind === "session_message" ||
-            s.author_kind === "owner" ||
-            MAINTAINERS.has(s.author_association ?? ""))
-        );
+        return s !== undefined && !refused(ownWords(s, q.quote, "trusted"));
       });
       if (!trusted)
         errors.push(
-          `${key}: supersedes and conflicts from ${target.origin} need the owner's or a maintainer's words, or the owner's session`,
+          `${key}: supersedes and conflicts from ${target.origin} need the owner's or a maintainer's words, or the owner's session: words that are in the source, and not only a quotation there`,
         );
     }
 
@@ -553,40 +512,27 @@ export async function checkRecord(
         problems.push(`${key}: adoption applies to decisions and constraints; ${a.source} left out`);
         continue;
       }
-      if (s.kind === "pr_event") {
-        problems.push(
-          `${key}: the merge does not adopt a proposal (it only shows the code went in); cite the owner's or a maintainer's words`,
-        );
-        continue;
-      }
       // The AI's own reply adopts only for the AI, only in a run an interactive session began and saves; checked below with the anchors
-      const route =
-        s.author_kind === "owner"
-          ? "owner_statement"
-          : MAINTAINERS.has(s.author_association ?? "")
-            ? "explicit"
-            : s.author_kind === "assistant" && s.kind === "session_message" && target.agent
-              ? "agent"
-              : null;
-      if (!route) {
-        problems.push(
-          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
-        );
+      const words = ownWords(s, a.quote, "maintainer", target.agent);
+      if (refused(words)) {
+        if (words.refused === "event")
+          problems.push(
+            `${key}: the merge does not adopt a proposal (it only shows the code went in); cite the owner's or a maintainer's words`,
+          );
+        else if (words.refused === "author")
+          problems.push(
+            `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
+          );
+        else if (words.refused === "missing")
+          quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
+        // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
+        else
+          problems.push(
+            `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
+          );
         continue;
       }
-      const span = locate(s.text, a.quote);
-      if (!span) {
-        quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
-        continue;
-      }
-      // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
-      if (quotedSpan(s.text, span[0], span[1]) || inlineQuoted(s.text, span[0], span[1])) {
-        problems.push(
-          `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
-        );
-        continue;
-      }
-      adoption.push({ source: s.id, start: span[0], end: span[1], route });
+      adoption.push(words);
     }
 
     const anchors: Planned["anchors"] = [];
@@ -726,7 +672,7 @@ export async function checkRecord(
       const s = sources.get(Number(f.quote.source.slice(1)));
       if (!s) continue;
       cites.add(s.id);
-      const span = locate(s.text, f.quote.quote);
+      const span = cited(s.text, f.quote.quote);
       // Refused rather than quarantined: a value nobody said should not be kept, and should not hold back the record either
       if (!span) {
         errors.push(`${at}: quote not found in ${f.quote.source}: "${head(f.quote.quote, 80)}"`);

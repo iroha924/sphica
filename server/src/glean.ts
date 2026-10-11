@@ -11,6 +11,7 @@ import type { DB } from "./db-types.ts";
 import { blobBytes, blobSize, commitOf, treeEntry } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
+import { locate, type OwnWords, ownWords, refused } from "./own-words.ts";
 import { inline } from "./panel.ts";
 import type { Hint } from "./reconcile.ts";
 import {
@@ -37,7 +38,6 @@ import { bytes, head, mask, privateKeyRanges, quoteSpan, sha256 } from "./text.t
 
 /** Files larger than this are not excerpted (a generated file or a data dump is not a statement). */
 const MAX_FILE = 1024 * 1024;
-const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 const SOURCE_REF = z.string().regex(/^s[1-9][0-9]{0,15}$/, "cite a source ref such as s12");
 const unit = z.string().min(1).max(200);
@@ -215,16 +215,13 @@ function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
   return { path: p, commit, blob, size, lines: [a, b], raw, text };
 }
 
-const locate = (body: string, q: string): [number, number] | null => {
-  const at = Buffer.from(body, "utf8").indexOf(Buffer.from(q, "utf8"));
-  return at < 0 ? null : [at, at + Buffer.byteLength(q, "utf8")];
-};
-
 type Planned = {
   input: OpInput;
   unitId: number;
   lifecycle: string;
   excerpt: Excerpt | null;
+  /** The words that give the operation its authority: the adoption, or the reason for moving, retiring, retracting, withdrawing, resolving */
+  said: OwnWords<"owner_statement" | "explicit" | "agent"> | null;
   /** The span a retraction removes */
   retracts: [number, number] | null;
   /** The live anchor a replacement retires */
@@ -348,6 +345,26 @@ export async function checkGlean(
     }
     return { s, at };
   };
+  // Words that carry authority: found in the source, by a writer who may speak here, and not only a quotation
+  const own = async (ref: string, q: string, policy: "owner" | "maintainer", what: string, who: string) => {
+    const s = await source(ref);
+    if (!s) {
+      errors.push(`${what}: ${ref} is not a source of this project`);
+      return null;
+    }
+    const words = policy === "owner" ? ownWords(s, q, "owner") : ownWords(s, q, "maintainer");
+    if (!refused(words)) return words;
+    errors.push(
+      words.refused === "missing"
+        ? `${what}: quote not found in ${ref}: "${head(q, 80)}"`
+        : words.refused === "event"
+          ? `${what}: the merge does not adopt a proposal`
+          : words.refused === "author"
+            ? `${what}: ${who}`
+            : `${what}: the quote in ${ref} is quoted or in a code block, so it is someone else's words; quote the writer's own`,
+    );
+    return null;
+  };
   // Anchors an operation in this batch replaces, and which operation: a second replacement would leave both new anchors live
   const replaced = new Map<number, number>();
   // Anchors an operation in this batch retires; retirements run before every replacement and every new anchor
@@ -392,6 +409,7 @@ export async function checkGlean(
       continue;
     }
     let excerpt: Excerpt | null = null;
+    let said: Planned["said"] = null;
     if (op.op === "add_evidence") {
       if (!op.source === !op.file) errors.push(`${what}: cite either a source or a file`);
       else if (op.file) {
@@ -427,10 +445,7 @@ export async function checkGlean(
     if (op.op === "adopt") {
       if (!["decision", "constraint"].includes(u.kind))
         errors.push(`${what}: adoption applies to decisions and constraints`);
-      const got = await span(op.source, op.quote, what);
-      if (got && got.s.kind === "pr_event") errors.push(`${what}: the merge does not adopt a proposal`);
-      else if (got && got.s.author_kind !== "owner" && !MAINTAINERS.has(got.s.author_association ?? ""))
-        errors.push(`${what}: only the owner or a maintainer can adopt`);
+      said = await own(op.source, op.quote, "maintainer", what, "only the owner or a maintainer can adopt");
     }
     if (op.op === "anchor" && !repoPath(op.path))
       errors.push(`${what}: the path is not inside the repository`);
@@ -450,11 +465,13 @@ export async function checkGlean(
       if (op.op === "replace_anchor" && !repoPath(op.to.path))
         errors.push(`${what}: the path is not inside the repository`);
       // Moving or retiring a location redirects where the record is delivered, so third-party text cannot do it
-      const said = await span(op.source, op.quote, what);
-      if (said && said.s.author_kind !== "owner")
-        errors.push(
-          `${what}: only the owner's words can ${op.op === "retire_anchor" ? "retire" : "move"} an anchor`,
-        );
+      said = await own(
+        op.source,
+        op.quote,
+        "owner",
+        what,
+        `only the owner's words can ${op.op === "retire_anchor" ? "retire" : "move"} an anchor`,
+      );
       const from = repoPath(op.from.path);
       if (!from) errors.push(`${what}: the from path is not inside the repository`);
       else {
@@ -544,9 +561,13 @@ export async function checkGlean(
       op.op === "withdraw" ||
       op.op === "resolve_conflict"
     ) {
-      const got = await span(op.reason_source, op.reason_quote, what);
-      if (got && got.s.author_kind !== "owner")
-        errors.push(`${what}: only the owner's words can retract, withdraw, or resolve`);
+      said = await own(
+        op.reason_source,
+        op.reason_quote,
+        "owner",
+        what,
+        "only the owner's words can retract, withdraw, or resolve",
+      );
     }
     // A superseded record is no longer the live answer: only its successors' withdrawal brings it back, and nothing else moves it
     if (op.op === "withdraw") {
@@ -610,6 +631,7 @@ export async function checkGlean(
       unitId: u.id,
       lifecycle: u.lifecycle,
       excerpt,
+      said,
       retracts,
       replaces,
       retires,
@@ -731,14 +753,10 @@ export async function saveGlean(
   const units = await saveRecord(trx, target, runId, c.units, [], { settle: false });
   const now = iso(Date.now());
   const changed: string[] = [];
-  const spanOf = async (ref: string, q: string) => {
-    const s = await trx
-      .selectFrom("source")
-      .select(["id", "text"])
-      .where("id", "=", Number(ref.slice(1)))
-      .executeTakeFirstOrThrow();
-    const at = locate(s.text, q) ?? [0, 0];
-    return { id: s.id, start: at[0], end: at[1] };
+  // checkGlean leaves no errors only when every operation that needs words has them
+  const saidOf = (p: Planned) => {
+    if (!p.said) throw new Error(`${p.input.op} ${p.input.unit}: saved without checked words`);
+    return p.said;
   };
   const touched = new Map<number, string>();
   const withdraw = new Map<number, Hint>();
@@ -753,14 +771,13 @@ export async function saveGlean(
     ...c.ops.filter((p) => !moves.includes(p.input.op)),
   ];
   // The owner's words that retired or moved an anchor, kept with it
-  const reason = async (anchorId: number | null, ref: string, q: string) => {
-    const s = await spanOf(ref, q);
+  const reason = async (anchorId: number | null, s: OwnWords) => {
     await trx
       .insertInto("unit_anchor_retirement")
       .values({
         anchor_id: anchorId ?? -1,
         run_id: runId,
-        source_id: s.id,
+        source_id: s.source,
         span_start: s.start,
         span_end: s.end,
         added_at: now,
@@ -797,18 +814,13 @@ export async function saveGlean(
         .execute();
       changed.push(`${op.unit}: evidence added`);
     } else if (op.op === "adopt") {
-      const s = await spanOf(op.source, op.quote);
-      const author = await trx
-        .selectFrom("source")
-        .select("author_kind")
-        .where("id", "=", s.id)
-        .executeTakeFirstOrThrow();
+      const s = saidOf(p);
       await trx
         .insertInto("unit_adoption")
         .values({
           unit_id: p.unitId,
-          route: author.author_kind === "owner" ? "owner_statement" : "explicit",
-          source_id: s.id,
+          route: s.route,
+          source_id: s.source,
           span_start: s.start,
           span_end: s.end,
           run_id: runId,
@@ -860,7 +872,7 @@ export async function saveGlean(
           .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
           .execute();
-        await reason(p.replaces, op.source, op.quote);
+        await reason(p.replaces, saidOf(p));
       }
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
     } else if (op.op === "retire_anchor") {
@@ -870,7 +882,7 @@ export async function saveGlean(
         .where("id", "=", p.retires ?? -1)
         .where("retired_at", "is", null)
         .execute();
-      await reason(p.retires, op.source, op.quote);
+      await reason(p.retires, saidOf(p));
       changed.push(`${op.unit}: anchor retired`);
     } else if (op.op === "replace_aliases") {
       const { content_hash } = await trx
@@ -890,11 +902,11 @@ export async function saveGlean(
         .execute();
       changed.push(`${op.unit}: aliases ${p.aliases?.length ? "replaced" : "cleared"}`);
     } else {
-      const reason = await spanOf(op.reason_source, op.reason_quote);
+      const reason = saidOf(p);
       const retraction = {
         retracted_at: now,
         retraction_reason: op.reason_quote,
-        retraction_source_id: reason.id,
+        retraction_source_id: reason.source,
         retraction_span_start: reason.start,
         retraction_span_end: reason.end,
       };
@@ -907,7 +919,7 @@ export async function saveGlean(
           .executeTakeFirstOrThrow();
         await trx
           .updateTable("unit_link")
-          .set({ resolved_at: now, resolution: `${head(op.reason_quote, 400)} (s${reason.id})` })
+          .set({ resolved_at: now, resolution: `${head(op.reason_quote, 400)} (s${reason.source})` })
           .where("kind", "=", "conflicts")
           .where("resolved_at", "is", null)
           .where((eb) =>
@@ -922,7 +934,7 @@ export async function saveGlean(
       }
       if (op.op === "withdraw") {
         // Written by reconcile with the batch's other changes: one a record of this save replaces needs no withdrawal
-        withdraw.set(p.unitId, { reason: `withdrawn: ${head(op.reason_quote, 200)}`, source: reason.id });
+        withdraw.set(p.unitId, { reason: `withdrawn: ${head(op.reason_quote, 200)}`, source: reason.source });
         continue;
       }
       const table = op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption";

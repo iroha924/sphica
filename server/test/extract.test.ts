@@ -1732,9 +1732,15 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       /glean:storage-4 already has a successor, glean:storage-6 \(in effect\); withdraw it first, or supersede it instead/,
     );
     assert.equal(state("glean:storage-5"), "candidate");
-    // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place
+    // A successor whose adoption quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place.
+    // Its evidence is there: a link from glean rests on words that are in the source
     await glean({
-      units: [decided("cache-q", said, "引用に無い言葉。", { supersedes: "trace:ext-s1/cache" })],
+      units: [
+        decided("cache-q", said, "Postgres にする。", {
+          adoption: [{ source: `s${said}`, quote: "引用に無い言葉。" }],
+          supersedes: "trace:ext-s1/cache",
+        }),
+      ],
     });
     assert.equal(
       db.owner.prepare("select extraction from unit where key = 'glean:cache-q'").get()?.extraction,
@@ -1748,7 +1754,10 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
     await glean({
       units: [
         decided("storage-9", said, "Postgres にする。", { supersedes: "glean:cache-2" }),
-        decided("storage-8", said, "また別の引用に無い言葉。", { supersedes: "glean:cache-2" }),
+        decided("storage-8", said, "Postgres にする。", {
+          adoption: [{ source: `s${said}`, quote: "また別の引用に無い言葉。" }],
+          supersedes: "glean:cache-2",
+        }),
       ],
     });
     assert.deepEqual([state("glean:storage-8"), state("glean:storage-9")], ["candidate", "active"]);
@@ -2281,7 +2290,8 @@ test("glean: the owner's words retire an anchor with nothing in its place, keep 
     };
     const c = await checkGlean(db.ingest, target, { ops: [retire({ path: "docs/note.md" })] });
     assert.deepEqual(c.errors, []);
-    Object.assign(c.ops[0]?.input ?? {}, { source: `s${reply}` });
+    // The save writes the words the check passed, not the input: forging those words past the types still meets the schema
+    Object.assign(c.ops[0] ?? {}, { said: { ...c.ops[0]?.said, source: reply } });
     await assert.rejects(
       inTransaction(db.ingest, (trx) => saveGlean(trx, target, runId, c)),
       /only the owner's words retire an anchor/,

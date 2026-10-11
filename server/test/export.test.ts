@@ -217,7 +217,8 @@ test("a quote spanning lines keeps its line breaks inside the fence", async () =
     const p = project(db);
     const text = "Use:\n  bun test\n```\nDecided.";
     const m = message(db, p, { id: "m1", text });
-    await save(db, p, [decision(m, text, "cmd")]);
+    // The evidence runs into the fence; the adoption is the owner's line before it, since words in a fence adopt nothing
+    await save(db, p, [decision(m, text, "cmd", { adoption: [{ source: `s${m}`, quote: "Use:" }] })]);
     const doc = await exported(db, p, ["trace:ext-s1/cmd"]);
     assert.match(doc, /\(states\): "Use:\n {6} {2}bun test\n {6}```\n {6}Decided\."/);
     assert.deepEqual(
