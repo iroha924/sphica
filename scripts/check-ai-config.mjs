@@ -6,7 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { withoutComments } from "./lib/english.mjs";
-import { settingsProblems } from "./lib/fork-intake.mjs";
+import { readerProblems, settingsProblems } from "./lib/fork-intake.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -502,7 +502,13 @@ const settingsText = read(settingsFile);
 if (fs.existsSync(path.join(root, settingsFile)))
   for (const problem of settingsProblems(settingsText)) fail(`${settingsFile}: ${problem}`);
 
-// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are not Agent definitions but
+// The agent that reads a fork's text for this session holds read tools only
+const readerFile = ".claude/agents/fork-reader.md";
+const readerText = read(readerFile);
+if (fs.existsSync(path.join(root, readerFile)))
+  for (const problem of readerProblems(readerText)) fail(`${readerFile}: ${problem}`);
+
+// Checks the repository-only agents (.claude/agents). Shipped reviewers are not Agent definitions but
 // the bodies in plugin/skills/review/reviewers/, which have no frontmatter
 // (check-pairs.mjs checks those).
 const agentDirectories = [".claude/agents"];
