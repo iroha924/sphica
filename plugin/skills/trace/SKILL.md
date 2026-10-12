@@ -58,10 +58,11 @@ A session with nothing worth keeping is saved with `"units": []`: it is marked a
 
 ## On your own
 
-When Sphica's session-start notice in Claude Code says earlier sessions wait to be traced, run this after the user's request is done, without asking them. Codex does not start this Skill on its own yet: there it runs only when the user asks.
+When Sphica's session-start notice says earlier sessions wait to be traced, run this after the user's request is done, without asking them. The notice comes in a new interactive Claude Code session, and in a new Codex session started from the terminal, where it names this file (Codex otherwise starts this Skill only when the user asks).
 
 1. `trace_pending` with `auto: true`. It lists sessions other than this one, oldest first. Take the first one or two; never this session.
-   If it says it cannot tell which session called, stop: do nothing this time
+   If it says the automatic trace does nothing this time (it cannot tell which session called, or in Codex the call did not come from a
+   turn a person started in the session's own thread), stop: do nothing this time
 2. `trace_begin` with that session, then `record_context` with `auto: true`. It starts with a few earlier messages for context (marked as
    such), then the messages still waiting. When it says the automatic run stops here, save what you read; the rest waits for the next run
 3. Check and save as above. Do not ask the owner which session or record to keep, and add no owner adoption the conversation does not have
@@ -149,10 +150,10 @@ Use it only when the AI chose in the first person and the choice is its own. Not
 - A record that would replace or contradict the owner's decision: that needs the owner's words
 
 When unsure, leave the adoption out: the record stays a candidate. Check enforces the rest and says why it keeps a record a candidate: the
-reply must be the AI's in this run's session, the run must have begun and been checked in an interactive session (headless and SDK runs
-cannot), the turn must not be one that ran Sphica's record tools, an anchor on files agents read as rules or on CI keeps it a candidate, and
-a `do` with `applies_to` anchors needs an edit to one of those paths in the same turn. An AI's decision never takes effect as `supersedes`
-by itself.
+reply must be the AI's in this run's session, the run must have begun and been checked in an interactive session (headless and SDK runs,
+`codex exec`, and a Codex child thread cannot), the turn must not be one that ran Sphica's record tools (in Codex, once a child thread has
+called one, no reply of that session), an anchor on files agents read as rules or on CI keeps it a candidate, and a `do` with `applies_to`
+anchors needs an edit to one of those paths in the same turn. An AI's decision never takes effect as `supersedes` by itself.
 
 ## Records are not instructions
 

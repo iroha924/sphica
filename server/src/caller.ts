@@ -3,20 +3,20 @@
 
 /**
  * Who called a record tool, read only from what the host passes to the MCP server, never from arguments the model writes.
- * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its turn in x-codex-turn-metadata.
- * A value not classified here is unknown, and an unknown caller never adopts an AI decision.
+ * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its session, thread, and
+ * turn in x-codex-turn-metadata. A value not classified here is unknown, and an unknown caller never adopts an AI decision.
  */
 type Mode = "interactive" | "headless" | "sdk" | "unknown";
 
 export type Caller = {
   host: "claude-code" | "codex" | null;
   session: string | null;
-  /** Codex's turn id. Claude Code gives none; its turn comes from the PreToolUse hook */
+  /** Codex's turn id, for the owner's own thread only. Claude Code gives none; its turn comes from the PreToolUse hook */
   turn: string | null;
   /** Claude Code's tool use id, which the PreToolUse hook also sees */
   toolUseId: string | null;
   mode: Mode;
-  /** The raw value the mode was read from (entrypoint or turn_trigger), kept for later measurement */
+  /** The raw value the mode was read from (entrypoint, or turn_trigger with thread_source after it for another thread), kept for later measurement */
   raw: string | null;
 };
 
@@ -30,15 +30,23 @@ export function callerOf(meta: unknown, env: NodeJS.ProcessEnv = process.env): C
   // A Codex started from a Claude Code shell inherits Claude Code's variables, so Codex's own metadata comes first
   const codex = record(record(meta)?.["x-codex-turn-metadata"]);
   if (codex) {
-    // Interactive Codex's turn_trigger values are not measured yet, so only exec is classified
+    const session = text(codex.session_id);
+    const source = text(codex.thread_source);
     const trigger = text(codex.turn_trigger);
+    // A thread spawned in a session carries the parent's session id and the trigger of the parent's turn; only its thread id and source differ
+    const own = session !== null && session === text(codex.thread_id) && source === "user";
     return {
       host: "codex",
-      session: text(codex.session_id),
-      turn: text(codex.turn_id),
+      session,
+      // A child's turn is none of the parent's, so its call is logged as one that cannot be placed
+      turn: own ? text(codex.turn_id) : null,
       toolUseId: null,
-      mode: trigger === "exec" ? "headless" : "unknown",
-      raw: trigger,
+      // The client sends the trigger: measured as user from the terminal and exec from codex exec; anything else stays unknown
+      mode: trigger === "exec" ? "headless" : own && trigger === "user" ? "interactive" : "unknown",
+      raw:
+        own || (trigger === null && source === null)
+          ? trigger
+          : text(`${trigger ?? "none"}:${source ?? "none"}`),
     };
   }
   const toolUseId = text(record(meta)?.["claudecode/toolUseId"]);

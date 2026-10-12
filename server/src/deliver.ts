@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
@@ -815,20 +816,74 @@ function rotateTrial(dir: string, file: string): void {
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
 const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
 
-/** Sphica's own words asking the agent to trace on its own, never taken from a record */
-export const AUTO_TRACE = (n: number) =>
-  `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, run the trace Skill on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
+/**
+ * Sphica's own words asking the agent to trace on its own, never taken from a record. Codex lists the trace Skill only for the user's
+ * `$sphica:trace`, so there the notice names the Skill's file
+ */
+export const AUTO_TRACE = (n: number, skill?: string) =>
+  `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, ${skill ? `read \`${skill}\` and run it` : "run the trace Skill"} on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
+
+/** How far into a Codex session log its first line is looked for; the line holds the session's instructions and ran to 23 KB when measured */
+const SESSION_META_BYTES = 256 * 1024;
+
+/**
+ * Whether a Codex session's log says a person started it in the terminal, in the session's own thread. Hook input and the hook's
+ * environment are the same for `codex exec`, and the log's first line is there by the time the session-start hook runs (Codex 0.162.1).
+ * Anything unreadable or unseen (another client, a child thread, another session's log) is not interactive.
+ */
+export function codexInteractive(input: Pick<HookInput, "session_id" | "transcript_path">): boolean {
+  const file = input.transcript_path;
+  if (!input.session_id || typeof file !== "string" || !path.isAbsolute(file)) return false;
+  let fd: number | undefined;
+  try {
+    // A regular file only: a FIFO would block the hook
+    if (!fs.lstatSync(file).isFile()) return false;
+    fd = fs.openSync(file, "r");
+    const buffer = Buffer.alloc(SESSION_META_BYTES);
+    const read = fs.readSync(fd, buffer, 0, SESSION_META_BYTES, 0);
+    const end = buffer.subarray(0, read).indexOf(0x0a);
+    if (end < 0) return false;
+    // Anything but an object with an object payload has none of these fields
+    const line = JSON.parse(buffer.subarray(0, end).toString("utf8")) as {
+      type?: unknown;
+      payload?: Record<string, unknown> | null;
+    } | null;
+    const payload = line?.payload;
+    return (
+      line?.type === "session_meta" &&
+      payload?.id === input.session_id &&
+      payload.originator === "codex-tui" &&
+      payload.thread_source === "user"
+    );
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/** A path the notice can name as it is, between backticks: nothing that would end them or break the notice's one line, and short enough to be read whole */
+export const namable = (file: string): string | null =>
+  Buffer.byteLength(file) <= 1000 && !/[\p{Cc}`]/u.test(file) ? file : null;
+
+/** The trace Skill's file beside this script: the bundle runs from <root>/dist, the source from server/src */
+export function traceSkill(here = path.dirname(fileURLToPath(import.meta.url))): string | null {
+  const file = [path.join(here, ".."), path.join(here, "..", "..", "plugin")]
+    .map((root) => path.join(root, "skills", "trace", "SKILL.md"))
+    .find((f) => fs.existsSync(f));
+  return file ? namable(file) : null;
+}
 
 /**
  * Records grow only when sessions are traced, so session start says when sessions wait, in the owner's own sessions only (a headless run
- * would use up the notice). A new interactive Claude Code session asks the agent to trace on its own, once per session; anywhere else
- * (Codex, whose interactive turns are not measured yet, a resumed session, an unknown start) it asks the owner to, at most once a local
- * day per database and project. A mark that cannot be written shows it again.
+ * would use up the notice). A new interactive session (Claude Code's cli, or a Codex session the terminal started) asks the agent to
+ * trace on its own, once per session; anywhere else (a resumed session, an unknown start, a client not measured) it asks the owner to,
+ * at most once a local day per database and project. A mark that cannot be written shows it again.
  */
 async function waiting(
   db: Reads,
   projectId: number,
-  place: { file: string; key: string; host: Host; owner: boolean; auto: string | null },
+  place: { file: string; key: string; host: Host; owner: boolean; auto: string | null; skill?: string },
 ): Promise<string> {
   if (!place.owner) return "";
   if (place.auto !== null) {
@@ -839,7 +894,7 @@ async function waiting(
     if (!total) return "";
     if (!markOnce("auto-trace", `${path.resolve(place.file)}\0${place.key}\0${place.host}\0${place.auto}`))
       return "";
-    return AUTO_TRACE(total);
+    return AUTO_TRACE(total, place.skill);
   }
   const n = (await pendingCount(db, projectId)).recent;
   if (!n) return "";
@@ -854,7 +909,15 @@ async function atStart(
   db: Reads,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean; auto: string | null },
+  place: {
+    file: string;
+    key: string;
+    host: Host;
+    owner: boolean;
+    subagent: boolean;
+    auto: string | null;
+    skill?: string;
+  },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -1302,6 +1365,17 @@ export async function deliver(
     }
     const reader = db;
     const session = input.session_id;
+    // Either the plugin's auto_trace setting or the environment variable turning it off keeps the automatic trace off
+    const asksToTrace =
+      name === "SessionStart" &&
+      input.source === "startup" &&
+      ![process.env.CLAUDE_PLUGIN_OPTION_AUTO_TRACE, process.env.SPHICA_AUTO_TRACE].some((v) =>
+        AUTO_TRACE_OFF.has((v ?? "").trim().toLowerCase()),
+      );
+    // Codex is asked only when the notice can name the Skill's file
+    const skill = asksToTrace && host === "codex" && codexInteractive(input) ? traceSkill() : null;
+    const newInteractive =
+      asksToTrace && (host === "claude-code" ? process.env.CLAUDE_CODE_ENTRYPOINT === "cli" : skill !== null);
     const make = async (): Promise<Plan> =>
       event === "pre_edit"
         ? await beforeEdit(reader, pid, rels)
@@ -1324,19 +1398,10 @@ export async function deliver(
                     key: place.key,
                     host,
                     subagent: name === "SubagentStart",
-                    // Only a new interactive Claude Code session: a resumed one (even when it compacts later), a start that does not say
+                    // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
                     // how it started, or a headless, SDK, or unknown one never traces on its own
-                    auto:
-                      host === "claude-code" &&
-                      name === "SessionStart" &&
-                      input.source === "startup" &&
-                      process.env.CLAUDE_CODE_ENTRYPOINT === "cli" &&
-                      // Either the plugin's auto_trace setting or the environment variable turning it off keeps it off
-                      ![process.env.CLAUDE_PLUGIN_OPTION_AUTO_TRACE, process.env.SPHICA_AUTO_TRACE].some(
-                        (v) => AUTO_TRACE_OFF.has((v ?? "").trim().toLowerCase()),
-                      )
-                        ? session
-                        : null,
+                    auto: newInteractive ? session : null,
+                    ...(skill ? { skill } : {}),
                     // A subagent's start is never the owner's, even when the host leaves out its agent id
                     owner:
                       name !== "SubagentStart" &&

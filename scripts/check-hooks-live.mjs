@@ -445,12 +445,33 @@ await withTempDir(async (dir) => {
       });
       if (!queuedOrSent(marker))
         fail(`Codex UserPromptSubmit through ${tag} queued nothing with this case's prompt`);
+      // A log as the terminal writes its first line: this new session is asked to trace, and is told where the packed Skill is
+      const log = path.join(dir, `rollout-${session}.jsonl`);
+      fs.writeFileSync(
+        log,
+        `${JSON.stringify({ type: "session_meta", payload: { id: session, originator: "codex-tui", thread_source: "user" } })}\n`,
+      );
+      let asked = "";
       for (const [event, input] of Object.entries(inputs))
         (codexHooks[event] ?? [])
           .flatMap((g) => g.hooks)
           .forEach((h, i) => {
-            check(event, i, run(event, h, input));
+            const result = run(
+              event,
+              h,
+              event === "SessionStart" ? { ...input, transcript_path: log } : input,
+            );
+            check(event, i, result);
+            if (event === "SessionStart") asked += result.stdout ?? "";
           });
+      const skill = path.join(at, "skills", "trace", "SKILL.md");
+      // JSON in the hook's output escapes the path, so it is looked for as JSON writes it; a root with a backtick cannot be named
+      const named = asked.includes(JSON.stringify(`read \`${skill}\` and run it`).slice(1, -1));
+      if (named === at.includes("`"))
+        fail(
+          `Codex SessionStart through ${tag} ${named ? "named a Skill path holding a backtick" : "did not name the packed trace Skill"}`,
+          asked,
+        );
     }
   }
   const expected =
