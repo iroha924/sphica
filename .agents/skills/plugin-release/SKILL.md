@@ -98,8 +98,8 @@ Once, before the first release, the owner sets these up in the web UI (without t
   2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
 
 3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run). Keep main merged into the PR branch
-   (if main has moved ahead, the tree CI checked and the tag's tree do not match). The owner checks the Codex review of the last head and shares its findings;
-   fix or decline each and resolve every thread before tagging
+   (if main has moved ahead, the tree CI checked and the tag's tree do not match). Read the Codex review of the last head on the PR;
+   fix or decline each finding and resolve every thread before tagging
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
    Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
