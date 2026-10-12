@@ -225,6 +225,20 @@ export async function sessionEdits(db: Reads, sessionId: string) {
     .execute();
 }
 
+/** A project's work items as a trace writes them: every one still open, and the newest few that were closed, each newest first */
+export async function workItems(db: Reads, projectId: number, closed = 10) {
+  const items = db
+    .selectFrom("work")
+    .where("project_id", "=", projectId)
+    .select(["key", "title", "goal", "current", "next", "status", "updated_at"])
+    .orderBy("updated_at", "desc")
+    .orderBy("id", "desc");
+  return {
+    open: await items.where("status", "in", ["active", "blocked", "paused"]).execute(),
+    closed: await items.where("status", "in", ["done", "abandoned"]).limit(closed).execute(),
+  };
+}
+
 /** Active and candidate records of the project, newest first: what a new record may supersede or conflict with. */
 export async function liveUnits(db: Reads, projectId: number, limit = 40) {
   return db

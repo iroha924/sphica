@@ -36,9 +36,9 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
    them, but they can still be traced. Trace one session at a time
 2. **Begin**: `trace_begin` with that `session`. It returns a `run` id bound to that session and this project; the record never names them
 3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
-   the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.
+   the edits observed, the work items there are, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.
    It comes in pages: when a page's last line says `call record_context with after: "..."`, call it again with that `after`, exactly as written
-   (`s<N>` while messages follow, then `t<id>.<line>` while the edits, fields, and live records go on), until a page names no `after`.
+   (`s<N>` while messages follow, then `t<id>.<line>` while the edits, fields, work items, and live records go on), until a page names no `after`.
    A message too long for a page ends with `(cut here; read s<N>@<byte> for the rest)`: read on with `read` when what it says matters.
    Saving marks as looked at only the messages you were shown and those you quote; the rest stay pending.
    Use `search` and `read` to look at older records this session may replace
@@ -91,9 +91,14 @@ When Sphica's session-start notice in Claude Code says earlier sessions wait to 
       "aliases": ["database", "storage", "SQLite", "Postgres", "server", "persistence", "..."]
     }
   ],
-  "work": { "key": "storage", "title": "Pick the storage", "goal": "One file per user", "current": "Decided", "next": [], "status": "done" }
+  "work": [
+    { "key": "storage", "current": "Decided", "next": [], "status": "done" },
+    { "key": "csv-export", "title": "Rework the export", "goal": "Notes never leave in a CSV", "current": "Not started", "next": ["List the columns"], "status": "active" }
+  ]
 }
 ```
+
+In this example `storage` is a work item context already lists, so only what changed is given; `csv-export` is new and gives every field.
 
 <!-- english-exempt: the aliases example has to show Japanese words -->
 The `"..."` stands for the other language's words: in this example, `"データベース", "保存先", "DB サーバー", "永続化"`.
@@ -112,11 +117,15 @@ The `"..."` stands for the other language's words: in this example, `"データ�
 | `supersedes` | The key of a live record this one replaces (context lists them). The old one is marked superseded, never deleted |
 | `conflicts` | Keys of live records this one contradicts without replacing them. Until resolved, both are held back from automatic injection, except the owner's decision, which only another record the owner adopted holds back |
 | `answers` | Keys of open questions (context lists them) this record answers, up to 5. Each is closed, withdrawn with this record named as the reason, once this record is active; a decision or constraint also needs the owner's or a maintainer's adoption, so an AI's own decision closes none. Only for a record that settles the question, never a proposal or something merely related. A closed question does not come back: save a new question if it is still open. Not on a question: one question replaces another with `supersedes` |
-| `work` | The current work status, optional. The same `key` updates it |
+| `work` | Work items, optional: one, or a list of up to 10. Context lists the ones there are. For work it lists, reuse its `key` and give only the fields that change (`title`, `goal`, `current`, `next`, `status`): a field left out keeps what is saved, and `next: []` clears the next steps. A new key gives `title`, `goal`, `current`, and `status`. Finished work is `done`; work given up, or opened twice under two keys, is `abandoned`. Change only what the conversation shows: a similar title is no reason to close an item or fold two together. Save says what became of each: created, updated, confirmed with nothing changed, or left as it is because a newer session's trace already wrote it |
 | `field_defs` | Top level, beside `units`. Only when the owner said in this session to keep a field on records: `name` (a lowercase letter, then lowercase letters, digits, `_`; at most 40), `type` (`text`, `enum`, `integer`, `date`), `label`, `description`, `enum` (1 to 30 distinct allowed values, only for `enum`), `kinds` (the unit kinds it applies to; empty means every kind), and `quote` of **the owner's** words defining it (their own, not a quotation inside their message). A field context already lists cannot be defined again |
 | `fields` | On a unit, only for fields context lists or this record's `field_defs` defines: `name`, `value`, and `quote` of the words that say it. The value must be written in the quote as it is: an `integer` whole (not the `95` of `p95`, not the `1` of `1.5` or `1,000`; `1,000` is `1000`), a `date` as `YYYY-MM-DD`, an `enum` value exactly, and a date or enum value on its own (not the `no` of `not`). When no message says the value, leave the field out; never infer one |
 
 A field value that breaks these rules refuses the whole save, like a `reconsider_quote` not found: fix it or leave the field out.
+
+When check or save refuses `answers` as an unknown key, a `work` list as not an object, or a work item whose key is already there for leaving
+out a field, the record server is older than this Skill. Do not drop them and save without: ask the owner to reload it (`/reload-plugins` in Claude Code; reopen Codex), then
+begin again, read context, and save.
 
 What becomes active: a decision or constraint with evidence and adoption (the owner's words, or the AI's own decision under the rules below); an implementation with code or commit evidence
 (an `evidence` anchor on a path this session edited counts); a finding, dead end, or question with evidence. Everything else stays a candidate,

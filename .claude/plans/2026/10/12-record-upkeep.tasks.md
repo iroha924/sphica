@@ -72,27 +72,34 @@ trace の保存 1 回で複数の作業状況を直せて、閉じるだけの�
   - コミット: `feat(record): take partial work updates, and say an answered older question once`
   - 結果: 実装の前（a1f4a46b）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^work: an item" test/record.test.ts` → 2 件とも `work.0.title: Invalid input: expected string, received undefined` などで失敗。受け入れケース status-09 も `record.ts` を戻した状態で同じ理由の失敗を確かめた。実装の後に `--test-name-pattern="^work:|^answers:|work state|session's branch"` → 18 pass（`{ key, status }` で題・goal・current・next が保たれる、`next` の省略は保持で `next: []` は消去、新しいキーは 4 項目のどれが欠けても断る、`key` だけは行を変えずに notes に出る、同じ内容の更新は `run_id` だけ進んで `updated_at` と `branch` は変わらず `confirmed, nothing changed` と出る、その後に届いた 10/5 のセッションの更新は省かれる）。T03 のテストのうち、status が欠けた項目のエラーを見ていた 2 行は、status を省けるようになったので、不正な値（`nearly`）で場所と項目が出ることを見る形に直した。`test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 137 件）
 
-- [ ] T05: trace の context に、開いた作業状況と、閉じた作業状況の直近 10 件を出す
+- [x] T05: trace の context に、開いた作業状況と、閉じた作業状況の直近 10 件を出す
   - 種別: 追加
   - 計画: S6
   - 依存: T04（見出しが「変える項目だけ書く」と伝えるので、部分更新が要る）
   - 変更: `server/src/extract.ts`, `server/src/trace.ts`, `server/test/extract.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/extract.test.ts` → trace の context の closing part に、開いた作業状況のキー・状態・題・goal・current・next・更新日と、閉じた作業状況の新しい順の 10 件（11 件目は出ない）が出る。harvest と glean の context には出ない。長い日本語の本文が入っていても各ページが 32,768 バイト以内で、ページをたどると全部のキーが欠けずに読める
-  - コミット: `feat(trace): list work items in the trace context`
+  - コミット: `feat(trace): show work items to a trace, and describe answers and work updates`
+  - 結果: 実装の前（c3364980）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^trace context:" test/extract.test.ts` → 2 件とも失敗（context に Work in progress の節が無い、作業状況がページをまたがない）。実装の後に同じコマンド → 2 pass（開いた作業状況が更新の新しい順に、キー・状態・更新日・題と goal・current・next の行で出る。閉じた作業状況は新しい順に 10 件で 11 件目は出ない。作業状況が 1 件も無いときは節ごと出ない。current に改行と見出しの文を入れても独立した行にならず、`Live records of this project` で始まる行は 1 つだけ。glean と harvest の context には出ず、見出しも前のまま。長い日本語の本文を 10 件入れても各ページが READ_BUDGET 以内で、10 件のキーが全部読める）。review-shipping が、`extract.ts` を戻すと 2 件とも落ちること、自動の trace でも closing part が最後まで読めること（10 ページ）を別のコピーで確かめた。`bun run verify` → exit 0
 
 ## P3: 文面
 
 trace をする AI が、新しい欄の使い方と、古いサーバーに断られたときの手順を Skill から読める。
 
-- [ ] T06: trace の Skill と、record の形を説明している記述を直す
+- [x] T06: trace の Skill と、record の形を説明している記述を直す
   - 種別: 変更
   - 計画: S7
   - 依存: T02（`answers` の挙動が決まっている必要がある）, T05（context に出る作業状況の形が決まっている必要がある）
-  - 変更: `plugin/skills/trace/SKILL.md`, `README.md`, `README.ja.md`, `server/src/mcp-record.ts`
+  - 変更: `plugin/skills/trace/SKILL.md`
   - 完了条件: `bun run verify` → 終了コード 0。`plugin/skills/trace/SKILL.md` の表に `answers` の行があり、`work` の行と例が配列と部分更新を説明し、古いサーバーに断られたときは欄を落とさず再読み込みして context を読み直すと書いてある。`rg -n "work" plugin/skills README.md README.ja.md server/src/mcp-record.ts` で拾った record の形の記述が、どれも新しい形と食い違わない
-  - コミット: `docs(trace): describe answers and partial work updates`
+  - コミット: `feat(trace): show work items to a trace, and describe answers and work updates`
+  - 結果: `rg -n "\bwork\b|answers" README.md README.ja.md server/src/mcp-record.ts plugin/skills/*/SKILL.md .agents` → record の形を説明しているのは `plugin/skills/trace/SKILL.md` だけだった（README と MCP のツールの説明は欄の形に触れていない。harvest の Skill は「work は書かない」とだけ言っていて、そのままで合う）。trace の Skill に、context が作業状況を出すこと、`work` の例（既にあるキーは変える項目だけ、新しいキーは全項目）、`work` の行（1 件か 10 件までの配列、省略は保持で `next: []` は消去、`done` と `abandoned`、会話で確かめられた更新だけ、save が返す 4 つの結果）、古いサーバーに断られたときは欄を落とさず再読み込みして context を読み直すこと、を書いた。`answers` の行は T01 で足してある。`bun run verify:ai` → exit 0。例のキーを `export` にすると、検査が MCP のツール名と読んで `allowed-tools lacks mcp__plugin_sphica_sphica__export` で落ちたので、`csv-export` にした。review-shipping が、Skill の各文を `record.ts` と `extract.ts` に照らして合っていると報告した。`bun run verify` → exit 0
 
 ## 記録
+
+- 2026-10-12 / T04・T07 / Codex のレビュー（c3364980、high）: 指摘なし。メモリ上の SQLite で、部分更新・同じ内容の確認・古いセッションの更新の除外・結果の行が 1 回だけ出ることを実行して確かめたと報告があった
+- 2026-10-12 / T05・T06 / 1 つのコミットにまとめ、コミット欄を直した。前: T05 `feat(trace): list work items in the trace context`、T06 `docs(trace): describe answers and partial work updates`。後: 両方とも `feat(trace): show work items to a trace, and describe answers and work updates`。T06 の変更欄から `README.md`・`README.ja.md`・`server/src/mcp-record.ts` を外した（record の形を説明していなかった）
+- 2026-10-12 / T05 / trace の context の見出しを「supersedes, conflicts, and answers take these keys」にした（T01 の review-shipping の指摘）。harvest と glean の見出しは前のまま
+- 2026-10-12 / T05・T06 / review-shipping（T05 と T06 の差分）: 止める指摘は無し。文面の取りこぼし 2 件を直した: `contextText` のコメントと Skill の 41 行目が closing part の中身に作業状況を挙げていなかった、キーが切れたときの注記が `answers` を挙げていなかった（「使う前に」とだけ言う形にした）。開いた作業状況に件数の上限は無いので、最大の長さの 10 件があると context が 8 ページほど増える、という報告もあった。計画どおり全件出す
 
 - 2026-10-12 / T03 / Codex のレビュー（a1f4a46b、high）: 指摘なし。コードとテストを読んだ範囲で、実行はしていないと報告があった
 - 2026-10-12 / T04・T07 / 1 つのコミットにまとめた（どちらも `record.ts` と `record.test.ts` を変える）。コミット欄を直した。前: T04 `feat(record): update only the fields a work item names`、T07 `fix(record): say once what became of an older question an answer also names`。後: 両方とも `feat(record): take partial work updates, and say an answered older question once`
