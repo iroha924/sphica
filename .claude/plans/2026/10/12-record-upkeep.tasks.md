@@ -31,13 +31,14 @@ trace の保存の中で、答えの記録が質問を取り下げる。持ち�
   - コミット: `feat(record): close a question from the record that answers it`
   - 結果: 実装の前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → 5 件とも `Unrecognized key: "answers"` で失敗。受け入れケース reconcile-11 も、`record.ts` と `extract.ts` を戻した状態で同じ理由の失敗を確かめた。実装の後に同じコマンド → 5 pass（持ち主の採用のある決定と finding が質問を withdrawn にし、理由が `answered by <キー>` で source が答えの発言、agent の採用だけの決定と candidate の答えは閉じずに理由が出る、既に閉じた質問は変えずに答えを保存する、同じ保存の 2 つの答えは資格のある方が理由になる、1 つの答えで質問 2 件と `supersedes` の併用、質問でない対象・別プロジェクト・`question` の unit・harvest と glean・6 件は断る、断られた保存は何も残さない、check の予測と save の結果が同じ行で出る）。`node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 134 件）。`bun run release:plan -- --base 6a4d91c6` はコミットの前なので none と出た。コミットの後に流し直す
 
-- [ ] T02: 取り下げで戻った祖先の質問も同じ答えで閉じる
+- [x] T02: 取り下げで戻った祖先の質問も同じ答えで閉じる
   - 種別: 追加
   - 計画: S3
   - 依存: T01（`answers` の取り下げの経路と結果の行が要る）
   - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/acceptance-cases.test.ts` → 質問の鎖 2 件と 11 件が全部 withdrawn になり、祖先の理由が `answered by <キー> (through <質問のキー>)` で、答えは active のまま。12 件の鎖は保存全体が rollback する。candidate に戻った祖先も閉じる。祖先でない後継は閉じず、結果に出る。閉じた後に質問か答えに届く別の保存をしても withdrawn のまま。足した受け入れケース（質問の鎖）は、実装の前は元の質問が active に戻るという理由で落ちる
   - コミット: `feat(record): close the older questions an answered one had replaced`
+  - 結果: 実装の前（T01 のコード）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → 足した 4 件が失敗（鎖 2 件と 11 件は古い質問が active か superseded のまま、12 件は保存が断られない、candidate に戻った祖先が閉じない）。受け入れケース reconcile-12 も `record.ts` を戻した状態で「元の質問が active」の失敗を確かめた。実装の後に同じコマンド → 9 pass（鎖 2 件と 11 件が全部 withdrawn で、祖先の理由が `answered by <キー> (through <質問のキー>)`、source は答えの発言、答えは active。12 件は保存全体が rollback し DB の中身が変わらない。candidate に戻った祖先も閉じる。祖先でない後継は active になるだけで閉じず、結果に `now active (was candidate)` と出る。結果の行は、名指しした質問、祖先、ほかに動いた記録の順で、途中で開いた瞬間は出ない）。閉じた後の別の保存で withdrawn のままなことは T01 のテストが見ている。`bun run verify` → exit 0（受け入れケース 135 件）
 
 ## P2: 作業状況
 
@@ -80,6 +81,8 @@ trace をする AI が、新しい欄の使い方と、古いサーバーに断�
   - コミット: `docs(trace): describe answers and partial work updates`
 
 ## 記録
+
+- 2026-10-12 / T02 / 最初のコミット（0e6d0fd8、push 前）は、チェックを付けるスクリプトが失敗したまま作られ、`[x]` が入っていなかった。`git reset --soft` で戻し、チェックと結果を入れて作り直した。原因は 2 つ: スクリプトの失敗でコミットの連鎖が止まる形になっていなかった、Python 3.9 が長い 1 行の途中の多バイト文字を読み損ねた。以後は置き換えの文面を JSON に置き、全部を `&&` でつなぐ
 
 - 2026-10-12 / T01・T02 / 完了条件の理由の形を変えた。前: `answered by <キー>: …`（引用の先頭つき）。後: `answered by <キー>`。理由: review-shipping の指摘（状態の履歴は forget で消えないので、引用を写すと忘れた言葉が残る）を確かめて、plan の方針を直した（plan の変更履歴）。glean の `withdraw` の理由は今も引用の先頭 200 字を写していて、同じ残り方をする。この PR の外なので持ち主に報告する
 - 2026-10-12 / T01 / review-shipping の結果: 止める指摘は無し。`npm pack` の中身（53 ファイル）と起動、4 か所のバージョン、直す前のコードでの red を確かめたと報告があった。もう 1 件の指摘（trace の context の見出しが「supersedes and conflicts take these keys」のままで `answers` を挙げていない）は T05 で context を直すときに合わせる

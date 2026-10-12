@@ -5846,6 +5846,153 @@
       ]
     },
     {
+      "id": "reconcile-12",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "Answering a question that had replaced an older one closes both, so the older one does not come back open",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-cache-ask",
+            "host": "claude-code",
+            "at": "2026-05-05T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Look at how covers are loaded.",
+                "assistant": "Covers are fetched on every page view. Should covers be cached at all?",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-cache-ask",
+            "record": {
+              "units": [
+                {
+                  "key": "cache-open",
+                  "kind": "question",
+                  "text": "Whether covers are cached at all is waiting for the owner",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-cache-ask#1.assistant",
+                      "quote": "Should covers be cached at all?",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-cache-where",
+            "host": "claude-code",
+            "at": "2026-05-06T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Measure the cover fetches.",
+                "assistant": "Each cover costs about 300 ms, so the open point is narrower now. Should the cover cache live in memory or on disk?",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-cache-where",
+            "record": {
+              "units": [
+                {
+                  "key": "cache-where-open",
+                  "kind": "question",
+                  "text": "Whether the cover cache lives in memory or on disk is waiting for the owner",
+                  "supersedes": "trace:s-en-cache-ask/cache-open",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-cache-where#1.assistant",
+                      "quote": "Should the cover cache live in memory or on disk?",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-cache-answer",
+            "host": "claude-code",
+            "at": "2026-05-07T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Keep the cover cache on disk. Memory is gone after every restart.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-cache-answer",
+          "record": {
+            "units": [
+              {
+                "key": "cover-disk",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Keep the cover cache on disk",
+                "answers": ["trace:s-en-cache-where/cache-where-open"],
+                "evidence": [
+                  {
+                    "source": "session:s-en-cache-answer#1.owner",
+                    "quote": "Keep the cover cache on disk.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-cache-answer#1.owner",
+                    "quote": "Keep the cover cache on disk."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-cache-where/cache-where-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-en-cache-ask/cache-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-en-cache-answer/cover-disk",
+          "lifecycle": "active"
+        },
+        {
+          "save_notes_contain": "trace:s-en-cache-ask/cache-open: withdrawn, answered by trace:s-en-cache-answer/cover-disk through trace:s-en-cache-where/cache-where-open"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-en-cache-ask/cache-open",
+            "contains": [
+              "answered by trace:s-en-cache-answer/cover-disk (through trace:s-en-cache-where/cache-where-open)"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "id": "agent-01",
       "layer": "agent",
       "lang": "ja",

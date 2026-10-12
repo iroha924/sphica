@@ -3357,3 +3357,165 @@ test("answers: check says what save then does, and leaves the question as it was
     await db.done();
   }
 });
+
+// A question that replaced older ones stands for them: withdrawing only the newest would bring the older back, so the answer closes the line
+const askedLine = async (db: TempDb, p: number, n: number) => {
+  const ask = message(db, p, {
+    id: "line",
+    speaker: "assistant",
+    text: Array.from({ length: n }, (_, i) => `Q${i + 1}?`).join(" "),
+  });
+  for (let i = 1; i <= n; i++)
+    await save(db, target(p), {
+      units: [asked(`q${i}`, ask, `Q${i}?`, i > 1 ? { supersedes: `trace:ext-s1/q${i - 1}` } : {})],
+    });
+};
+/** Questions written straight into the tables, for states no single save leaves behind */
+const questions = (db: TempDb, p: number) => {
+  const ask = message(db, p, { id: "a9", text: "Which store?", speaker: "assistant" });
+  const owner = message(db, p, { id: "o9", text: "That was wrong." });
+  const runId = run(db, p);
+  const exec = (sql: string, ...a: (string | number | null)[]) => db.owner.prepare(sql).run(...a);
+  const question = (key: string) => {
+    const u = Number(
+      (
+        db.owner
+          .prepare(
+            "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (?, ?, 'question', ?, 'supported', ?, ?, ?) returning id",
+          )
+          .get(p, `trace:ext-s1/${key}`, key, runId, now, hash(key.length)) as { id: number }
+      ).id,
+    );
+    exec(
+      "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, ?, 0, 5, 'proposes', ?, ?)",
+      u,
+      ask,
+      runId,
+      now,
+    );
+    return u;
+  };
+  const link = (from: number, to: number) =>
+    exec(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', ?, ?)",
+      from,
+      to,
+      runId,
+      now,
+    );
+  const unsupport = (u: number) =>
+    exec(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'r', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ?",
+      now,
+      owner,
+      u,
+    );
+  const settle = (ids: number[]) => inTransaction(db.ingest, (trx) => reconcile(trx, ids, { runId }));
+  return { question, link, unsupport, settle };
+};
+
+for (const n of [2, 11])
+  test(`answers: answering a question that replaced older ones closes all ${n} of the line`, async () => {
+    const db = tempDb();
+    try {
+      const p = project(db);
+      await askedLine(db, p, n);
+      const keys = Array.from({ length: n }, (_, i) => `q${n - i}`);
+      assert.deepEqual(lives(db, ...keys), ["active", ...Array(n - 1).fill("superseded")]);
+      const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+      const { saved } = await save(db, target(p), {
+        units: [ownerDecided("store", said, "SQLite にする。", true, { answers: [`trace:ext-s1/q${n}`] })],
+      });
+      assert.deepEqual(lives(db, ...keys, "store"), [...Array(n).fill("withdrawn"), "active"]);
+      // The newest first, then each older one through the one that had replaced it; nothing of the moment it stood open in between
+      assert.deepEqual(saved.closed, [
+        `trace:ext-s1/q${n}: withdrawn, answered by trace:ext-s1/store`,
+        ...keys
+          .slice(1)
+          .map(
+            (k, i) =>
+              `trace:ext-s1/${k}: withdrawn, answered by trace:ext-s1/store through trace:ext-s1/${keys[i]}`,
+          ),
+      ]);
+      assert.deepEqual(
+        { ...lastState(db, "trace:ext-s1/q1") },
+        {
+          to_state: "withdrawn",
+          reason: "answered by trace:ext-s1/store (through trace:ext-s1/q2)",
+          source_id: said,
+        },
+      );
+    } finally {
+      await db.done();
+    }
+  });
+
+test("answers: a line of more than ten older questions refuses the whole save", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    await askedLine(db, p, 12);
+    const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+    const before = dump(db);
+    await assert.rejects(
+      save(db, target(p), {
+        units: [ownerDecided("store", said, "SQLite にする。", true, { answers: ["trace:ext-s1/q12"] })],
+      }),
+      /trace:ext-s1\/store: answering trace:ext-s1\/q12 would close more than 10 older questions it replaced/,
+    );
+    assert.deepEqual(dump(db), before);
+    assert.deepEqual(lives(db, "q12", "q11", "q1", "store"), [
+      "active",
+      "superseded",
+      "superseded",
+      undefined,
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: an older question that comes back only as a candidate is closed too, and a waiting successor that is no older question is not", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { question, link, unsupport, settle } = questions(db, p);
+    const old = question("old");
+    const newer = question("newer");
+    link(newer, old);
+    await settle([old]);
+    unsupport(old);
+    await settle([old]);
+    assert.deepEqual(lives(db, "old", "newer"), ["superseded", "active"]);
+    const plain = question("plain");
+    const first = question("first");
+    const second = question("second");
+    link(first, plain);
+    link(second, plain);
+    await settle([plain]);
+    assert.deepEqual(lives(db, "plain", "first", "second"), ["superseded", "active", "candidate"]);
+    const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+    const { saved } = await save(db, target(p), {
+      units: [
+        ownerDecided("store", said, "SQLite にする。", true, {
+          answers: ["trace:ext-s1/newer", "trace:ext-s1/first"],
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "old", "newer", "plain", "first", "second"), [
+      "withdrawn",
+      "withdrawn",
+      "superseded",
+      "withdrawn",
+      "active",
+    ]);
+    assert.deepEqual(saved.closed, [
+      "trace:ext-s1/newer: withdrawn, answered by trace:ext-s1/store",
+      "trace:ext-s1/first: withdrawn, answered by trace:ext-s1/store",
+      "trace:ext-s1/old: withdrawn, answered by trace:ext-s1/store through trace:ext-s1/newer",
+      "trace:ext-s1/second: now active (was candidate)",
+    ]);
+  } finally {
+    await db.done();
+  }
+});

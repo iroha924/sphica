@@ -912,6 +912,9 @@ export async function settleSaved(
   return settled;
 }
 
+/** How many older questions, each replaced by the next, one answer closes behind the question it names */
+const OLDER_QUESTIONS = 10;
+
 /**
  * Closes the questions the save's records answer, once the judge has said which of those records stand: an open question is withdrawn on
  * the first answer that is active and, for a decision or constraint, adopted by the owner or a maintainer. The judge writes the
@@ -931,6 +934,8 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
   );
   const withdraw = new Map<number, Hint>();
   const by = new Map<number, string>();
+  /** Each question asked to close → the named question whose withdrawal reached it (itself, when named) */
+  const root = new Map<number, number>();
   const left = new Map<number, string>();
   for (const p of answering) {
     const why = !saved.active.includes(p.key)
@@ -949,18 +954,66 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
         // The answer's key and its source only: state history outlives a forgotten source, so the reason copies none of its words
         withdraw.set(id, { reason: `answered by ${p.key}`, source: p.grounds });
         by.set(id, p.key);
+        root.set(id, id);
       }
     }
   }
-  if (withdraw.size) {
-    const settled = await reconcile(trx, [...withdraw.keys()], { runId }, { withdraw });
+  // What each record was before the first withdrawal and is after the last, in the order it first moved
+  const moved = new Map<number, { key: string; before: string; after: string }>();
+  const through = new Map<number, string>();
+  let asked = new Map(withdraw);
+  for (let round = 0; asked.size; round++) {
+    if (round > OLDER_QUESTIONS) {
+      const named = root.get([...asked.keys()][0] as number) as number;
+      throw new SaveRefused(
+        `${by.get(named)}: answering ${questions.get(named)?.key} would close more than ${OLDER_QUESTIONS} older questions it replaced; leave it out of answers, and the owner can withdraw them`,
+      );
+    }
+    const settled = await reconcile(trx, [...asked.keys()], { runId }, { withdraw: asked });
     for (const c of settled.changes)
+      moved.set(c.id, { key: c.key, before: moved.get(c.id)?.before ?? c.before, after: c.after });
+    // Withdrawing a question frees the one it had replaced: that older question was asked again as this one, so the same answer closes it
+    const back = settled.changes.filter((c) => c.before === "superseded" && c.after !== "superseded");
+    const older = back.length
+      ? await trx
+          .selectFrom("unit_link")
+          .select(["from_unit", "to_unit"])
+          .where("kind", "=", "supersedes")
+          .where("from_unit", "in", [...asked.keys()])
+          .where(
+            "to_unit",
+            "in",
+            back.map((c) => c.id),
+          )
+          .orderBy("to_unit")
+          .orderBy("from_unit")
+          .execute()
+      : [];
+    const next = new Map<number, Hint>();
+    for (const l of older) {
+      const from = asked.get(l.from_unit) as Hint;
+      const answer = by.get(l.from_unit) as string;
+      next.set(l.to_unit, {
+        reason: `answered by ${answer} (through ${settled.keys.get(l.from_unit)})`,
+        source: from.source,
+      });
+      by.set(l.to_unit, answer);
+      through.set(l.to_unit, settled.keys.get(l.from_unit) ?? `u${l.from_unit}`);
+      root.set(l.to_unit, root.get(l.from_unit) as number);
+    }
+    asked = next;
+  }
+  // The questions closed, in the order they were asked to close, then whatever else the withdrawals moved
+  for (const [id, answer] of by) {
+    const m = moved.get(id);
+    if (m?.after === "withdrawn")
       saved.closed.push(
-        c.after === "withdrawn" && by.has(c.id)
-          ? `${c.key}: withdrawn, answered by ${by.get(c.id)}`
-          : `${c.key}: now ${c.after} (was ${c.before})`,
+        `${m.key}: withdrawn, answered by ${answer}${through.has(id) ? ` through ${through.get(id)}` : ""}`,
       );
   }
+  for (const [id, m] of moved)
+    if (!(by.has(id) && m.after === "withdrawn") && m.after !== m.before)
+      saved.closed.push(`${m.key}: now ${m.after} (was ${m.before})`);
   for (const [id, note] of left) if (!withdraw.has(id)) saved.notes.push(note);
 }
 
