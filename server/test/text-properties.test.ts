@@ -154,8 +154,9 @@ const ADVERSARIAL: [string, (n: number) => string][] = [
   ["private key header", (n) => "-----BEGIN ".repeat(n)],
 ];
 
-// Doubling the input must not much more than double the time: each ratio is from one length to the next (2n/n and 4n/2n). A busy machine
-// can slow one measurement, so each shape gets up to three tries; a pattern that really grows faster than linear fails all of them
+// Four times the input must take about four times as long (16 when a pattern backtracks). Only the two ends are compared: one step
+// between lengths can jump on its own. A busy machine can slow one measurement, so each shape gets up to three tries; a pattern that
+// really grows faster than linear fails all of them
 test("mask takes time in proportion to the input on shapes that stress its patterns", () => {
   for (const [name, make] of ADVERSARIAL) {
     // Callers never pass more than 2 MiB (capture cuts at 128 KiB, anchors read files up to 2 MiB), so 4n stays within that
@@ -163,11 +164,14 @@ test("mask takes time in proportion to the input on shapes that stress its patte
     while (timed(make(n)) < 5 && n < 500_000) n *= 2;
     const tries: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const [a, b, c] = [timed(make(n)), timed(make(2 * n)), timed(make(4 * n))];
-      if (b / a <= 3 && c / b <= 3) break;
-      tries.push(`${a.toFixed(1)}, ${b.toFixed(1)}, ${c.toFixed(1)} ms`);
+      const [a, c] = [timed(make(n)), timed(make(4 * n))];
+      if (c / a <= 8) break;
+      tries.push(`${a.toFixed(1)}, ${c.toFixed(1)} ms`);
     }
-    assert.ok(tries.length < 3, `${name}: every try grew faster than linear (${tries.join("; ")})`);
+    assert.ok(
+      tries.length < 3,
+      `${name}: every try took over 8 times as long for 4 times the input (${tries.join("; ")})`,
+    );
   }
 });
 

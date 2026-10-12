@@ -693,27 +693,33 @@ test("migrating revision 4 stops, changing nothing, when a file excerpt has a pa
 
 // The repairs run while the migration holds the write lock, with the indexes dropped: they must not slow down faster than the rows grow
 test("migrating revision 4 with many anchors, edit observations, and evidence and nothing to repair takes time in proportion to them", () => {
-  const raw = create("old.db", REV4);
-  fill(raw);
-  raw.exec(
-    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 20000) insert into edit_observation (session_id, turn_id, path, via, observed_at) select 's1', null, 'p' || i || '.ts', 'tool', '2026-09-20T00:00:00.000Z' from n",
-  );
-  // Spread over many records, as a real database is: one record's search text holds all its anchors
-  raw.exec(
-    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 5000) insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) select 1, 'k' || i, 'finding', 'f' || i, 'supported', 1, '2026-09-20T00:00:00.000Z', zeroblob(32) from n",
-  );
-  raw.exec(
-    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 20000) insert into unit_anchor (unit_id, path, role, run_id, added_at) select 2 + i % 5000, 'p' || i || '.ts', 'applies_to', 1, '2026-09-20T00:00:00.000Z' from n",
-  );
-  raw.exec(
-    "with recursive n(i) as (select 0 union all select i + 1 from n where i < 19999) insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) select 2 + i % 5000, 1, 0, 3, case i / 5000 when 0 then 'states' when 1 then 'proposes' when 2 then 'rejects' else 'explains' end, 1, '2026-09-20T00:00:00.000Z' from n",
-  );
-  const started = performance.now();
-  const said = migrate(raw);
-  const took = performance.now() - started;
-  assert.doesNotMatch(said, /Changed while migrating/);
-  // Measured: 0.3 seconds here; 7 seconds when each evidence row looked for its duplicates alone, 22 when each anchor did
-  assert.ok(took < 3000, `took ${Math.round(took)} ms`);
+  const timed = (name: string, rows: number): number => {
+    const raw = create(name, REV4);
+    fill(raw);
+    const units = rows / 4;
+    raw.exec(
+      `with recursive n(i) as (select 1 union all select i + 1 from n where i < ${rows}) insert into edit_observation (session_id, turn_id, path, via, observed_at) select 's1', null, 'p' || i || '.ts', 'tool', '2026-09-20T00:00:00.000Z' from n`,
+    );
+    // Spread over many records, as a real database is: one record's search text holds all its anchors
+    raw.exec(
+      `with recursive n(i) as (select 1 union all select i + 1 from n where i < ${units}) insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) select 1, 'k' || i, 'finding', 'f' || i, 'supported', 1, '2026-09-20T00:00:00.000Z', zeroblob(32) from n`,
+    );
+    raw.exec(
+      `with recursive n(i) as (select 1 union all select i + 1 from n where i < ${rows}) insert into unit_anchor (unit_id, path, role, run_id, added_at) select 2 + i % ${units}, 'p' || i || '.ts', 'applies_to', 1, '2026-09-20T00:00:00.000Z' from n`,
+    );
+    raw.exec(
+      `with recursive n(i) as (select 0 union all select i + 1 from n where i < ${rows - 1}) insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) select 2 + i % ${units}, 1, 0, 3, case i / ${units} when 0 then 'states' when 1 then 'proposes' when 2 then 'rejects' else 'explains' end, 1, '2026-09-20T00:00:00.000Z' from n`,
+    );
+    const started = performance.now();
+    const said = migrate(raw);
+    const took = performance.now() - started;
+    assert.doesNotMatch(said, /Changed while migrating/);
+    return took;
+  };
+  const [few, many] = [timed("few.db", 2500), timed("many.db", 20000)];
+  // A ratio, so a slow machine does not fail it. Measured for 8 times the rows: 5 times as long here; 27 and 50 when each anchor or
+  // each edit observation looked for its duplicates alone
+  assert.ok(many <= 12 * few, `8 times the rows took ${Math.round(many)} ms against ${Math.round(few)} ms`);
 });
 
 // Revision 4 let small values through that revision 5 refuses. Each takes the nearest value revision 5 accepts, and is listed
