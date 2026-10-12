@@ -102,6 +102,7 @@ const Unit = z
     aliases: z.array(z.string()).max(12).default([]),
     supersedes: z.string().min(1).optional(),
     conflicts: z.array(z.string().min(1)).max(5).default([]),
+    answers: z.array(z.string().min(1)).max(5).default([]),
     fields: z
       .array(
         z
@@ -129,21 +130,26 @@ const FieldDef = z
     quote: Quote,
   })
   .strict();
+// A field left out keeps what is saved for the key, so none has a default: a default would overwrite it
 const Work = z
   .object({
     key: z.string().regex(KEY),
-    title: text(200),
-    goal: text(1000),
-    current: text(2000),
-    next: z.array(text(500)).max(10).default([]),
-    status: z.enum(WORK_STATUSES),
+    title: text(200).optional(),
+    goal: text(1000).optional(),
+    current: text(2000).optional(),
+    next: z.array(text(500)).max(10).optional(),
+    status: z.enum(WORK_STATUSES).optional(),
   })
   .strict();
 const Record = z
   .object({
     field_defs: z.array(FieldDef).max(10).default([]),
     units: z.array(Unit).max(50),
-    work: Work.optional(),
+    // One item or a list. Read as a list either way: a union would answer a malformed item with no field name
+    work: z.preprocess(
+      (w) => (w === undefined || Array.isArray(w) ? w : [w]),
+      z.array(Work).min(1).max(10).optional(),
+    ),
   })
   .strict();
 
@@ -184,6 +190,10 @@ type Planned = {
   aliases: string[];
   supersedes: number | null;
   conflicts: number[];
+  /** The questions this unit answers */
+  answers: number[];
+  /** The source an answer closes a question on: the owner's or a maintainer's adoption of a decision or constraint, else its first evidence */
+  grounds: number | null;
   fields: (Span & { name: string; value: string })[];
 };
 
@@ -195,7 +205,8 @@ export type Checked = {
   errors: string[];
   problems: string[];
   units: Planned[];
-  work: z.infer<typeof Work> | null;
+  /** The work items the record gives, one or several; none when it gives none */
+  work: z.infer<typeof Work>[];
   /** Field definitions this record adds; they are written before its units */
   fieldDefs: PlannedDef[];
   /** What the check read from the working tree and git; save reads each file again and judges it anew only when it changed */
@@ -280,7 +291,7 @@ export async function checkRecord(
       ),
       problems,
       units: [],
-      work: null,
+      work: [],
       fieldDefs: [],
       facts,
     };
@@ -406,7 +417,9 @@ export async function checkRecord(
     errors.push(`field_defs ${n}: defined twice in this record`);
 
   const linked = [
-    ...new Set(record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts])),
+    ...new Set(
+      record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts, ...u.answers]),
+    ),
   ];
   const others = new Map(
     (linked.length
@@ -644,6 +657,16 @@ export async function checkRecord(
       if (!other) errors.push(`${key}: conflicts with ${k}, which is not a record of this project`);
       return other ? [other.id] : [];
     });
+    // One question takes another's place by supersedes; what closes a question is the record that answers it
+    if (u.answers.length && u.kind === "question")
+      errors.push(`${key}: a question does not answer another; one that replaces it supersedes it`);
+    const answers = [...new Set(u.answers)].flatMap((k) => {
+      const other = others.get(k);
+      if (!other) errors.push(`${key}: answers ${k}, which is not a record of this project`);
+      else if (other.kind !== "question")
+        errors.push(`${key}: answers ${k}, a ${other.kind}; only a question is answered`);
+      return other?.kind === "question" ? [other.id] : [];
+    });
 
     for (const x of adoption.filter((x) => x.route === "agent")) {
       const why = await agentRefusal(db, u, x, sources.get(x.source), evidence, anchors);
@@ -651,6 +674,10 @@ export async function checkRecord(
       problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
       adoption.splice(adoption.indexOf(x), 1);
     }
+    // An AI's own adoption closes no question: of a decision or constraint, only the owner's or a maintainer's words do
+    const grounds =
+      (["decision", "constraint"].includes(u.kind) ? adoption.find((x) => x.route !== "agent") : evidence[0])
+        ?.source ?? null;
 
     const fields: Planned["fields"] = [];
     for (const f of u.fields) {
@@ -701,12 +728,35 @@ export async function checkRecord(
       aliases: aliases.filter((a) => !bad.includes(a)),
       supersedes,
       conflicts,
+      answers,
+      grounds,
       fields,
     });
   }
+  // A question closes on what the traced session shows: a harvest or glean reads text others wrote, and glean withdraws on the owner's words
+  if (target.origin !== "trace" && record.units.some((u) => u.answers.length))
+    errors.push("answers: only trace closes a question");
   // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
-  if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
-  return { errors, problems, units, work: record.work ?? null, fieldDefs, facts };
+  const work = record.work ?? [];
+  if (work.length && target.origin !== "trace") errors.push("work: only trace records work");
+  const named = work.map((w) => w.key);
+  for (const k of new Set(named.filter((k, i) => named.indexOf(k) !== i)))
+    errors.push(`work ${k}: the key appears twice`);
+  const known = new Set(
+    (work.length
+      ? await db
+          .selectFrom("work")
+          .select("key")
+          .where("project_id", "=", target.projectId)
+          .where("key", "in", named)
+          .execute()
+      : []
+    ).map((w) => w.key),
+  );
+  for (const w of work)
+    if (!known.has(w.key) && [w.title, w.goal, w.current, w.status].includes(undefined))
+      errors.push(`work ${w.key}: a new key needs title, goal, current, and status`);
+  return { errors, problems, units, work, fieldDefs, facts };
 }
 
 /** Why a value does not fit its field's type, or null. The schema's triggers check the same. */
@@ -762,6 +812,12 @@ export type Saved = {
   superseded: string[];
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
+  /** What answering did to records already saved: each question it closed, and any other record that moved with it */
+  closed: string[];
+  /** Each question an answer named and did not close, and each work item left as it was, and why */
+  notes: string[];
+  /** Each work item this save created or updated */
+  work: string[];
   /** The units this save wrote, for a caller that reconciles them with its own changes */
   written: { id: number; key: string; hint: Hint }[];
 };
@@ -882,6 +938,194 @@ export async function settleSaved(
   return settled;
 }
 
+/** How many older questions, each replaced by the next, one answer closes behind the question it names */
+const OLDER_QUESTIONS = 10;
+
+/**
+ * Closes the questions the save's records answer, once the judge has said which of those records stand: an open question is withdrawn on
+ * the first answer that is active and, for a decision or constraint, adopted by the owner or a maintainer. The judge writes the
+ * withdrawal like any other, and a question already closed is left as it is.
+ */
+async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], saved: Saved): Promise<void> {
+  const answering = units.filter((p) => p.answers.length);
+  if (!answering.length) return;
+  const questions = new Map(
+    (
+      await trx
+        .selectFrom("unit")
+        .select(["id", "key", "lifecycle"])
+        .where("id", "in", [...new Set(answering.flatMap((p) => p.answers))])
+        .execute()
+    ).map((q) => [q.id, q]),
+  );
+  const withdraw = new Map<number, Hint>();
+  const by = new Map<number, string>();
+  /** Each question asked to close → the named question whose withdrawal reached it (itself, when named) */
+  const root = new Map<number, number>();
+  const left = new Map<number, string>();
+  for (const p of answering) {
+    const why = !saved.active.includes(p.key)
+      ? `${p.key} did not become active`
+      : p.grounds !== null
+        ? null
+        : `${p.key} is an AI's decision, and a question closes only on the owner's or a maintainer's adoption`;
+    for (const id of p.answers) {
+      const q = questions.get(id);
+      if (!q || withdraw.has(id)) continue;
+      if (q.lifecycle !== "active" && q.lifecycle !== "candidate")
+        left.set(id, `${q.key}: already ${q.lifecycle}, so ${p.key} closes nothing there`);
+      else if (why !== null || p.grounds === null)
+        left.set(id, left.get(id) ?? `${q.key}: left open: ${why}`);
+      else {
+        // The answer's key and its source only: state history outlives a forgotten source, so the reason copies none of its words
+        withdraw.set(id, { reason: `answered by ${p.key}`, source: p.grounds });
+        by.set(id, p.key);
+        root.set(id, id);
+      }
+    }
+  }
+  // What each record was before the first withdrawal and is after the last, in the order it first moved
+  const moved = new Map<number, { key: string; before: string; after: string }>();
+  const through = new Map<number, string>();
+  let asked = new Map(withdraw);
+  for (let round = 0; asked.size; round++) {
+    if (round > OLDER_QUESTIONS) {
+      const named = root.get([...asked.keys()][0] as number) as number;
+      throw new SaveRefused(
+        `${by.get(named)}: answering ${questions.get(named)?.key} would close more than ${OLDER_QUESTIONS} older questions it replaced; leave it out of answers, and the owner can withdraw them`,
+      );
+    }
+    const settled = await reconcile(trx, [...asked.keys()], { runId }, { withdraw: asked });
+    for (const c of settled.changes)
+      moved.set(c.id, { key: c.key, before: moved.get(c.id)?.before ?? c.before, after: c.after });
+    // Withdrawing a question frees the one it had replaced: that older question was asked again as this one, so the same answer closes it
+    const back = settled.changes.filter((c) => c.before === "superseded" && c.after !== "superseded");
+    const older = back.length
+      ? await trx
+          .selectFrom("unit_link")
+          .select(["from_unit", "to_unit"])
+          .where("kind", "=", "supersedes")
+          .where("from_unit", "in", [...asked.keys()])
+          .where(
+            "to_unit",
+            "in",
+            back.map((c) => c.id),
+          )
+          .orderBy("to_unit")
+          .orderBy("from_unit")
+          .execute()
+      : [];
+    const next = new Map<number, Hint>();
+    for (const l of older) {
+      const from = asked.get(l.from_unit) as Hint;
+      const answer = by.get(l.from_unit) as string;
+      next.set(l.to_unit, {
+        reason: `answered by ${answer} (through ${settled.keys.get(l.from_unit)})`,
+        source: from.source,
+      });
+      by.set(l.to_unit, answer);
+      through.set(l.to_unit, settled.keys.get(l.from_unit) ?? `u${l.from_unit}`);
+      root.set(l.to_unit, root.get(l.from_unit) as number);
+    }
+    asked = next;
+  }
+  // The questions closed, in the order they were asked to close, then whatever else the withdrawals moved
+  for (const [id, answer] of by) {
+    const m = moved.get(id);
+    if (m?.after === "withdrawn")
+      saved.closed.push(
+        `${m.key}: withdrawn, answered by ${answer}${through.has(id) ? ` through ${through.get(id)}` : ""}`,
+      );
+  }
+  for (const [id, m] of moved)
+    if (!(by.has(id) && m.after === "withdrawn") && m.after !== m.before)
+      saved.closed.push(`${m.key}: now ${m.after} (was ${m.before})`);
+  // A question an earlier answer could not close, or that stood replaced, may still have been closed since: by a later answer, or as an older one
+  for (const [id, note] of left) if (moved.get(id)?.after !== "withdrawn") saved.notes.push(note);
+}
+
+/** Writes the work items a trace gives, each judged on its own, and says what became of each */
+async function saveWork(
+  trx: Kysely<DB>,
+  target: Target,
+  runId: number,
+  items: Checked["work"],
+  now: string,
+  saved: Saved,
+): Promise<void> {
+  if (!items.length) return;
+  const traced = target.sessionId
+    ? await trx
+        .selectFrom("session")
+        .select(["started_at", "branch"])
+        .where("id", "=", target.sessionId)
+        .executeTakeFirst()
+    : undefined;
+  // Session start marks work on the branch it is on
+  const stamp = { branch: traced?.branch ?? null, run_id: runId, updated_at: now };
+  for (const w of items) {
+    const held = await trx
+      .selectFrom("work as w")
+      .leftJoin("extraction_run as r", "r.id", "w.run_id")
+      .leftJoin("session as s", "s.id", "r.session_id")
+      .select(["w.id", "w.title", "w.goal", "w.current", "w.next", "w.status", "s.started_at"])
+      .where("w.project_id", "=", target.projectId)
+      .where("w.key", "=", w.key)
+      .executeTakeFirst();
+    if (!held) {
+      await trx
+        .insertInto("work")
+        .values({
+          project_id: target.projectId,
+          key: w.key,
+          // The check refused a new key that leaves any of these out
+          title: w.title as string,
+          goal: w.goal as string,
+          current: w.current as string,
+          next: JSON.stringify(w.next ?? []),
+          status: w.status as string,
+          ...stamp,
+        })
+        .execute();
+      saved.work.push(`work ${w.key}: created`);
+      continue;
+    }
+    if ([w.title, w.goal, w.current, w.next, w.status].every((v) => v === undefined)) {
+      saved.notes.push(`work ${w.key}: nothing to change: only its key was given`);
+      continue;
+    }
+    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
+    const mine = traced?.started_at;
+    if (held.started_at && mine && held.started_at > mine) {
+      saved.notes.push(`work ${w.key}: left as it is: a newer session's state is already saved`);
+      continue;
+    }
+    // The connection hands next back as the list it holds
+    const stored = typeof held.next === "string" ? held.next : JSON.stringify(held.next);
+    const row = {
+      title: w.title ?? held.title,
+      goal: w.goal ?? held.goal,
+      current: w.current ?? held.current,
+      next: w.next ? JSON.stringify(w.next) : stored,
+      status: w.status ?? held.status,
+    };
+    const same =
+      row.title === held.title &&
+      row.goal === held.goal &&
+      row.current === held.current &&
+      row.next === stored &&
+      row.status === held.status;
+    // The same state said again keeps its place in the list and its branch: only the run moves on, so a session older than this one
+    // still cannot replace it
+    await trx
+      .updateTable("work")
+      .set(same ? { run_id: runId } : { ...row, ...stamp })
+      .where("id", "=", held.id)
+      .execute();
+    saved.work.push(`work ${w.key}: ${same ? "confirmed, nothing changed" : "updated"}`);
+  }
+}
+
 /**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
  * coverage counts what was examined even when nothing came of it.
@@ -903,6 +1147,9 @@ export async function saveRecord(
     quarantined: [],
     superseded: [],
     anchorProblems: [],
+    closed: [],
+    notes: [],
+    work: [],
     written: [],
   };
   const cited = new Set<number>();
@@ -1097,44 +1344,11 @@ export async function saveRecord(
       },
     });
   }
-  if (settle) await settleSaved(trx, runId, saved);
-  if (checked.work) {
-    const w = checked.work;
-    const traced = target.sessionId
-      ? await trx
-          .selectFrom("session")
-          .select(["started_at", "branch"])
-          .where("id", "=", target.sessionId)
-          .executeTakeFirst()
-      : undefined;
-    const row = {
-      title: w.title,
-      goal: w.goal,
-      current: w.current,
-      next: JSON.stringify(w.next),
-      status: w.status,
-      // Session start marks work on the branch it is on
-      branch: traced?.branch ?? null,
-      run_id: runId,
-      updated_at: now,
-    };
-    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
-    const held = await trx
-      .selectFrom("work as w")
-      .leftJoin("extraction_run as r", "r.id", "w.run_id")
-      .leftJoin("session as s", "s.id", "r.session_id")
-      .select("s.started_at")
-      .where("w.project_id", "=", target.projectId)
-      .where("w.key", "=", w.key)
-      .executeTakeFirst();
-    const mine = traced?.started_at;
-    if (!(held?.started_at && mine && held.started_at > mine))
-      await trx
-        .insertInto("work")
-        .values({ project_id: target.projectId, key: w.key, ...row })
-        .onConflict((oc) => oc.columns(["project_id", "key"]).doUpdateSet(row))
-        .execute();
+  if (settle) {
+    await settleSaved(trx, runId, saved);
+    await closeAnswered(trx, runId, checked.units, saved);
   }
+  await saveWork(trx, target, runId, checked.work, now, saved);
   for (const s of new Set(looked))
     await trx
       .insertInto("source_processing")

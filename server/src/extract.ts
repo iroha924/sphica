@@ -53,6 +53,7 @@ import {
   runOf,
   sessionEdits,
   sessionSources,
+  workItems,
 } from "./trace.ts";
 
 const newRunId = () => crypto.randomBytes(9).toString("base64url");
@@ -399,7 +400,7 @@ async function scopeOf(
 
 /**
  * One page of what the run may cite, from where `after` points: past a source (`s<id>`), or at a line of the closing part
- * (`t<id>.<line>`: the edits, fields, and live records). Its body ends within PAGE_BYTES, and the last page names no cursor. With
+ * (`t<id>.<line>`: the edits, fields, work items, and live records). Its body ends within PAGE_BYTES, and the last page names no cursor. With
  * `auto` (trace runs only), the messages start at the first one waiting, after a few as context, and end after AUTO_PAGES pages.
  */
 export async function contextText(
@@ -555,6 +556,10 @@ export async function contextText(
             .orderBy("id")
             .execute()
         : [];
+    // Only a trace writes work, and it can keep to a key only when it sees the keys there are
+    const work = scope.target.origin === "trace" ? await workItems(db, projectId) : { open: [], closed: [] };
+    const item = (w: (typeof work.open)[number]) =>
+      `- ${w.key} (${w.status}, updated ${w.updated_at.slice(0, 10)}) ${inline(w.title)}`;
     const keys = live.map((u) => keyShown(u.key, u.id));
     let tailId = "";
     do tailId = crypto.randomBytes(4).toString("hex");
@@ -577,7 +582,25 @@ export async function contextText(
               }),
             ]
           : []),
-        "Live records of this project (supersedes and conflicts take these keys):",
+        ...(work.open.length
+          ? [
+              "Work in progress (to update one, give its key and only the fields that change; the same work keeps its key):",
+              ...work.open.flatMap((w) => [
+                item(w),
+                `  goal: ${inline(w.goal)}`,
+                `  current: ${inline(w.current)}`,
+                // The connection hands next back as the list it holds
+                `  next: ${(w.next as unknown as string[]).map(inline).join(" | ") || "none"}`,
+              ]),
+            ]
+          : []),
+        ...(work.closed.length
+          ? [
+              "Closed work, newest first (a key here is taken: work that goes on keeps it):",
+              ...work.closed.map(item),
+            ]
+          : []),
+        `Live records of this project (${scope.target.origin === "trace" ? "supersedes, conflicts, and answers" : "supersedes and conflicts"} take these keys):`,
         ...(live.length
           ? live.map(
               (u, i) =>
@@ -586,7 +609,7 @@ export async function contextText(
           : ["None."]),
         ...(keys.some((k, i) => k !== inline(live[i]?.key ?? ""))
           ? [
-              "A key marked [key cut] is not whole: read that u<id> and take the key from there before using it in supersedes or conflicts.",
+              "A key marked [key cut] is not whole: read that u<id> and take the key from there before using it.",
             ]
           : []),
       ].flatMap(pieces),
@@ -653,7 +676,7 @@ function contextOnly(
       .filter((d) => old.has(d.source))
       .map((d) => `field_defs ${d.name}: an automatic run defines a field only from a message it traces`),
     // Work cites nothing, so an automatic run updates it only beside a record of what it traced
-    ...(c.work && !c.units.length
+    ...(c.work.length && !c.units.length
       ? ["work: an automatic run updates work only beside a record of the messages it traces"]
       : []),
   ];
@@ -751,7 +774,7 @@ async function validate(
         checked,
         scope.looked.filter((s) => shown.has(s) || cited.has(s)),
       );
-      return { saved, changed: [] };
+      return { saved, changed: [...saved.closed, ...saved.work] };
     },
   };
 }
@@ -792,6 +815,7 @@ export async function checkText(
           ...done.saved.superseded.map((k) => `✓ would be superseded: ${k}`),
           ...done.saved.candidates.map((c) => `△ would stay a candidate: ${c.key}: ${c.why}`),
           ...done.saved.quarantined.map((q) => `△ would be quarantined: ${q}`),
+          ...done.saved.notes.map((n) => `△ ${n}`),
           // Judged again under the lock, once per place; glean's validation names the operation before the record, so match the end
           ...[...new Set(done.saved.anchorProblems)]
             .filter((a) => !v.problems.some((p) => p === a || p.endsWith(` ${a}`)))
@@ -870,6 +894,7 @@ export async function saveText(
     const warnings = [
       ...new Set([
         ...saved.anchorProblems.map((a) => `△ ${a}`),
+        ...saved.notes.map((n) => `△ ${n}`),
         // What check would warn about is said at save too: what was left out, and why a record stays a candidate
         ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
       ]),

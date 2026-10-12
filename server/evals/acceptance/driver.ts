@@ -998,6 +998,21 @@ export async function createDriver(world: World): Promise<Driver> {
         if (want.has_evidence !== undefined) assert.equal(last.source_id !== null, want.has_evidence);
         return;
       }
+      if (typeof e.work === "string") {
+        const row = await db()
+          .selectFrom("work")
+          .select(["title", "goal", "current", "next", "status"])
+          .where("project_id", "=", await projectId())
+          .where("key", "=", e.work)
+          .executeTakeFirst();
+        assert.ok(row, `no work item ${e.work}`);
+        assert.deepEqual(
+          Object.fromEntries(Object.keys(e.is as object).map((k) => [k, row[k as keyof typeof row]])),
+          e.is,
+          `work ${e.work}`,
+        );
+        return;
+      }
       if (e.status && typeof e.status === "object") {
         const want = e.status as Record<string, unknown>;
         // Seen this many days after the capture, which stamps messages with the real clock

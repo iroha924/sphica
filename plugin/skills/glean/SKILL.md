@@ -90,7 +90,7 @@ Japanese corner brackets, backticks, apostrophes): quote more of the owner's own
 Check reads where the words sit, not what they mean: whether they settle this record is yours to judge.
 
 Every op carries the `revision` read printed; a record changed since is refused, so read it again. To correct what a record says, write a new
-record in `units` (trace's shape, keys saved as `glean:<key>`) with `supersedes` naming the old one (citing the owner's words, a maintainer's, or the owner's session, not other people's text: words that are in the source, and not only a
+record in `units` (trace's shape without the keys `"work"`, `"answers"`, `"field_defs"`, and `"fields"`, and without evidence of the role `decides`, all of which only a trace takes; keys saved as `glean:<key>`) with `supersedes` naming the old one (citing the owner's words, a maintainer's, or the owner's session, not other people's text: words that are in the source, and not only a
 quotation there); records are never rewritten.
 
 ## When a source turns up for an unsourced record

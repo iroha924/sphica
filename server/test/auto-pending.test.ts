@@ -361,7 +361,8 @@ test("auto pending: an automatic run defines no field from context, and updates 
       units: [],
       work: { key: "w", title: "Severity", goal: "g", current: "c", next: [], status: "active" },
     };
-    for (const record of [fields, work]) {
+    const works = { units: [], work: [work.work, { ...work.work, key: "w2" }] };
+    for (const record of [fields, work, works]) {
       const checked = await checkText(db.ingest, second, p, null, record);
       assert.equal(checked.ok, false, JSON.stringify(record).slice(0, 40));
       assert.match(checked.text, /automatic run/);

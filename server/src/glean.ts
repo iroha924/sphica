@@ -298,7 +298,7 @@ export async function checkGlean(
         errors: [],
         problems: [],
         units: [],
-        work: null,
+        work: [],
         fieldDefs: [],
         facts,
       },

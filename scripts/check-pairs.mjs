@@ -585,6 +585,28 @@ if (TRAILER !== null) {
     fail.push(
       `the glean Skill's op table (${glean.names.join(", ")}) differs from the ops glean.ts accepts (${ops.join(", ")})`,
     );
+  // The harvest and glean Skills borrow trace's record shape, and the save refuses the fields only a trace may write: a Skill
+  // that does not name one of them tells its reader to send a record the save turns down
+  const record = read("server/src/record.ts");
+  const refusals = [...record.matchAll(/errors\.push\(\s*"([a-z_ ]+): only trace /g)];
+  // A refusal worded this way but written as a template, or in a call the pattern does not fit, would drop out of the list unseen
+  if (refusals.length === 0 || refusals.length !== (record.match(/: only trace /g) ?? []).length)
+    fail.push(
+      'cannot read every ": only trace" refusal in server/src/record.ts as errors.push("<keys>: only trace ...")',
+    );
+  // The one evidence role only a trace may cite is refused in words of its own
+  if (!/decides quotes[^"`]*only a trace records it/.test(record))
+    fail.push("cannot find the refusal of decides evidence outside a trace in server/src/record.ts");
+  // Keys are named as JSON keys: a bare `fields` in a Skill reads as the MCP tool of that name
+  const traceOnly = [...refusals.flatMap((m) => m[1].split(" and ").map((k) => `\`"${k}"\``)), "`decides`"];
+  for (const skill of ["harvest", "glean"]) {
+    const text = read(`plugin/skills/${skill}/SKILL.md`);
+    const unsaid = traceOnly.filter((name) => !text.includes(name));
+    if (unsaid.length)
+      fail.push(
+        `the ${skill} Skill borrows trace's record shape without naming what only a trace may send: ${unsaid.join(", ")}`,
+      );
+  }
 }
 
 // ---- Plugin settings match the hooks that read them ----

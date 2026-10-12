@@ -812,6 +812,170 @@
       ]
     },
     {
+      "id": "status-08",
+      "layer": "status",
+      "lang": "en",
+      "summary": "One trace updates a work item already there and creates another, and the save says which it did to each",
+      "given": [
+        {
+          "work": {
+            "key": "export-v2",
+            "title": "Rework CSV export",
+            "current": "notes removed",
+            "next": ["add column order"]
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-two-works",
+            "host": "claude-code",
+            "at": "2026-05-08T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "The export rework is finished. Next, look at why search is slow.",
+                "assistant": "The export rework is merged. Search takes 2 seconds on 10,000 books.",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-two-works",
+          "record": {
+            "units": [
+              {
+                "key": "search-slow",
+                "kind": "finding",
+                "text": "Search takes 2 seconds on 10,000 books",
+                "evidence": [
+                  {
+                    "source": "session:s-en-two-works#1.assistant",
+                    "quote": "Search takes 2 seconds on 10,000 books.",
+                    "role": "states"
+                  }
+                ]
+              }
+            ],
+            "work": [
+              {
+                "key": "export-v2",
+                "title": "Rework CSV export",
+                "goal": "Rework CSV export",
+                "current": "merged",
+                "next": [],
+                "status": "done"
+              },
+              {
+                "key": "search-speed",
+                "title": "Make search fast",
+                "goal": "Search answers within 200 ms on 10,000 books",
+                "current": "measured at 2 seconds",
+                "next": ["find the slow query"],
+                "status": "active"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "work": "export-v2",
+          "is": {
+            "status": "done",
+            "current": "merged",
+            "next": []
+          }
+        },
+        {
+          "work": "search-speed",
+          "is": {
+            "status": "active",
+            "goal": "Search answers within 200 ms on 10,000 books",
+            "next": ["find the slow query"]
+          }
+        },
+        {
+          "save_notes_contain": "work export-v2: updated"
+        },
+        {
+          "save_notes_contain": "work search-speed: created"
+        }
+      ]
+    },
+    {
+      "id": "status-09",
+      "layer": "status",
+      "lang": "ja",
+      "summary": "A work item closed by its key and status alone keeps its title, current state, and next steps",
+      "given": [
+        {
+          "work": {
+            "key": "cover-cache",
+            "title": "表紙のキャッシュ",
+            "current": "ディスクに置く形で実装中",
+            "next": ["期限切れの掃除を足す"]
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-close-work",
+            "host": "claude-code",
+            "at": "2026-05-09T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙のキャッシュはこれで終わりでいい。",
+                "assistant": "表紙のキャッシュは main に入りました。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-close-work",
+          "record": {
+            "units": [
+              {
+                "key": "cover-cache-merged",
+                "kind": "finding",
+                "text": "表紙のキャッシュは main に入った",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-close-work#1.assistant",
+                    "quote": "表紙のキャッシュは main に入りました。",
+                    "role": "states"
+                  }
+                ]
+              }
+            ],
+            "work": [
+              {
+                "key": "cover-cache",
+                "status": "done"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "work": "cover-cache",
+          "is": {
+            "status": "done",
+            "title": "表紙のキャッシュ",
+            "current": "ディスクに置く形で実装中",
+            "next": ["期限切れの掃除を足す"]
+          }
+        },
+        {
+          "save_notes_contain": "work cover-cache: updated"
+        }
+      ]
+    },
+    {
       "id": "retrieval-01",
       "layer": "retrieval",
       "lang": "ja>ja",
@@ -5738,6 +5902,258 @@
         { "unit": "trace:s-ja-storage/storage", "lifecycle": "active" },
         { "unit": "trace:s-ja-propose/duckdb", "lifecycle": "candidate" },
         { "unit": "trace:s-en-propose-pg/postgres", "lifecycle": "candidate" }
+      ]
+    },
+    {
+      "id": "reconcile-11",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "The owner's decision that answers an open question closes it in the same trace, and the question's history names the answer",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ask",
+            "host": "claude-code",
+            "at": "2026-05-03T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "書き出しの上限を調べて。",
+                "assistant": "上限は 60 KiB です。issue にしておきますか。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ask",
+            "record": {
+              "units": [
+                {
+                  "key": "limit-issue-open",
+                  "kind": "question",
+                  "text": "書き出しの上限を issue にするかは、持ち主の返事待ち",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ask#1.assistant",
+                      "quote": "issue にしておきますか。",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-answer",
+            "host": "claude-code",
+            "at": "2026-05-04T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "上限の件は issue にしない。困ってからでいい。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-answer",
+          "record": {
+            "units": [
+              {
+                "key": "limit-no-issue",
+                "kind": "decision",
+                "stance": "dont",
+                "text": "書き出しの上限は issue にしない",
+                "answers": ["trace:s-ja-ask/limit-issue-open"],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-answer#1.owner",
+                    "quote": "上限の件は issue にしない。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-answer#1.owner",
+                    "quote": "上限の件は issue にしない。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ask/limit-issue-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-ja-answer/limit-no-issue",
+          "lifecycle": "active"
+        },
+        {
+          "save_notes_contain": "trace:s-ja-ask/limit-issue-open: withdrawn, answered by trace:s-ja-answer/limit-no-issue"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-ask/limit-issue-open",
+            "contains": ["answered by trace:s-ja-answer/limit-no-issue"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-12",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "Answering a question that had replaced an older one closes both, so the older one does not come back open",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-cache-ask",
+            "host": "claude-code",
+            "at": "2026-05-05T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Look at how covers are loaded.",
+                "assistant": "Covers are fetched on every page view. Should covers be cached at all?",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-cache-ask",
+            "record": {
+              "units": [
+                {
+                  "key": "cache-open",
+                  "kind": "question",
+                  "text": "Whether covers are cached at all is waiting for the owner",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-cache-ask#1.assistant",
+                      "quote": "Should covers be cached at all?",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-cache-where",
+            "host": "claude-code",
+            "at": "2026-05-06T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Measure the cover fetches.",
+                "assistant": "Each cover costs about 300 ms, so the open point is narrower now. Should the cover cache live in memory or on disk?",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-cache-where",
+            "record": {
+              "units": [
+                {
+                  "key": "cache-where-open",
+                  "kind": "question",
+                  "text": "Whether the cover cache lives in memory or on disk is waiting for the owner",
+                  "supersedes": "trace:s-en-cache-ask/cache-open",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-cache-where#1.assistant",
+                      "quote": "Should the cover cache live in memory or on disk?",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-cache-answer",
+            "host": "claude-code",
+            "at": "2026-05-07T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Keep the cover cache on disk. Memory is gone after every restart.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-cache-answer",
+          "record": {
+            "units": [
+              {
+                "key": "cover-disk",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Keep the cover cache on disk",
+                "answers": ["trace:s-en-cache-where/cache-where-open"],
+                "evidence": [
+                  {
+                    "source": "session:s-en-cache-answer#1.owner",
+                    "quote": "Keep the cover cache on disk.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-cache-answer#1.owner",
+                    "quote": "Keep the cover cache on disk."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-cache-where/cache-where-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-en-cache-ask/cache-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-en-cache-answer/cover-disk",
+          "lifecycle": "active"
+        },
+        {
+          "save_notes_contain": "trace:s-en-cache-ask/cache-open: withdrawn, answered by trace:s-en-cache-answer/cover-disk through trace:s-en-cache-where/cache-where-open"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-en-cache-ask/cache-open",
+            "contains": [
+              "answered by trace:s-en-cache-answer/cover-disk (through trace:s-en-cache-where/cache-where-open)"
+            ]
+          }
+        }
       ]
     },
     {

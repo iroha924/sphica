@@ -178,7 +178,7 @@ const INGEST_UPDATES: Record<string, Set<string>> = {
   unit_adoption: new Set(RETRACTION),
   // A replacement only ever ends; what started it is never rewritten
   unit_replacement: new Set(["ended_at", "end_reason", "end_run_id"]),
-  // The upsert of the current work
+  // A work item's new state, or its run alone when a later session says the same state again
   work: new Set(["title", "goal", "current", "next", "status", "branch", "run_id", "updated_at"]),
 };
 /** Pull request links follow the current body, so an issue it no longer closes is unlinked */

@@ -10,7 +10,7 @@ import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 
 const PER_LAYER = {
   capture: 17,
-  status: 7,
+  status: 9,
   retrieval: 13,
   injection: 28,
   review: 8,
@@ -21,7 +21,7 @@ const PER_LAYER = {
   export: 1,
   fields: 3,
   paging: 3,
-  reconcile: 10,
+  reconcile: 12,
   agent: 15,
 };
 const DELIBERATE_MISSING = new Set(["capture-04", "glean-03"]);
