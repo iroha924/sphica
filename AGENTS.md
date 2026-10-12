@@ -42,6 +42,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 - Check the CLI separately from MCP. One working does not mean the other works <!-- invariant: exits-separate -->
 - When a value, category, or decision changes, is the paired interface fixed too? Add pairs you can list to a check <!-- invariant: rg-pairs -->
 - Does a new ingestion source write through the record server's run-bound tools or capture, not a bulk import? <!-- invariant: harvest -->
+- Does the change work the same in Claude Code and Codex, as far as each host allows? If it works in only one host, does it name what the other host lacks, and does the README say the difference? <!-- invariant: host-parity -->
 
 ### Package
 
