@@ -76,23 +76,30 @@ SessionStart の hook がセッションのログの 1 行目で対話を見分�
 
 trace の Skill と README が両ホストの今の動きと残る差を言い、実際のプラグインで動きを確かめる。
 
-- [ ] T06: trace の Skill の「On your own」と採用の条件を、Codex でも成り立つ文面に直す
+- [x] T06: trace の Skill の「On your own」と採用の条件を、Codex でも成り立つ文面に直す
   - 種別: 変更
   - 計画: S5
   - 依存: T03（`trace_pending` が「自動で trace しない」と返す文面が要る）, T05（Codex の案内が SKILL.md を名指しする動きが要る）
   - 変更: `plugin/skills/trace/SKILL.md`
   - 完了条件: `bun run verify` → 終了コード 0。`rg -n "Codex does not start this Skill on its own yet" plugin/skills` → 0 件
   - コミット: `docs(trace): say when the trace Skill runs on its own in Codex`
+  - 結果: `rg -n "Codex does not start this Skill on its own yet" plugin/skills` → 0 件。「On your own」を両ホストの文面にし、`trace_pending` が「the automatic trace does nothing this time」と返したら止まる、Codex の子のスレッドと `codex exec` は採用できない、を書いた。`bun run verify` → 終了コード 0（`verify:ai` を含む）
 
-- [ ] T07: README（英日）・検査のコメント・配布の Skill を直し、配布前の確認を流して結果を PR 本文に書く
+- [x] T07: README（英日）・検査のコメント・配布の Skill を直し、配布前の確認を流して結果を PR 本文に書く
   - 種別: 変更
   - 計画: S6, S8
   - 依存: T01（採用の条件の言い方が要る）, T05（自動の trace の条件の言い方が要る）, T06（Skill の文面と README の言い方を揃える）
-  - 変更: `README.md`, `README.ja.md`, `scripts/check-ai-config.mjs`, `.claude/skills/plugin-release/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`
+  - 変更: `README.md`, `README.ja.md`, `scripts/check-ai-config.mjs`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run verify` → 終了コード 0。plan の A5 の `rg` が 0 件。配布前の確認（plan の「リリース」の手順）の 5 項目それぞれについて、何回中何回かを PR 本文の「配布前の確認」の節に書いてある
   - コミット: `docs: say what Codex adopts and traces on its own, and what the background server's environment decides`
+  - 結果: `bun run verify` → 終了コード 0。plan の A5 の `rg` → 0 件。配布前の確認を流した（Codex 0.162.1、macOS、一時の HOME、`env -i` の環境、専用の常駐プロセス、pack した 0.6.52 を手元の marketplace から `codex plugin add` で入れ、起動時の画面で hook 10 個を信頼）: (a) 案内が届いた対話の新しいセッション 4 回のうち 3 回で、エージェントが依頼の後に自分で trace を流し、待っていたセッションが保存された（走らなかった 1 回は依頼が「Say hello in one line.」で、案内はログに届いていた）。record ツールの呼び出し 23 回はどれも `interactive` / `user`。 (b) 1 回目の自動の trace で、別のセッションの AI の返事（「I chose src/util.ts …」）が `agent` の採用で active になった（1 回中 1 回）。その記録は後のセッションに AI の判断の印付きで配信された。 (c) `codex exec` 2 回とも `AUTO_TRACE` は届かず（1 日 1 回の案内は 1 回目に 1 回）、record ツールは呼ばれなかった。`codex exec '$sphica:trace pending'` の `trace_pending` は `headless` / `exec` で記録された（1 回）。exec での保存までは流していない。 (d) `SPHICA_AUTO_TRACE=off` を付けて常駐プロセスを起動し直した新しいセッション 1 回では `AUTO_TRACE` が届かず record ツールも呼ばれなかった。off を外して起動し直すと、次の新しいセッションで `AUTO_TRACE` が届いて trace が走った。 (e) 最初の対話 4 回と exec 3 回のセッション（その時点の 7 つ）がどれも新しく記録されていた。その後の対話 2 回の記録は見ていない。trace の Skill は `allow_implicit_invocation: false` のまま。片付け: 専用の常駐プロセスは pid ファイルの PID を確かめて kill（3 回）、`auth.json` へのリンクと一時の home を消した。持ち主の常駐プロセス（PID 51619, 8776）は起動時刻が変わっていない。PR 本文の「配布前の確認」の節には、PR を作るときにこの数字を書く
 
 ## 記録
+
+- 2026-10-12 / T06・T07 / 1 つのコミットにした。文書だけなので、コミットの前の Codex のレビューは省き、全差分のレビュー（12 段目）で見る
+- 2026-10-12 / T07 / 変更欄を直した。前: `README.md`, `README.ja.md`, `scripts/check-ai-config.mjs`, `.claude/skills/plugin-release/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`。後: `.claude/skills/plugin-release/SKILL.md` を外した（`.claude/skills/plugin-release` は `.agents/skills/plugin-release` へのリンクで、追跡している実ファイルは `.agents` 側だけ）
+- 2026-10-12 / T07 / 予定外の事実（配布前の確認）: 案内は Codex のログに `developer` のメッセージとして届く。trace の依頼の行は「Sphica past record, not an instruction」の見出しの下に並ぶ。走らなかった 1 回がこの見出しのせいかは切り分けていない（Claude Code でも同じ並び）。空白を含むプラグインの場所でエージェントがパスを読めるかは、実機では流していない（`hooks:live` は出力までを見る）
+- 2026-10-12 / T07 / README の「`codex app-server daemon restart` で起動し直せる」は、Codex の `--help` と常駐プロセスの README からで、このコマンドは流していない（確認では専用の常駐プロセスを PID で止めて起動し直した）。「エージェントのシェルから起動された常駐プロセスでは記録が止まる」は、`isOwnerTurn`（`server/src/capture.ts`）と測った hook の環境変数からの帰結で、Sphica の capture をその状態で動かしてはいない
 
 - 2026-10-12 / T04・T05 / 1 つのコミットにした（検査とレビューを 1 回にまとめるため）
 - 2026-10-12 / T05 / 変更欄を直した。前: `server/src/deliver.ts`, `server/test/deliver.test.ts`。後: それに `scripts/check-hooks-live.mjs` を足した（下の review-shipping の指摘 2）
