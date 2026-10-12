@@ -490,7 +490,11 @@ function fire(
       clearTimeout(timer);
       const ms = performance.now() - start;
       if (signal || code !== 0)
-        return reject(new Error(`${host} ${input.hook_event_name} exited ${code ?? signal}: ${err}`));
+        return reject(
+          new Error(
+            `${host} ${input.hook_event_name} exited ${code ?? signal} after ${Math.round(ms)} ms (${JSON.stringify(input.tool_input)} in ${String(input.cwd)}): ${err}`,
+          ),
+        );
       try {
         resolve({
           text: out ? String(JSON.parse(out)?.hookSpecificOutput?.additionalContext ?? "") : "",
@@ -685,6 +689,22 @@ async function extraRows(f: Fixture, p: Plugin): Promise<Row[]> {
     for (const rel of rels) fs.writeFileSync(path.join(f.ctx.repo, rel), BASE(rel));
   };
   const count = (texts: string[], k: string) => texts.filter((t) => keysIn(t).includes(k)).length;
+  // Two Posts at once: one that cannot take the write lock soon answers unlogged, and then both may bring the same record. A try that
+  // went that way (one Post logged, the other not) is run again in a new session; three in a row fail, as a lock never waited for would
+  const settled = async (
+    run: (session: string) => Promise<{ shown: number[]; ids: string[] }>,
+    session: string,
+  ) => {
+    for (let tries = 1; ; tries++) {
+      const { shown, ids } = await run(`${session}-${tries}`);
+      const logged = trialLines(f.env.home)
+        .filter((l) => ids.includes(String(l.call)))
+        .map((l) => l.logged);
+      const slow = shown.some((n) => n === 2) && logged.includes(true) && logged.includes(false);
+      if (!slow || tries === 3) return { shown, tries };
+    }
+  };
+  const after = (tries: number) => (tries > 1 ? `, on try ${tries} (a Post went unlogged before)` : "");
 
   {
     reset("src/c1.ts");
@@ -699,37 +719,49 @@ async function extraRows(f: Fixture, p: Plugin): Promise<Row[]> {
     rows.push({ name: "parallel read and write of one file", ok: n === 1, detail: `shown ${n} time(s)` });
   }
   {
-    reset("src/c2.ts");
     gen(f.ctx, "tools/genc2.cjs", "src/c2.ts");
-    const a = call("x-write-write", "node tools/genc2.cjs");
-    const b = call("x-write-write", "node tools/genc2.cjs");
-    await a.pre();
-    await b.pre();
-    runCommand(f.ctx, "sh", "node tools/genc2.cjs; node tools/genc2.cjs");
-    const posts = await Promise.all([a.post(), b.post()]);
-    const n = count(
-      posts.map((x) => x.text),
-      key("src/c2.ts"),
-    );
-    rows.push({ name: "parallel writes of one file", ok: n === 1, detail: `shown ${n} time(s)` });
+    const { shown, tries } = await settled(async (session) => {
+      reset("src/c2.ts");
+      const a = call(session, "node tools/genc2.cjs");
+      const b = call(session, "node tools/genc2.cjs");
+      await a.pre();
+      await b.pre();
+      runCommand(f.ctx, "sh", "node tools/genc2.cjs; node tools/genc2.cjs");
+      const posts = await Promise.all([a.post(), b.post()]);
+      return {
+        shown: [
+          count(
+            posts.map((x) => x.text),
+            key("src/c2.ts"),
+          ),
+        ],
+        ids: [a.id, b.id],
+      };
+    }, "x-write-write");
+    rows.push({
+      name: "parallel writes of one file",
+      ok: shown[0] === 1,
+      detail: `shown ${shown[0]} time(s)${after(tries)}`,
+    });
   }
   {
-    reset("src/c3a.ts", "src/c3b.ts");
     gen(f.ctx, "tools/genc3a.cjs", "src/c3a.ts");
     gen(f.ctx, "tools/genc3b.cjs", "src/c3b.ts");
-    const a = call("x-two-files", "node tools/genc3a.cjs");
-    const b = call("x-two-files", "node tools/genc3b.cjs");
-    await a.pre();
-    await b.pre();
-    runCommand(f.ctx, "sh", "node tools/genc3a.cjs; node tools/genc3b.cjs");
-    // Both writes land inside both calls, so whichever Post plans first brings both records, and the other has nothing left to bring
-    const texts = (await Promise.all([a.post(), b.post()])).map((x) => x.text);
-    const na = count(texts, key("src/c3a.ts"));
-    const nb = count(texts, key("src/c3b.ts"));
+    const { shown, tries } = await settled(async (session) => {
+      reset("src/c3a.ts", "src/c3b.ts");
+      const a = call(session, "node tools/genc3a.cjs");
+      const b = call(session, "node tools/genc3b.cjs");
+      await a.pre();
+      await b.pre();
+      runCommand(f.ctx, "sh", "node tools/genc3a.cjs; node tools/genc3b.cjs");
+      // Both writes land inside both calls, so whichever Post plans first brings both records, and the other has nothing left to bring
+      const texts = (await Promise.all([a.post(), b.post()])).map((x) => x.text);
+      return { shown: [count(texts, key("src/c3a.ts")), count(texts, key("src/c3b.ts"))], ids: [a.id, b.id] };
+    }, "x-two-files");
     rows.push({
       name: "parallel writes of two files",
-      ok: na === 1 && nb === 1,
-      detail: `shown ${na} and ${nb} time(s)`,
+      ok: shown[0] === 1 && shown[1] === 1,
+      detail: `shown ${shown[0]} and ${shown[1]} time(s)${after(tries)}`,
     });
   }
   {
