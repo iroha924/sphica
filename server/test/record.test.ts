@@ -3596,9 +3596,9 @@ test("work: eleven items, none, or a key given twice refuse the save, and a refu
     );
     assert.equal(await errorsOf(Array.from({ length: 10 }, (_, i) => workItem(`w${i}`, "active", "c"))), "");
     // A malformed item is named by its place and field, alone or in a list, so whoever wrote it knows what to fix
-    const { status: _, ...noStatus } = workItem("a", "active", "c");
-    assert.match(await errorsOf(noStatus), /work\.0\.status: /);
-    assert.match(await errorsOf([workItem("a", "active", "c"), noStatus]), /work\.1\.status: /);
+    const wrong = (key: string) => ({ ...workItem(key, "active", "c"), status: "nearly" });
+    assert.match(await errorsOf(wrong("a")), /work\.0\.status: /);
+    assert.match(await errorsOf([workItem("a", "active", "c"), wrong("b")]), /work\.1\.status: /);
     assert.match(await errorsOf({ ...workItem("a", "active", "c"), next: "one step" }), /work\.0\.next: /);
     await assert.rejects(
       save(
@@ -3678,6 +3678,134 @@ test("work: check says of each work item what save then does, and writes none", 
     assert.equal(saved.ok, true, saved.text);
     assert.match(saved.text, /✓ work b: created/);
     assert.match(saved.text, /△ work a: left as it is: a newer session's state is already saved/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: an older question the answer also names is said once, as closed through the one that replaced it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    await askedLine(db, p, 2);
+    const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const { checked, saved } = await checkThenSave(db, run, p, {
+      units: [
+        ownerDecided("store", said, "SQLite にする。", true, {
+          answers: ["trace:ext-s1/q2", "trace:ext-s1/q1"],
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "q2", "q1", "store"), ["withdrawn", "withdrawn", "active"]);
+    for (const [text, would] of [
+      [checked.text, "would: "],
+      [saved.text, ""],
+    ]) {
+      assert.match(
+        text ?? "",
+        new RegExp(
+          `✓ ${would}trace:ext-s1/q1: withdrawn, answered by trace:ext-s1/store through trace:ext-s1/q2`,
+        ),
+      );
+      assert.doesNotMatch(text ?? "", /q1: already/);
+    }
+  } finally {
+    await db.done();
+  }
+});
+
+// work: an item whose key is already there takes only the fields it gives
+const fullRow = (db: TempDb, key: string) => {
+  const row = db.owner
+    .prepare("select title, goal, current, next, status, branch, run_id, updated_at from work where key = ?")
+    .get(key);
+  return row ? { ...row } : undefined;
+};
+
+test("work: an item for a key already there changes only the fields it names, and a new key needs them all", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "進めた。" });
+    await save(
+      db,
+      target(p),
+      { units: [], work: [{ ...workItem("a", "active", "途中"), next: ["次の一手", "その次"] }] },
+      [m],
+    );
+    const closed = await save(db, target(p), { units: [], work: { key: "a", status: "done" } }, [m]);
+    assert.deepEqual(closed.saved.work, ["work a: updated"]);
+    const { branch: _b, run_id: _r, updated_at: _u, ...kept } = fullRow(db, "a") ?? {};
+    assert.deepEqual(kept, {
+      title: "題 a",
+      goal: "目的 a",
+      current: "途中",
+      next: JSON.stringify(["次の一手", "その次"]),
+      status: "done",
+    });
+    await save(db, target(p), { units: [], work: [{ key: "a", current: "済み", next: [] }] }, [m]);
+    assert.deepEqual(
+      [fullRow(db, "a")?.current, fullRow(db, "a")?.next, fullRow(db, "a")?.status],
+      ["済み", "[]", "done"],
+    );
+    const errorsOf = async (work: unknown) =>
+      (await checkRecord(db.ingest, target(p), { units: [], work })).errors.join("\n");
+    for (const field of ["title", "goal", "current", "status"]) {
+      const { [field]: _, ...missing } = workItem("n", "active", "c") as Record<string, unknown>;
+      assert.match(
+        await errorsOf([missing]),
+        /work n: a new key needs title, goal, current, and status/,
+        field,
+      );
+    }
+    assert.match(await errorsOf({ key: "n" }), /work n: a new key needs title, goal, current, and status/);
+    assert.match(await errorsOf({ key: "a", title: "" }), /work\.0\.title: /);
+    assert.match(await errorsOf({ key: "a", extra: 1 }), /work\.0: /);
+    const created = await save(db, target(p), { units: [], work: [workItem("n", "active", "c")] }, [m]);
+    assert.deepEqual(created.saved.work, ["work n: created"]);
+    assert.equal(fullRow(db, "n")?.next, "[]");
+  } finally {
+    await db.done();
+  }
+});
+
+test("work: an item that gives only its key writes nothing, and one that repeats what is saved only marks which session confirmed it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const first = message(db, p, { id: "m1", text: "終わった。", session: "s1" });
+    const last = message(db, p, { id: "m3", text: "確かに終わっている。", session: "s3" });
+    const between = message(db, p, { id: "m2", text: "まだ途中。", session: "s2" });
+    const started = { s1: "2026-10-01T00:00:00Z", s2: "2026-10-05T00:00:00Z", s3: "2026-10-10T00:00:00Z" };
+    for (const [id, when] of Object.entries(started))
+      db.owner.prepare("update session set started_at = ?, branch = ? where id = ?").run(at(when), id, id);
+    await save(db, tracing(p, "s1"), { units: [], work: [workItem("a", "done", "終わった")] }, [first]);
+    const saved = fullRow(db, "a");
+    const only = await save(db, tracing(p, "s3"), { units: [], work: [{ key: "a" }] }, [last]);
+    assert.deepEqual(only.saved.work, []);
+    assert.deepEqual(only.saved.notes, ["work a: nothing to change: only its key was given"]);
+    assert.deepEqual(fullRow(db, "a"), saved);
+    // The same state said again by a later session: the row keeps its place and branch, and only who confirmed it moves on
+    const run = await beginTrace(db.ingest, p, "s3");
+    const again = await checkThenSave(db, run, p, {
+      units: [found("sure", last, "確かに終わっている。")],
+      work: [workItem("a", "done", "終わった")],
+    });
+    assert.match(again.checked.text, /✓ would: work a: confirmed, nothing changed/);
+    assert.match(again.saved.text, /✓ work a: confirmed, nothing changed/);
+    const confirmed = fullRow(db, "a");
+    assert.notEqual(confirmed?.run_id, saved?.run_id);
+    assert.deepEqual({ ...confirmed, run_id: saved?.run_id }, saved);
+    // Without that mark, this older session's state would be newer than the first save's and replace it
+    const stale = await save(
+      db,
+      tracing(p, "s2"),
+      { units: [], work: [{ key: "a", status: "active", current: "まだ途中" }] },
+      [between],
+    );
+    assert.deepEqual(stale.saved.notes, ["work a: left as it is: a newer session's state is already saved"]);
+    assert.deepEqual(fullRow(db, "a"), confirmed);
   } finally {
     await db.done();
   }

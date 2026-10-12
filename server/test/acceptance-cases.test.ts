@@ -10,7 +10,7 @@ import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 
 const PER_LAYER = {
   capture: 17,
-  status: 8,
+  status: 9,
   retrieval: 13,
   injection: 28,
   review: 8,

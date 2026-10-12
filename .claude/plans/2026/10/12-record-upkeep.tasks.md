@@ -40,14 +40,15 @@ trace の保存の中で、答えの記録が質問を取り下げる。持ち�
   - コミット: `feat(record): close the older questions an answered one had replaced`
   - 結果: 実装の前（T01 のコード）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → 足した 4 件が失敗（鎖 2 件と 11 件は古い質問が active か superseded のまま、12 件は保存が断られない、candidate に戻った祖先が閉じない）。受け入れケース reconcile-12 も `record.ts` を戻した状態で「元の質問が active」の失敗を確かめた。実装の後に同じコマンド → 9 pass（鎖 2 件と 11 件が全部 withdrawn で、祖先の理由が `answered by <キー> (through <質問のキー>)`、source は答えの発言、答えは active。12 件は保存全体が rollback し DB の中身が変わらない。candidate に戻った祖先も閉じる。祖先でない後継は active になるだけで閉じず、結果に `now active (was candidate)` と出る。結果の行は、名指しした質問、祖先、ほかに動いた記録の順で、途中で開いた瞬間は出ない）。閉じた後の別の保存で withdrawn のままなことは T01 のテストが見ている。`bun run verify` → exit 0（受け入れケース 135 件）
 
-- [ ] T07: 答えが名指しした古い質問を連鎖で閉じたとき、「既に閉じている」の行を出さない（T02 のレビューの F1）
+- [x] T07: 答えが名指しした古い質問を連鎖で閉じたとき、「既に閉じている」の行を出さない（T02 のレビューの F1）
   - 種別: 修正
   - 計画: S3
   - 依存: T02（直す対象の連鎖の処理）
   - 変更: `server/src/record.ts`, `server/test/record.test.ts`
   - red: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → q2 と、q2 が置き換えた q1 の両方を `answers` に書くと、q1 が withdrawn の行と `already superseded, so … closes nothing there` の行の両方に出る
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → q1 は withdrawn の行だけに出て、notes は空。check と save で同じ
-  - コミット: `fix(record): say once what became of an older question an answer also names`
+  - コミット: `feat(record): take partial work updates, and say an answered older question once`
+  - 結果: red を直す前のコード（a1f4a46b）で実測: `--test-name-pattern="^answers: an older question the answer also names"` → check の返答に `△ trace:ext-s1/q1: already superseded, so trace:ext-s1/store closes nothing there` と `✓ would: trace:ext-s1/q1: withdrawn, … through trace:ext-s1/q2` の両方が出て失敗。直した後に `--test-name-pattern="^answers:"` → 10 pass（q1 は withdrawn の行だけに出て、check と save で同じ）。review-shipping が、この 1 行だけを戻すと足したテストだけが落ちることを別のコピーで確かめた。`bun run verify` → exit 0
 
 ## P2: 作業状況
 
@@ -62,13 +63,14 @@ trace の保存 1 回で複数の作業状況を直せて、閉じるだけの�
   - コミット: `feat(record): take several work items in one save and report each`
   - 結果: 実装の前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^work:" test/record.test.ts` → 4 件とも `work: Invalid input: expected object, received array` で失敗。`test/auto-pending.test.ts` の配列の行と、受け入れケース status-08（`record.ts`・`extract.ts`・`glean.ts` を戻した状態）も同じ理由の失敗を確かめた。実装の後に同じコマンド → 4 pass（配列 2 件が created、次の保存で updated と created、単一のオブジェクトも updated。11 件・空の配列・重複キーは断り、10 件は通る。重複キーで断られた保存は unit も作業状況も残さない。harvest と glean は断る。より新しいセッションの状態があるキーは省かれて notes に出て、同じ配列のほかのキーは created になる。check と save が同じ行を出す）。既にあった 2 件（古いセッションが新しい状態を上書きしない、branch を持つ）も pass。`node --import ./test/isolate-home.ts --test --test-name-pattern="updates work only beside" test/auto-pending.test.ts` → pass（配列でも、記録の無い自動 run は断られる）。`test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 136 件）
 
-- [ ] T04: 既にあるキーは書いた項目だけを更新し、同じ内容の確認は `run_id` だけ進める
+- [x] T04: 既にあるキーは書いた項目だけを更新し、同じ内容の確認は `run_id` だけ進める
   - 種別: 変更
   - 計画: S4, S5
   - 依存: T03（配列に統一した保存の経路とキーごとの結果の行が要る）
-  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/src/record.ts`, `server/src/db-write.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/acceptance-cases.test.ts` → `{ key, status }` でほかの項目が保たれる。`next` の省略は保持、`next: []` は消去。`key` だけは何も書かず、変更なしと返る。新しいキーで `title`・`goal`・`current`・`status` のどれかが無いと保存を断る。保存済みと同じ内容を明示した更新は `run_id` だけ進み、`updated_at` と `branch` は変わらない。その後に届いた古いセッションの更新は省かれる。足した受け入れケース（部分更新）は、実装の前は項目の不足という理由で落ちる
-  - コミット: `feat(record): update only the fields a work item names`
+  - コミット: `feat(record): take partial work updates, and say an answered older question once`
+  - 結果: 実装の前（a1f4a46b）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^work: an item" test/record.test.ts` → 2 件とも `work.0.title: Invalid input: expected string, received undefined` などで失敗。受け入れケース status-09 も `record.ts` を戻した状態で同じ理由の失敗を確かめた。実装の後に `--test-name-pattern="^work:|^answers:|work state|session's branch"` → 18 pass（`{ key, status }` で題・goal・current・next が保たれる、`next` の省略は保持で `next: []` は消去、新しいキーは 4 項目のどれが欠けても断る、`key` だけは行を変えずに notes に出る、同じ内容の更新は `run_id` だけ進んで `updated_at` と `branch` は変わらず `confirmed, nothing changed` と出る、その後に届いた 10/5 のセッションの更新は省かれる）。T03 のテストのうち、status が欠けた項目のエラーを見ていた 2 行は、status を省けるようになったので、不正な値（`nearly`）で場所と項目が出ることを見る形に直した。`test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 137 件）
 
 - [ ] T05: trace の context に、開いた作業状況と、閉じた作業状況の直近 10 件を出す
   - 種別: 追加
@@ -91,6 +93,11 @@ trace をする AI が、新しい欄の使い方と、古いサーバーに断�
   - コミット: `docs(trace): describe answers and partial work updates`
 
 ## 記録
+
+- 2026-10-12 / T03 / Codex のレビュー（a1f4a46b、high）: 指摘なし。コードとテストを読んだ範囲で、実行はしていないと報告があった
+- 2026-10-12 / T04・T07 / 1 つのコミットにまとめた（どちらも `record.ts` と `record.test.ts` を変える）。コミット欄を直した。前: T04 `feat(record): update only the fields a work item names`、T07 `fix(record): say once what became of an older question an answer also names`。後: 両方とも `feat(record): take partial work updates, and say an answered older question once`
+- 2026-10-12 / T04 / 変更欄に `server/src/db-write.ts` を足した。review-shipping が、ingest の更新の許可表の上のコメント（「The upsert of the current work」）が今の文と合わないと指摘したので直した（コードは同じ）
+- 2026-10-12 / T04・T07 / review-shipping（T04 と T07 の差分）: 止める指摘は無し。ingest の接続が `saveWork` の文（select・insert・id での update）を全部許すこと、足したテストが前のコードで落ちること、`npm pack` の中身と起動を確かめたと報告があった。指摘 1 件は採らなかった: 古い Skill の文面のセッションが `next` を省いて「次は無い」のつもりで送ると、今は前の next が残る。省略は保持と計画で決めてあり、古い文面の例は `"next": []` を明示しているので、この形は変えない（PR の Declined findings に書く）
 
 - 2026-10-12 / T02・T03 / review-shipping（aa4f0e1d と T03 の差分）: 1 件。`work` を union で受けると、項目が欠けた作業状況のエラーが `work: Invalid input` だけになり、どの項目かが出ない（再現あり）。T03 のコミットの前に直した: 1 件でも配列として読む形にし、`work.0.status` のように場所と項目が出る。直す前に落ちるテストを足して確かめた。ほかは、`npm pack` の中身（53 ファイル）と起動、4 か所のバージョン、足したテストが前のコードで落ちることを確かめたと報告があった
 

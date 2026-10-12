@@ -130,14 +130,15 @@ const FieldDef = z
     quote: Quote,
   })
   .strict();
+// A field left out keeps what is saved for the key, so none has a default: a default would overwrite it
 const Work = z
   .object({
     key: z.string().regex(KEY),
-    title: text(200),
-    goal: text(1000),
-    current: text(2000),
-    next: z.array(text(500)).max(10).default([]),
-    status: z.enum(WORK_STATUSES),
+    title: text(200).optional(),
+    goal: text(1000).optional(),
+    current: text(2000).optional(),
+    next: z.array(text(500)).max(10).optional(),
+    status: z.enum(WORK_STATUSES).optional(),
   })
   .strict();
 const Record = z
@@ -741,6 +742,20 @@ export async function checkRecord(
   const named = work.map((w) => w.key);
   for (const k of new Set(named.filter((k, i) => named.indexOf(k) !== i)))
     errors.push(`work ${k}: the key appears twice`);
+  const known = new Set(
+    (work.length
+      ? await db
+          .selectFrom("work")
+          .select("key")
+          .where("project_id", "=", target.projectId)
+          .where("key", "in", named)
+          .execute()
+      : []
+    ).map((w) => w.key),
+  );
+  for (const w of work)
+    if (!known.has(w.key) && [w.title, w.goal, w.current, w.status].includes(undefined))
+      errors.push(`work ${w.key}: a new key needs title, goal, current, and status`);
   return { errors, problems, units, work, fieldDefs, facts };
 }
 
@@ -1025,7 +1040,8 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
   for (const [id, m] of moved)
     if (!(by.has(id) && m.after === "withdrawn") && m.after !== m.before)
       saved.closed.push(`${m.key}: now ${m.after} (was ${m.before})`);
-  for (const [id, note] of left) if (!withdraw.has(id)) saved.notes.push(note);
+  // A question an earlier answer could not close, or that stood replaced, may still have been closed since: by a later answer, or as an older one
+  for (const [id, note] of left) if (moved.get(id)?.after !== "withdrawn") saved.notes.push(note);
 }
 
 /** Writes the work items a trace gives, each judged on its own, and says what became of each */
@@ -1045,38 +1061,68 @@ async function saveWork(
         .where("id", "=", target.sessionId)
         .executeTakeFirst()
     : undefined;
+  // Session start marks work on the branch it is on
+  const stamp = { branch: traced?.branch ?? null, run_id: runId, updated_at: now };
   for (const w of items) {
-    const row = {
-      title: w.title,
-      goal: w.goal,
-      current: w.current,
-      next: JSON.stringify(w.next),
-      status: w.status,
-      // Session start marks work on the branch it is on
-      branch: traced?.branch ?? null,
-      run_id: runId,
-      updated_at: now,
-    };
-    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
     const held = await trx
       .selectFrom("work as w")
       .leftJoin("extraction_run as r", "r.id", "w.run_id")
       .leftJoin("session as s", "s.id", "r.session_id")
-      .select(["w.id", "s.started_at"])
+      .select(["w.id", "w.title", "w.goal", "w.current", "w.next", "w.status", "s.started_at"])
       .where("w.project_id", "=", target.projectId)
       .where("w.key", "=", w.key)
       .executeTakeFirst();
+    if (!held) {
+      await trx
+        .insertInto("work")
+        .values({
+          project_id: target.projectId,
+          key: w.key,
+          // The check refused a new key that leaves any of these out
+          title: w.title as string,
+          goal: w.goal as string,
+          current: w.current as string,
+          next: JSON.stringify(w.next ?? []),
+          status: w.status as string,
+          ...stamp,
+        })
+        .execute();
+      saved.work.push(`work ${w.key}: created`);
+      continue;
+    }
+    if ([w.title, w.goal, w.current, w.next, w.status].every((v) => v === undefined)) {
+      saved.notes.push(`work ${w.key}: nothing to change: only its key was given`);
+      continue;
+    }
+    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
     const mine = traced?.started_at;
-    if (held?.started_at && mine && held.started_at > mine) {
+    if (held.started_at && mine && held.started_at > mine) {
       saved.notes.push(`work ${w.key}: left as it is: a newer session's state is already saved`);
       continue;
     }
+    // The connection hands next back as the list it holds
+    const stored = typeof held.next === "string" ? held.next : JSON.stringify(held.next);
+    const row = {
+      title: w.title ?? held.title,
+      goal: w.goal ?? held.goal,
+      current: w.current ?? held.current,
+      next: w.next ? JSON.stringify(w.next) : stored,
+      status: w.status ?? held.status,
+    };
+    const same =
+      row.title === held.title &&
+      row.goal === held.goal &&
+      row.current === held.current &&
+      row.next === stored &&
+      row.status === held.status;
+    // The same state said again keeps its place in the list and its branch: only the run moves on, so a session older than this one
+    // still cannot replace it
     await trx
-      .insertInto("work")
-      .values({ project_id: target.projectId, key: w.key, ...row })
-      .onConflict((oc) => oc.columns(["project_id", "key"]).doUpdateSet(row))
+      .updateTable("work")
+      .set(same ? { run_id: runId } : { ...row, ...stamp })
+      .where("id", "=", held.id)
       .execute();
-    saved.work.push(`work ${w.key}: ${held ? "updated" : "created"}`);
+    saved.work.push(`work ${w.key}: ${same ? "confirmed, nothing changed" : "updated"}`);
   }
 }
 

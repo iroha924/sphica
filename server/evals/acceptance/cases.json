@@ -905,6 +905,77 @@
       ]
     },
     {
+      "id": "status-09",
+      "layer": "status",
+      "lang": "ja",
+      "summary": "A work item closed by its key and status alone keeps its title, current state, and next steps",
+      "given": [
+        {
+          "work": {
+            "key": "cover-cache",
+            "title": "表紙のキャッシュ",
+            "current": "ディスクに置く形で実装中",
+            "next": ["期限切れの掃除を足す"]
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-close-work",
+            "host": "claude-code",
+            "at": "2026-05-09T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙のキャッシュはこれで終わりでいい。",
+                "assistant": "表紙のキャッシュは main に入りました。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-close-work",
+          "record": {
+            "units": [
+              {
+                "key": "cover-cache-merged",
+                "kind": "finding",
+                "text": "表紙のキャッシュは main に入った",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-close-work#1.assistant",
+                    "quote": "表紙のキャッシュは main に入りました。",
+                    "role": "states"
+                  }
+                ]
+              }
+            ],
+            "work": [
+              {
+                "key": "cover-cache",
+                "status": "done"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "work": "cover-cache",
+          "is": {
+            "status": "done",
+            "title": "表紙のキャッシュ",
+            "current": "ディスクに置く形で実装中",
+            "next": ["期限切れの掃除を足す"]
+          }
+        },
+        {
+          "save_notes_contain": "work cover-cache: updated"
+        }
+      ]
+    },
+    {
       "id": "retrieval-01",
       "layer": "retrieval",
       "lang": "ja>ja",
