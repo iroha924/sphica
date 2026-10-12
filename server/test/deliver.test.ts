@@ -17,11 +17,14 @@ import {
   AUTO_TRACE,
   anchoredRules,
   CONFIRM,
+  codexInteractive,
   deliver,
   deliverableIds,
   leadFor,
+  namable,
   namedRecords,
   recordLines,
+  traceSkill,
 } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
@@ -2206,7 +2209,7 @@ test("auto trace notice: a new interactive Claude Code session asks the agent to
         /earlier session/,
         `${entry} ${source}`,
       );
-    // A Codex started from a Claude Code shell inherits cli, and its interactive turns are not measured yet
+    // A Codex started from a Claude Code shell inherits cli; without a log that says the terminal started it, it is not asked
     assert.doesNotMatch(
       await as("cli", () => start(crypto.randomUUID(), "startup", "codex")),
       /earlier session/,
@@ -2361,6 +2364,261 @@ test("decided by an AI: the per-record mark takes no room, so an AI's decision f
   };
   for (let size = 200; size <= 236; size += 4)
     assert.equal(await shownFor(false, size), await shownFor(true, size), `text of ${size}`);
+});
+
+/** A Codex session log as Codex 0.162.1 writes its first line, and the directory to remove afterwards */
+function codexLog(sessionId: string, payload: Record<string, unknown> = {}, rest = ""): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-codex-log-")));
+  const file = path.join(dir, `rollout-${sessionId}.jsonl`);
+  const first = {
+    timestamp: "2026-10-12T10:57:58.000Z",
+    type: "session_meta",
+    payload: {
+      id: sessionId,
+      session_id: sessionId,
+      originator: "codex-tui",
+      source: "vscode",
+      thread_source: "user",
+      cli_version: "0.162.1",
+      base_instructions: { text: "You are Codex." },
+      ...payload,
+    },
+  };
+  fs.writeFileSync(file, `${JSON.stringify(first)}\n${rest}`);
+  return file;
+}
+
+test("a Codex session is interactive only when its log's first line says the terminal started this session's own thread", () => {
+  const made: string[] = [];
+  const log = (...a: Parameters<typeof codexLog>) => {
+    const file = codexLog(...a);
+    made.push(path.dirname(file));
+    return file;
+  };
+  const says = (file: string | undefined, session: { id?: string } = { id: "cx-1" }) =>
+    codexInteractive({ session_id: session.id, transcript_path: file });
+  try {
+    assert.equal(says(log("cx-1")), true);
+    // The first line alone is read, however long the log has grown
+    assert.equal(says(log("cx-1", {}, `${"x".repeat(1024 * 1024)}\n`)), true);
+    // The instructions make the line long; it is read up to 256 KiB
+    assert.equal(says(log("cx-1", { base_instructions: { text: "i".repeat(200 * 1024) } })), true);
+    assert.equal(says(log("cx-1", { base_instructions: { text: "i".repeat(300 * 1024) } })), false);
+    // codex exec, a client not measured, a child thread, and another session's log
+    assert.equal(says(log("cx-1", { originator: "codex_exec", source: "exec" })), false);
+    assert.equal(says(log("cx-1", { originator: "Codex Desktop" })), false);
+    assert.equal(
+      says(log("cx-1", { thread_source: "subagent", source: { subagent: { thread_spawn: { depth: 1 } } } })),
+      false,
+    );
+    assert.equal(says(log("cx-other")), false);
+    assert.equal(says(log("cx-1"), {}), false);
+    // Nothing to read, or not a session's first line
+    assert.equal(says(undefined), false);
+    const good = log("cx-1");
+    // Hosts name the log by its full path; one relative to wherever the hook runs is not read, even when it leads to a good log
+    assert.equal(says(path.relative(process.cwd(), good)), false);
+    // A link to a good log is not the session's log file. Windows needs a privilege to make one, so it is tried elsewhere only
+    if (process.platform !== "win32") {
+      const link = path.join(path.dirname(good), "link.jsonl");
+      fs.symlinkSync(good, link);
+      assert.equal(says(link), false);
+    }
+    assert.equal(says(path.join(path.dirname(good), "missing.jsonl")), false);
+    assert.equal(says(path.dirname(good)), false, "a directory");
+    for (const text of [
+      "",
+      '{"type":"session_meta","payload":{"id":"cx-1"',
+      `${JSON.stringify({ type: "session_meta", payload: null })}\n`,
+      `${JSON.stringify({ type: "session_meta", payload: ["cx-1"] })}\n`,
+      `${JSON.stringify({ type: "response_item", payload: { id: "cx-1", originator: "codex-tui", thread_source: "user" } })}\n`,
+      "[]\n",
+      "not json\n",
+    ]) {
+      const file = log("cx-1");
+      fs.writeFileSync(file, text);
+      assert.equal(says(file), false, text.slice(0, 40));
+    }
+  } finally {
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a path is named in a notice only as it is: within 1,000 bytes and without a control character or a backtick", () => {
+  const spaced = path.join(os.tmpdir(), "my plugins", 'it\'s "here"', "SKILL.md");
+  assert.equal(namable(spaced), spaced);
+  const japanese = path.join(os.tmpdir(), "プラグイン", "SKILL.md");
+  assert.equal(namable(japanese), japanese);
+  assert.equal(namable(`/tmp/${"a".repeat(1000)}/SKILL.md`), null);
+  // Bytes, not characters: 400 characters of 3 bytes each
+  assert.equal(namable(`/tmp/${"あ".repeat(400)}/SKILL.md`), null);
+  for (const bad of [
+    "/tmp/a\nb/SKILL.md",
+    "/tmp/a\tb/SKILL.md",
+    "/tmp/a\u0000b/SKILL.md",
+    "/tmp/a`b/SKILL.md",
+    "/tmp/a\u007fb",
+  ])
+    assert.equal(namable(bad), null, JSON.stringify(bad));
+});
+
+test("the trace Skill's file is found beside the bundle or the source, and is named only when its path can be", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-skill-")));
+  try {
+    const lay = (root: string) => {
+      const file = path.join(root, "skills", "trace", "SKILL.md");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "# trace\n");
+      return file;
+    };
+    // The bundle: <root>/dist beside <root>/skills, here under a root with a space and quotes
+    const packed = path.join(dir, "plugin root it's");
+    assert.equal(traceSkill(path.join(packed, "dist")), null, "no Skill file yet");
+    const file = lay(packed);
+    assert.equal(traceSkill(path.join(packed, "dist")), file);
+    // The source: server/src, with the Skill under plugin/
+    const repo = path.join(dir, "repo");
+    const source = lay(path.join(repo, "plugin"));
+    assert.equal(traceSkill(path.join(repo, "server", "src")), source);
+    // A root whose path would end the notice's backticks is not named
+    const ticked = path.join(dir, "plugin `x");
+    lay(ticked);
+    assert.equal(traceSkill(path.join(ticked, "dist")), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("auto trace notice: a new Codex session the terminal started is asked to trace with the Skill's file named, once, and nothing else is", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const made: string[] = [];
+  const savedThread = process.env.CODEX_THREAD_ID;
+  delete process.env.CODEX_THREAD_ID;
+  try {
+    const p = project(db);
+    const today = new Date().toISOString();
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: today });
+    message(db, p, { id: "m2", text: "untraced too", session: "s2", sent: today });
+    session(db, p, "s3", "codex");
+    message(db, p, { id: "m3", text: "untraced in Codex", session: "s3", sent: today });
+    const start = (session: string, source: string | undefined, payload?: Record<string, unknown> | null) => {
+      const file = payload === null ? undefined : codexLog(session, payload);
+      if (file) made.push(path.dirname(file));
+      return deliver(
+        {
+          hook_event_name: "SessionStart",
+          ...(source ? { source } : {}),
+          session_id: session,
+          cwd: repo,
+          ...(file ? { transcript_path: file } : {}),
+        },
+        "codex",
+        db.file,
+      );
+    };
+    const skill = path.join(ROOT, "skills", "trace", "SKILL.md");
+    assert.ok(fs.existsSync(skill));
+    const fresh = crypto.randomUUID();
+    const first = await start(fresh, "startup");
+    assert.equal(first.split("\n").at(-1), AUTO_TRACE(3, skill));
+    assert.ok(first.includes(`read \`${skill}\` and run it on your own`));
+    assert.doesNotMatch(await start(fresh, "startup"), /earlier session/, "once per session");
+    // The caller's own session is never one to trace
+    assert.equal((await start("ext-s3", "startup")).split("\n").at(-1), AUTO_TRACE(2, skill));
+    for (const [why, source, payload] of [
+      ["resumed", "resume", {}],
+      ["a start that does not say how", undefined, {}],
+      ["codex exec", "startup", { originator: "codex_exec", source: "exec" }],
+      ["a client not measured", "startup", { originator: "Codex Desktop" }],
+      ["a child thread", "startup", { thread_source: "subagent" }],
+      ["no log", "startup", null],
+    ] as const)
+      assert.doesNotMatch(await start(crypto.randomUUID(), source, payload), /earlier session/, why);
+    // Another session's log does not make this one interactive
+    const other = codexLog("someone-else");
+    made.push(path.dirname(other));
+    assert.doesNotMatch(
+      await deliver(
+        {
+          hook_event_name: "SessionStart",
+          source: "startup",
+          session_id: crypto.randomUUID(),
+          cwd: repo,
+          transcript_path: other,
+        },
+        "codex",
+        db.file,
+      ),
+      /earlier session/,
+    );
+  } finally {
+    if (savedThread !== undefined) process.env.CODEX_THREAD_ID = savedThread;
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("auto trace notice: in Codex, each off value of SPHICA_AUTO_TRACE gives the owner's daily notice, and nothing waits for a session traced or long idle", async () => {
+  const saved = { off: process.env.SPHICA_AUTO_TRACE, thread: process.env.CODEX_THREAD_ID };
+  delete process.env.CODEX_THREAD_ID;
+  const made: string[] = [];
+  const begin = async (db: TempDb, repo: string) => {
+    const id = crypto.randomUUID();
+    const file = codexLog(id);
+    made.push(path.dirname(file));
+    return deliver(
+      {
+        hook_event_name: "SessionStart",
+        source: "startup",
+        session_id: id,
+        cwd: repo,
+        transcript_path: file,
+      },
+      "codex",
+      db.file,
+    );
+  };
+  try {
+    for (const off of ["off", "0", "false", "no", " OFF "]) {
+      const db = tempDb();
+      const repo = checkout();
+      try {
+        message(db, project(db), {
+          id: "m1",
+          text: "untraced",
+          session: "s1",
+          sent: new Date().toISOString(),
+        });
+        process.env.SPHICA_AUTO_TRACE = off;
+        const out = await begin(db, repo);
+        assert.doesNotMatch(out, /earlier session/, off);
+        assert.match(out, /1 session waiting to be traced: run \$sphica:trace pending\./, off);
+      } finally {
+        await db.done();
+        fs.rmSync(repo, { recursive: true, force: true });
+      }
+    }
+    delete process.env.SPHICA_AUTO_TRACE;
+    // Nothing waits, and a session whose last message is over 14 days old is not counted
+    const db = tempDb();
+    const repo = checkout();
+    try {
+      const p = project(db);
+      assert.doesNotMatch(await begin(db, repo), /earlier session|waiting to be traced/);
+      message(db, p, { id: "old", text: "long ago", session: "s-old", sent: "2026-01-01T00:00:00Z" });
+      assert.doesNotMatch(await begin(db, repo), /earlier session/);
+    } finally {
+      await db.done();
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  } finally {
+    if (saved.off === undefined) delete process.env.SPHICA_AUTO_TRACE;
+    else process.env.SPHICA_AUTO_TRACE = saved.off;
+    if (saved.thread !== undefined) process.env.CODEX_THREAD_ID = saved.thread;
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("auto trace notice: SPHICA_AUTO_TRACE=off turns only the automatic trace off, back to the owner's daily notice", async () => {

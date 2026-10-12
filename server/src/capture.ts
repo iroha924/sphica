@@ -225,6 +225,8 @@ export type HookInput = {
   turn_id?: string;
   agent_id?: string;
   cwd?: string;
+  /** Codex: the session's log, whose first line says what started the session */
+  transcript_path?: string;
   prompt?: string;
   last_assistant_message?: string | null;
   tool_name?: string;

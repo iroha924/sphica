@@ -54,21 +54,23 @@ base: main
 
 SessionStart の hook がセッションのログの 1 行目で対話を見分け、`codex-tui` の新しいセッションにだけ、trace の SKILL.md を名指しした案内を出す。
 
-- [ ] T04: hook の入力の `transcript_path` の 1 行目から、Codex の対話のセッションかを読む関数を足す
+- [x] T04: hook の入力の `transcript_path` の 1 行目から、Codex の対話のセッションかを読む関数を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（バージョンを上げた後でないと、package に入るファイルを変えるコミットを pre-commit が断る）
   - 変更: `server/src/capture.ts`, `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass。`codex-tui` で `payload.id` が一致するログだけ対話、`codex_exec`・ファイル無し・通常ファイルでない・途中で切れた JSON・空やオブジェクトでない payload・別のセッションの id・subagent・1 行目が 256 KiB を超えるものは対話でない、短い 1 行目 + 大きな残りは対話。続けて `bun run verify` → 終了コード 0
   - コミット: `feat(deliver): read whether a Codex session is interactive from its log's first line`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="Codex session is interactive" test/deliver.test.ts` → pass。`codex-tui` で `payload.id` が一致するログだけ対話。1 行目 200 KiB は通り 300 KiB は通らない、短い 1 行目 + 1 MiB の残りは通る。`codex_exec`・未知の originator・subagent・別のセッションの id・`session_id` 無し・相対パス（良いログに届くもの）・リンク（Windows 以外）・ディレクトリ・ファイル無し・空・途中で切れた JSON・payload が null や配列・`session_meta` でない行は通らない。`bun run verify` → 終了コード 0
 
-- [ ] T05: 新しい対話の Codex のセッションに、SKILL.md のパスを名指しした自動の trace の案内を出す
+- [x] T05: 新しい対話の Codex のセッションに、SKILL.md のパスを名指しした自動の trace の案内を出す
   - 種別: 変更
   - 計画: S4
   - 依存: T04（ログの 1 行目で対話を見る関数が要る）, T03（案内を受けたエージェントが呼ぶ `auto: true` を、対話でない呼び出しに返さない止めが先に要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `scripts/check-hooks-live.mjs`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass。Codex の `codex-tui` の新しいセッションで `AUTO_TRACE`（パス入り）が同じセッションで 1 回だけ出る、`source: "resume"`・off（`off`, `0`, `false`, `no`）・待ち 0 件・長すぎるパス・制御文字を含むパスでは今の案内、Claude Code の文面は変わらない。続けて `bun run verify` → 終了コード 0
   - コミット: `feat(deliver): ask a new interactive Codex session to trace on its own`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="auto trace notice|a path is named|trace Skill's file" test/deliver.test.ts` → pass。Codex の新しい対話のセッションに、SKILL.md の絶対パスをバッククォートで囲んだ `AUTO_TRACE` が 1 回だけ出る。自分のセッションは数えない。resume・`source` 無し・`codex_exec`・未知の originator・subagent・ログ無し・別のセッションのログ・off の各表記（off, 0, false, no, 前後に空白のある OFF）・待ち 0 件・14 日超では出ない。Claude Code の文面は既存のテストのまま通る。bundle の `deliver.js` は 444,946 バイト（上限 445,000）。`bun run verify` → 終了コード 0（`hooks:live` が、空白と引用符を含むプラグインの場所から起こした Codex の SessionStart で、pack した中の SKILL.md が名指しされることを見る。SKILL.md を消した写しでは「did not name the packed trace Skill」で落ちることを確かめた）
 
 ## P3: Skill・文書・配布前の確認
 
@@ -91,6 +93,13 @@ trace の Skill と README が両ホストの今の動きと残る差を言い�
   - コミット: `docs: say what Codex adopts and traces on its own, and what the background server's environment decides`
 
 ## 記録
+
+- 2026-10-12 / T04・T05 / 1 つのコミットにした（検査とレビューを 1 回にまとめるため）
+- 2026-10-12 / T05 / 変更欄を直した。前: `server/src/deliver.ts`, `server/test/deliver.test.ts`。後: それに `scripts/check-hooks-live.mjs` を足した（下の review-shipping の指摘 2）
+- 2026-10-12 / T04・T05 / 予定外: bundle の `deliver.js` が 445,057 バイトで上限（445,000）を 57 バイト超えた。上限は上げず、1 行目の判定のコードを短くして 444,946 バイトに収めた。余裕は 54 バイト
+- 2026-10-12 / T04・T05 / コミットの前の Codex のレビュー（`staged diff on e26c39c0`、新しい会話、high）: 指摘 0 件。ソースの export にメモリ内のファイルシステムを当てて 47 通りを確かめたとのこと。`bun run verify`・実際の Codex・Windows は未実行と明記
+- 2026-10-12 / T04・T05 / コミットの前の review-shipping: 出荷可の判定。pack した 0.6.52 の `deliver.js` を一時の HOME と DB で hook として起こし、案内が展開先の `skills/trace/SKILL.md` を名指しすることを確認。hook の時間は中央値 85〜87 ms（ログ無しは 82〜84 ms）。手元の Codex のログ 995 件で 1 行目の最長は 23,446 バイト。指摘 4 件: (1) SKILL.md:61 と README.md:150 が tag の前に直っている必要がある（T06・T07 の予定どおり） (2) bundle が自分の隣の SKILL.md を見つける経路を、どの検査も通らない (3) 絶対パスの確認・通常ファイルの確認・`traceSkill` の中の `namable` を外してもテストが通る (4) 空白を含むパスを引用符なしで名指ししている / (2)(3)(4) を採用。(2) は `hooks:live` に確認を足し、(3) は良いログに届く相対パス・リンク・`traceSkill` に場所を渡すテストを足し、(4) はパスをバッククォートで囲んだ。Windows で Codex が書いている最中のログを開けるかは未確認
+- 2026-10-12 / T04・T05 / 予定外: 最初のコミット（9dea4fdf）にチェックと結果の行が入らなかった（tasks を書き換えるスクリプトが文字コードのエラーで止まり、コミットのコマンドがそれで止まる形になっていなかった）。push の前だったので、同じコミットを作り直してチェックを入れた
 
 - 2026-10-12 / T01〜T03 / 1 つのコミットにした（検査とレビューを 1 回にまとめるため）
 - 2026-10-12 / T02 / 変更欄を直した。前: `server/test/codex-caller.test.ts`。後: `server/test/codex-caller.test.ts`, `server/test/record-world.ts`（`reply` がホストの `_meta` を受け取る引数を足した）
