@@ -94,7 +94,21 @@ trace をする AI が、新しい欄の使い方と、古いサーバーに断�
   - コミット: `feat(trace): show work items to a trace, and describe answers and work updates`
   - 結果: `rg -n "\bwork\b|answers" README.md README.ja.md server/src/mcp-record.ts plugin/skills/*/SKILL.md .agents` → record の形を説明しているのは `plugin/skills/trace/SKILL.md` だけだった（README と MCP のツールの説明は欄の形に触れていない。harvest の Skill は「work は書かない」とだけ言っていて、そのままで合う）。trace の Skill に、context が作業状況を出すこと、`work` の例（既にあるキーは変える項目だけ、新しいキーは全項目）、`work` の行（1 件か 10 件までの配列、省略は保持で `next: []` は消去、`done` と `abandoned`、会話で確かめられた更新だけ、save が返す 4 つの結果）、古いサーバーに断られたときは欄を落とさず再読み込みして context を読み直すこと、を書いた。`answers` の行は T01 で足してある。`bun run verify:ai` → exit 0。例のキーを `export` にすると、検査が MCP のツール名と読んで `allowed-tools lacks mcp__plugin_sphica_sphica__export` で落ちたので、`csv-export` にした。review-shipping が、Skill の各文を `record.ts` と `extract.ts` に照らして合っていると報告した。`bun run verify` → exit 0
 
+- [x] T08: harvest と glean の Skill に、trace だけが送れる欄と role を書き、食い違いを `pairs` の検査で止める（全差分のレビューの F1）
+  - 種別: 修正
+  - 計画: S7
+  - 依存: T06（直す対象の Skill の文面と、trace の Skill の `answers` の行が要る）
+  - 変更: `plugin/skills/harvest/SKILL.md`, `plugin/skills/glean/SKILL.md`, `scripts/check-pairs.mjs`
+  - red: `bun run pairs` → 検査を足した時点で、harvest の Skill が `field_defs`・`fields`・`answers` を、glean の Skill がそれに加えて `work` を名指ししていないと出て、終了コード 1
+  - 完了条件: `bun run pairs` → 終了コード 0。2 つの Skill を戻すと、名指ししていない欄を挙げて落ちる
+  - コミット: `fix(skills): name what only a trace may send in the harvest and glean Skills`
+  - 結果: red を実測（検査を足して Skill を直す前に `bun run pairs` → 上の文面で exit 1）。Skill に、trace だけが受ける 4 つのキー（`"work"`・`"answers"`・`"field_defs"`・`"fields"`）と、trace だけが引ける role `decides` を書いた。キーは JSON の形で書いた: 素の `fields` だと `verify:ai` が MCP のツール名と読み、`allowed-tools lacks mcp__plugin_sphica_sphica__fields` で落ちる。直した後に `bun run pairs` → exit 0、`bun run verify:ai` → exit 0。2 つの Skill を `git stash` で戻して `bun run pairs` → 4 つの欄を挙げて exit 1。`decides` を足す前の Skill では `decides` を挙げて exit 1。`bun run verify` → exit 0
+
 ## 記録
+
+- 2026-10-12 / T05・T06 / Codex のレビュー（a2f4dfea）: 指摘なし。メモリ上の SQLite で `contextText` を実行し、開いた 12 件のキーが 10 ページにわたって欠けないこと、最大のページが 31,880 バイトであること、閉じたものが新しい順で 11 件目が出ないこと、harvest と glean に出ないことを確かめたと報告があった
+- 2026-10-12 / 全差分 / Codex のレビュー（main..a2f4dfea、high）: 1 件（P2、再現あり）。harvest の Skill が「trace の形から `work` を除く」と言ったままで、`answers` を書いた harvest の保存が断られる。採って T08 を足した。`field_defs` と `fields` は今回より前からあった書き漏れで、合わせて直した
+- 2026-10-12 / T08 / review-shipping: 足した検査の穴 3 件（再現あり 2 件）。(1) formatter が `errors.push` を折り返すと、その欄が検査から黙って落ちる → 正規表現が折り返しを読む形にし、`: only trace` の出現数と読めた数が違えば落とす。(2) 言い回しの違う拒否（テンプレート文字列など）を拾わない → 同じ数の突き合わせで落ちる。(3) trace だけが引ける role `decides` を検査も Skill も挙げていない → Skill に書き、検査が `decides` の拒否の文と Skill の両方を見る。3 件ともコミットの前に直した
 
 - 2026-10-12 / T04・T07 / Codex のレビュー（c3364980、high）: 指摘なし。メモリ上の SQLite で、部分更新・同じ内容の確認・古いセッションの更新の除外・結果の行が 1 回だけ出ることを実行して確かめたと報告があった
 - 2026-10-12 / T05・T06 / 1 つのコミットにまとめ、コミット欄を直した。前: T05 `feat(trace): list work items in the trace context`、T06 `docs(trace): describe answers and partial work updates`。後: 両方とも `feat(trace): show work items to a trace, and describe answers and work updates`。T06 の変更欄から `README.md`・`README.ja.md`・`server/src/mcp-record.ts` を外した（record の形を説明していなかった）

@@ -38,7 +38,7 @@ as `cwd` to every tool.
    when a page's last line says `call record_context with after: "..."`, call it again with that `after`, exactly as written, until a page names none
    (a source too long for a page says where `read` goes on)
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
-   "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. As in trace, check runs the save in a transaction that
+   "The record"), without the keys `"work"`, `"answers"`, `"field_defs"`, and `"fields"`, and without evidence of the role `decides`: only a trace takes those. Keys are saved as `harvest:<number>/<key>`. As in trace, check runs the save in a transaction that
    rolls back and says what would become of each record (`would be active`, ...), the verdict and the counts first; when a reply ends with
    `call record_more with cursor: "..."`, read the rest with `record_more`. Fix and check again until there are no errors.
    A file the pull request touched may have moved since: on a warning that a path is not in the working tree, give the commit that holds it,
