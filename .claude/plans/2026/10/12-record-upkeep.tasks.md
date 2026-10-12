@@ -40,17 +40,27 @@ trace の保存の中で、答えの記録が質問を取り下げる。持ち�
   - コミット: `feat(record): close the older questions an answered one had replaced`
   - 結果: 実装の前（T01 のコード）に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → 足した 4 件が失敗（鎖 2 件と 11 件は古い質問が active か superseded のまま、12 件は保存が断られない、candidate に戻った祖先が閉じない）。受け入れケース reconcile-12 も `record.ts` を戻した状態で「元の質問が active」の失敗を確かめた。実装の後に同じコマンド → 9 pass（鎖 2 件と 11 件が全部 withdrawn で、祖先の理由が `answered by <キー> (through <質問のキー>)`、source は答えの発言、答えは active。12 件は保存全体が rollback し DB の中身が変わらない。candidate に戻った祖先も閉じる。祖先でない後継は active になるだけで閉じず、結果に `now active (was candidate)` と出る。結果の行は、名指しした質問、祖先、ほかに動いた記録の順で、途中で開いた瞬間は出ない）。閉じた後の別の保存で withdrawn のままなことは T01 のテストが見ている。`bun run verify` → exit 0（受け入れケース 135 件）
 
+- [ ] T07: 答えが名指しした古い質問を連鎖で閉じたとき、「既に閉じている」の行を出さない（T02 のレビューの F1）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T02（直す対象の連鎖の処理）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → q2 と、q2 が置き換えた q1 の両方を `answers` に書くと、q1 が withdrawn の行と `already superseded, so … closes nothing there` の行の両方に出る
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → q1 は withdrawn の行だけに出て、notes は空。check と save で同じ
+  - コミット: `fix(record): say once what became of an older question an answer also names`
+
 ## P2: 作業状況
 
 trace の保存 1 回で複数の作業状況を直せて、閉じるだけの更新で本文を打ち直さない。trace をする AI に既にあるキーが見える。
 
-- [ ] T03: `work` を単一か 1〜10 件の配列で受け、キーごとの結果を返す
+- [x] T03: `work` を単一か 1〜10 件の配列で受け、キーごとの結果を返す
   - 種別: 変更
   - 計画: S1, S4, S5
   - 依存: T01（バージョンが上がっていないとパッケージ入力のコミットを hook が断る。check / save の返答に行を足す所も使う）
-  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
-  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/extract.test.ts test/acceptance-cases.test.ts` → 配列 2 件が両方保存される。11 件と重複キーは保存を断る。全項目を書いた単一のオブジェクトは今までどおり通る。より新しいセッションの状態があるキーは省かれ、同じ配列のほかのキーは更新され、結果に別々の行で出る。自動 run で記録の無い保存は断られる。断られた保存は unit も作業状況も残さない。足した受け入れケース（作業状況 2 件）は、実装の前は配列が型の違いという理由で落ちる
+  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/auto-pending.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/auto-pending.test.ts test/acceptance-cases.test.ts` → 配列 2 件が両方保存される。11 件と重複キーは保存を断る。全項目を書いた単一のオブジェクトは今までどおり通る。より新しいセッションの状態があるキーは省かれ、同じ配列のほかのキーは更新され、結果に別々の行で出る。自動 run で記録の無い保存は断られる。断られた保存は unit も作業状況も残さない。足した受け入れケース（作業状況 2 件）は、実装の前は配列が型の違いという理由で落ちる
   - コミット: `feat(record): take several work items in one save and report each`
+  - 結果: 実装の前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^work:" test/record.test.ts` → 4 件とも `work: Invalid input: expected object, received array` で失敗。`test/auto-pending.test.ts` の配列の行と、受け入れケース status-08（`record.ts`・`extract.ts`・`glean.ts` を戻した状態）も同じ理由の失敗を確かめた。実装の後に同じコマンド → 4 pass（配列 2 件が created、次の保存で updated と created、単一のオブジェクトも updated。11 件・空の配列・重複キーは断り、10 件は通る。重複キーで断られた保存は unit も作業状況も残さない。harvest と glean は断る。より新しいセッションの状態があるキーは省かれて notes に出て、同じ配列のほかのキーは created になる。check と save が同じ行を出す）。既にあった 2 件（古いセッションが新しい状態を上書きしない、branch を持つ）も pass。`node --import ./test/isolate-home.ts --test --test-name-pattern="updates work only beside" test/auto-pending.test.ts` → pass（配列でも、記録の無い自動 run は断られる）。`test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 136 件）
 
 - [ ] T04: 既にあるキーは書いた項目だけを更新し、同じ内容の確認は `run_id` だけ進める
   - 種別: 変更
@@ -81,6 +91,13 @@ trace をする AI が、新しい欄の使い方と、古いサーバーに断�
   - コミット: `docs(trace): describe answers and partial work updates`
 
 ## 記録
+
+- 2026-10-12 / T02・T03 / review-shipping（aa4f0e1d と T03 の差分）: 1 件。`work` を union で受けると、項目が欠けた作業状況のエラーが `work: Invalid input` だけになり、どの項目かが出ない（再現あり）。T03 のコミットの前に直した: 1 件でも配列として読む形にし、`work.0.status` のように場所と項目が出る。直す前に落ちるテストを足して確かめた。ほかは、`npm pack` の中身（53 ファイル）と起動、4 か所のバージョン、足したテストが前のコードで落ちることを確かめたと報告があった
+
+- 2026-10-12 / T01 / Codex のレビュー（5c0e6ac0、high）: 指摘なし。見た範囲は 12 ファイルと、検証・採用の資格・判定の後の取り下げ・rollback。`bun run verify` と tarball は read-only のため流していないと報告があった
+- 2026-10-12 / T02 / Codex のレビュー（aa4f0e1d、high）: 1 件（P2、再現あり）。q2 と、q2 が置き換えた q1 の両方を `answers` に書くと、q1 が withdrawn の行と「already superseded」の行の両方に出る。完了条件の「結果は全部の繰り返しの後の状態から作る」に反するので採り、修正タスク T07 を足した
+- 2026-10-12 / T02 / T02 のコミットの前に review-shipping を流していなかった（プロジェクトの決まりでは、パッケージを変えるコミットの前に流す）。T03 のコミットの前に、T02 のコミットと T03 の差分を合わせて流した
+- 2026-10-12 / T03 / 変更欄と完了条件のコマンドを直した。前: `server/test/extract.test.ts` を含み、`server/src/glean.ts` と `server/test/auto-pending.test.ts` を含まない。後: 入れ替えた。理由: 自動 run の規則のテストは `auto-pending.test.ts` にあり、`glean.ts` は `Checked.work` の型の変更に合わせる 1 行が要った
 
 - 2026-10-12 / T02 / 最初のコミット（0e6d0fd8、push 前）は、チェックを付けるスクリプトが失敗したまま作られ、`[x]` が入っていなかった。`git reset --soft` で戻し、チェックと結果を入れて作り直した。原因は 2 つ: スクリプトの失敗でコミットの連鎖が止まる形になっていなかった、Python 3.9 が長い 1 行の途中の多バイト文字を読み損ねた。以後は置き換えの文面を JSON に置き、全部を `&&` でつなぐ
 

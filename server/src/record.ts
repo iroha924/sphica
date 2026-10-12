@@ -144,7 +144,11 @@ const Record = z
   .object({
     field_defs: z.array(FieldDef).max(10).default([]),
     units: z.array(Unit).max(50),
-    work: Work.optional(),
+    // One item or a list. Read as a list either way: a union would answer a malformed item with no field name
+    work: z.preprocess(
+      (w) => (w === undefined || Array.isArray(w) ? w : [w]),
+      z.array(Work).min(1).max(10).optional(),
+    ),
   })
   .strict();
 
@@ -200,7 +204,8 @@ export type Checked = {
   errors: string[];
   problems: string[];
   units: Planned[];
-  work: z.infer<typeof Work> | null;
+  /** The work items the record gives, one or several; none when it gives none */
+  work: z.infer<typeof Work>[];
   /** Field definitions this record adds; they are written before its units */
   fieldDefs: PlannedDef[];
   /** What the check read from the working tree and git; save reads each file again and judges it anew only when it changed */
@@ -285,7 +290,7 @@ export async function checkRecord(
       ),
       problems,
       units: [],
-      work: null,
+      work: [],
       fieldDefs: [],
       facts,
     };
@@ -731,8 +736,12 @@ export async function checkRecord(
   if (target.origin !== "trace" && record.units.some((u) => u.answers.length))
     errors.push("answers: only trace closes a question");
   // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
-  if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
-  return { errors, problems, units, work: record.work ?? null, fieldDefs, facts };
+  const work = record.work ?? [];
+  if (work.length && target.origin !== "trace") errors.push("work: only trace records work");
+  const named = work.map((w) => w.key);
+  for (const k of new Set(named.filter((k, i) => named.indexOf(k) !== i)))
+    errors.push(`work ${k}: the key appears twice`);
+  return { errors, problems, units, work, fieldDefs, facts };
 }
 
 /** Why a value does not fit its field's type, or null. The schema's triggers check the same. */
@@ -790,8 +799,10 @@ export type Saved = {
   anchorProblems: string[];
   /** What answering did to records already saved: each question it closed, and any other record that moved with it */
   closed: string[];
-  /** Each question an answer named and did not close, and why */
+  /** Each question an answer named and did not close, and each work item left as it was, and why */
   notes: string[];
+  /** Each work item this save created or updated */
+  work: string[];
   /** The units this save wrote, for a caller that reconciles them with its own changes */
   written: { id: number; key: string; hint: Hint }[];
 };
@@ -1017,6 +1028,58 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
   for (const [id, note] of left) if (!withdraw.has(id)) saved.notes.push(note);
 }
 
+/** Writes the work items a trace gives, each judged on its own, and says what became of each */
+async function saveWork(
+  trx: Kysely<DB>,
+  target: Target,
+  runId: number,
+  items: Checked["work"],
+  now: string,
+  saved: Saved,
+): Promise<void> {
+  if (!items.length) return;
+  const traced = target.sessionId
+    ? await trx
+        .selectFrom("session")
+        .select(["started_at", "branch"])
+        .where("id", "=", target.sessionId)
+        .executeTakeFirst()
+    : undefined;
+  for (const w of items) {
+    const row = {
+      title: w.title,
+      goal: w.goal,
+      current: w.current,
+      next: JSON.stringify(w.next),
+      status: w.status,
+      // Session start marks work on the branch it is on
+      branch: traced?.branch ?? null,
+      run_id: runId,
+      updated_at: now,
+    };
+    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
+    const held = await trx
+      .selectFrom("work as w")
+      .leftJoin("extraction_run as r", "r.id", "w.run_id")
+      .leftJoin("session as s", "s.id", "r.session_id")
+      .select(["w.id", "s.started_at"])
+      .where("w.project_id", "=", target.projectId)
+      .where("w.key", "=", w.key)
+      .executeTakeFirst();
+    const mine = traced?.started_at;
+    if (held?.started_at && mine && held.started_at > mine) {
+      saved.notes.push(`work ${w.key}: left as it is: a newer session's state is already saved`);
+      continue;
+    }
+    await trx
+      .insertInto("work")
+      .values({ project_id: target.projectId, key: w.key, ...row })
+      .onConflict((oc) => oc.columns(["project_id", "key"]).doUpdateSet(row))
+      .execute();
+    saved.work.push(`work ${w.key}: ${held ? "updated" : "created"}`);
+  }
+}
+
 /**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
  * coverage counts what was examined even when nothing came of it.
@@ -1040,6 +1103,7 @@ export async function saveRecord(
     anchorProblems: [],
     closed: [],
     notes: [],
+    work: [],
     written: [],
   };
   const cited = new Set<number>();
@@ -1238,43 +1302,7 @@ export async function saveRecord(
     await settleSaved(trx, runId, saved);
     await closeAnswered(trx, runId, checked.units, saved);
   }
-  if (checked.work) {
-    const w = checked.work;
-    const traced = target.sessionId
-      ? await trx
-          .selectFrom("session")
-          .select(["started_at", "branch"])
-          .where("id", "=", target.sessionId)
-          .executeTakeFirst()
-      : undefined;
-    const row = {
-      title: w.title,
-      goal: w.goal,
-      current: w.current,
-      next: JSON.stringify(w.next),
-      status: w.status,
-      // Session start marks work on the branch it is on
-      branch: traced?.branch ?? null,
-      run_id: runId,
-      updated_at: now,
-    };
-    // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
-    const held = await trx
-      .selectFrom("work as w")
-      .leftJoin("extraction_run as r", "r.id", "w.run_id")
-      .leftJoin("session as s", "s.id", "r.session_id")
-      .select("s.started_at")
-      .where("w.project_id", "=", target.projectId)
-      .where("w.key", "=", w.key)
-      .executeTakeFirst();
-    const mine = traced?.started_at;
-    if (!(held?.started_at && mine && held.started_at > mine))
-      await trx
-        .insertInto("work")
-        .values({ project_id: target.projectId, key: w.key, ...row })
-        .onConflict((oc) => oc.columns(["project_id", "key"]).doUpdateSet(row))
-        .execute();
-  }
+  await saveWork(trx, target, runId, checked.work, now, saved);
   for (const s of new Set(looked))
     await trx
       .insertInto("source_processing")

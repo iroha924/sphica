@@ -653,7 +653,7 @@ function contextOnly(
       .filter((d) => old.has(d.source))
       .map((d) => `field_defs ${d.name}: an automatic run defines a field only from a message it traces`),
     // Work cites nothing, so an automatic run updates it only beside a record of what it traced
-    ...(c.work && !c.units.length
+    ...(c.work.length && !c.units.length
       ? ["work: an automatic run updates work only beside a record of the messages it traces"]
       : []),
   ];
@@ -751,7 +751,7 @@ async function validate(
         checked,
         scope.looked.filter((s) => shown.has(s) || cited.has(s)),
       );
-      return { saved, changed: saved.closed };
+      return { saved, changed: [...saved.closed, ...saved.work] };
     },
   };
 }

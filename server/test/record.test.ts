@@ -3519,3 +3519,166 @@ test("answers: an older question that comes back only as a candidate is closed t
     await db.done();
   }
 });
+
+// work: one save takes several work items, and says what became of each
+const workItem = (key: string, status: string, current: string) => ({
+  key,
+  title: `題 ${key}`,
+  goal: `目的 ${key}`,
+  current,
+  status,
+});
+const workRow = (db: TempDb, key: string) => {
+  const row = db.owner.prepare("select status, current from work where key = ?").get(key);
+  return row ? { ...row } : undefined;
+};
+const tracing = (p: number, sessionId: string) => ({
+  ...target(p, sessionId),
+  prefix: `trace:ext-${sessionId}/`,
+});
+
+test("work: a save takes several work items and says which it created and updated, and still takes one alone", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "二つ進めた。" });
+    const first = await save(
+      db,
+      target(p),
+      { units: [], work: [workItem("a", "active", "途中"), workItem("b", "blocked", "待ち")] },
+      [m],
+    );
+    assert.deepEqual(first.saved.work, ["work a: created", "work b: created"]);
+    assert.deepEqual(
+      [workRow(db, "a"), workRow(db, "b")],
+      [
+        { status: "active", current: "途中" },
+        { status: "blocked", current: "待ち" },
+      ],
+    );
+    const second = await save(
+      db,
+      target(p),
+      { units: [], work: [workItem("b", "done", "済み"), workItem("c", "active", "新規")] },
+      [m],
+    );
+    assert.deepEqual(second.saved.work, ["work b: updated", "work c: created"]);
+    const alone = await save(db, target(p), { units: [], work: workItem("a", "done", "済み") }, [m]);
+    assert.deepEqual(alone.saved.work, ["work a: updated"]);
+    assert.deepEqual(
+      ["a", "b", "c"].map((k) => workRow(db, k)?.status),
+      ["done", "done", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("work: eleven items, none, or a key given twice refuse the save, and a refused save leaves no unit and no work", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const errorsOf = async (work: unknown) =>
+      (await checkRecord(db.ingest, target(p), { units: [], work })).errors.join("\n");
+    assert.match(
+      await errorsOf(Array.from({ length: 11 }, (_, i) => workItem(`w${i}`, "active", "c"))),
+      /work/,
+    );
+    assert.match(await errorsOf([]), /work/);
+    assert.match(
+      await errorsOf([
+        workItem("a", "active", "c"),
+        workItem("b", "active", "c"),
+        workItem("a", "done", "c"),
+      ]),
+      /work a: the key appears twice/,
+    );
+    assert.equal(await errorsOf(Array.from({ length: 10 }, (_, i) => workItem(`w${i}`, "active", "c"))), "");
+    // A malformed item is named by its place and field, alone or in a list, so whoever wrote it knows what to fix
+    const { status: _, ...noStatus } = workItem("a", "active", "c");
+    assert.match(await errorsOf(noStatus), /work\.0\.status: /);
+    assert.match(await errorsOf([workItem("a", "active", "c"), noStatus]), /work\.1\.status: /);
+    assert.match(await errorsOf({ ...workItem("a", "active", "c"), next: "one step" }), /work\.0\.next: /);
+    await assert.rejects(
+      save(
+        db,
+        target(p),
+        {
+          units: [ownerDecided("sqlite", m, "SQLite にする。", true)],
+          work: [workItem("a", "active", "c"), workItem("a", "done", "c")],
+        },
+        [m],
+      ),
+      /work a: the key appears twice/,
+    );
+    assert.equal(lifecycle(db, "trace:ext-s1/sqlite"), undefined);
+    assert.equal(workRow(db, "a"), undefined);
+    for (const origin of ["harvest", "glean"] as const)
+      assert.match(
+        (
+          await checkRecord(
+            db.ingest,
+            { ...target(p), origin },
+            { units: [], work: [workItem("a", "active", "c")] },
+          )
+        ).errors.join("\n"),
+        /work: only trace records work/,
+      );
+  } finally {
+    await db.done();
+  }
+});
+
+test("work: of several items, one a newer session already saved is left as it is and the others are written, each said apart", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const older = message(db, p, { id: "m1", text: "まだ途中。" });
+    const newer = message(db, p, { id: "m2", text: "終わった。", session: "s2" });
+    db.owner.prepare("update session set started_at = ? where id = 's2'").run(at("2026-09-05T00:00:00Z"));
+    await save(db, tracing(p, "s2"), { units: [], work: [workItem("a", "done", "終わった")] }, [newer]);
+    const { saved } = await save(
+      db,
+      tracing(p, "s1"),
+      { units: [], work: [workItem("a", "active", "まだ途中"), workItem("b", "active", "別件")] },
+      [older],
+    );
+    assert.deepEqual(saved.work, ["work b: created"]);
+    assert.deepEqual(saved.notes, ["work a: left as it is: a newer session's state is already saved"]);
+    assert.deepEqual(
+      [workRow(db, "a"), workRow(db, "b")],
+      [
+        { status: "done", current: "終わった" },
+        { status: "active", current: "別件" },
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("work: check says of each work item what save then does, and writes none", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const older = message(db, p, { id: "m1", text: "まだ途中。" });
+    const newer = message(db, p, { id: "m2", text: "終わった。", session: "s2" });
+    db.owner.prepare("update session set started_at = ? where id = 's2'").run(at("2026-09-05T00:00:00Z"));
+    await save(db, tracing(p, "s2"), { units: [], work: [workItem("a", "done", "終わった")] }, [newer]);
+    const run = await beginTrace(db.ingest, p, "s1");
+    const record = {
+      units: [found("note", older, "まだ途中。")],
+      work: [workItem("a", "active", "まだ途中"), workItem("b", "active", "別件")],
+    };
+    const { checked, saved } = await checkThenSave(db, run, p, record);
+    assert.equal(checked.ok, true, checked.text);
+    assert.match(checked.text, /✓ would: work b: created/);
+    assert.match(checked.text, /△ work a: left as it is: a newer session's state is already saved/);
+    assert.equal(saved.ok, true, saved.text);
+    assert.match(saved.text, /✓ work b: created/);
+    assert.match(saved.text, /△ work a: left as it is: a newer session's state is already saved/);
+  } finally {
+    await db.done();
+  }
+});

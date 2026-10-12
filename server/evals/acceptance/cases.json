@@ -812,6 +812,99 @@
       ]
     },
     {
+      "id": "status-08",
+      "layer": "status",
+      "lang": "en",
+      "summary": "One trace updates a work item already there and creates another, and the save says which it did to each",
+      "given": [
+        {
+          "work": {
+            "key": "export-v2",
+            "title": "Rework CSV export",
+            "current": "notes removed",
+            "next": ["add column order"]
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-two-works",
+            "host": "claude-code",
+            "at": "2026-05-08T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "The export rework is finished. Next, look at why search is slow.",
+                "assistant": "The export rework is merged. Search takes 2 seconds on 10,000 books.",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-two-works",
+          "record": {
+            "units": [
+              {
+                "key": "search-slow",
+                "kind": "finding",
+                "text": "Search takes 2 seconds on 10,000 books",
+                "evidence": [
+                  {
+                    "source": "session:s-en-two-works#1.assistant",
+                    "quote": "Search takes 2 seconds on 10,000 books.",
+                    "role": "states"
+                  }
+                ]
+              }
+            ],
+            "work": [
+              {
+                "key": "export-v2",
+                "title": "Rework CSV export",
+                "goal": "Rework CSV export",
+                "current": "merged",
+                "next": [],
+                "status": "done"
+              },
+              {
+                "key": "search-speed",
+                "title": "Make search fast",
+                "goal": "Search answers within 200 ms on 10,000 books",
+                "current": "measured at 2 seconds",
+                "next": ["find the slow query"],
+                "status": "active"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "work": "export-v2",
+          "is": {
+            "status": "done",
+            "current": "merged",
+            "next": []
+          }
+        },
+        {
+          "work": "search-speed",
+          "is": {
+            "status": "active",
+            "goal": "Search answers within 200 ms on 10,000 books",
+            "next": ["find the slow query"]
+          }
+        },
+        {
+          "save_notes_contain": "work export-v2: updated"
+        },
+        {
+          "save_notes_contain": "work search-speed: created"
+        }
+      ]
+    },
+    {
       "id": "retrieval-01",
       "layer": "retrieval",
       "lang": "ja>ja",
