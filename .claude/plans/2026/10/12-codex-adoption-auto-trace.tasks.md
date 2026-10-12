@@ -94,7 +94,23 @@ trace の Skill と README が両ホストの今の動きと残る差を言い�
   - コミット: `docs: say what Codex adopts and traces on its own, and what the background server's environment decides`
   - 結果: `bun run verify` → 終了コード 0。plan の A5 の `rg` → 0 件。配布前の確認を流した（Codex 0.162.1、macOS、一時の HOME、`env -i` の環境、専用の常駐プロセス、pack した 0.6.52 を手元の marketplace から `codex plugin add` で入れ、起動時の画面で hook 10 個を信頼）: (a) 案内が届いた対話の新しいセッション 4 回のうち 3 回で、エージェントが依頼の後に自分で trace を流し、待っていたセッションが保存された（走らなかった 1 回は依頼が「Say hello in one line.」で、案内はログに届いていた）。record ツールの呼び出し 23 回はどれも `interactive` / `user`。 (b) 1 回目の自動の trace で、別のセッションの AI の返事（「I chose src/util.ts …」）が `agent` の採用で active になった（1 回中 1 回）。その記録は後のセッションに AI の判断の印付きで配信された。 (c) `codex exec` 2 回とも `AUTO_TRACE` は届かず（1 日 1 回の案内は 1 回目に 1 回）、record ツールは呼ばれなかった。`codex exec '$sphica:trace pending'` の `trace_pending` は `headless` / `exec` で記録された（1 回）。exec での保存までは流していない。 (d) `SPHICA_AUTO_TRACE=off` を付けて常駐プロセスを起動し直した新しいセッション 1 回では `AUTO_TRACE` が届かず record ツールも呼ばれなかった。off を外して起動し直すと、次の新しいセッションで `AUTO_TRACE` が届いて trace が走った。 (e) 最初の対話 4 回と exec 3 回のセッション（その時点の 7 つ）がどれも新しく記録されていた。その後の対話 2 回の記録は見ていない。trace の Skill は `allow_implicit_invocation: false` のまま。片付け: 専用の常駐プロセスは pid ファイルの PID を確かめて kill（3 回）、`auth.json` へのリンクと一時の home を消した。持ち主の常駐プロセス（PID 51619, 8776）は起動時刻が変わっていない。PR 本文の「配布前の確認」の節には、PR を作るときにこの数字を書く
 
+## P4: レビューで見つかった直し
+
+全差分のレビューで見つかった、完了条件（文書がコードと実測に合う、コメントの規則）に当たる 2 点を直す。
+
+- [x] T08: README の環境変数の段落を常駐プロセスを通るセッションに絞り、`caller.ts` の冒頭のコメントを 3 行にする
+  - 種別: 変更
+  - 計画: S6
+  - 依存: T07（直す対象の README の段落）, T01（直す対象のコメント）
+  - 変更: `README.md`, `README.ja.md`, `server/src/caller.ts`
+  - 完了条件: `bun run verify` → 終了コード 0。README（英日）が「常駐プロセスを通るセッションでは起動時の環境、`codex exec` は起動した環境」と書いている
+  - コミット: `docs: scope the background server's environment to sessions that run through it`
+  - 結果: `bun run verify` → 終了コード 0。README.md と README.ja.md の段落を「常駐プロセスを通るセッション」に絞り、`codex exec` は起動した環境がフックに届くと書いた（実測 B3・B5）。`server/src/caller.ts` の冒頭のコメントは内容を変えずに 3 行にした
+
 ## 記録
+
+- 2026-10-12 / 全体 / Codex の全差分のレビュー（`6a5568ae..c4acd4b0`、新しい会話、high）: 指摘 2 件、どちらも P3、読んで確認。(1) README（英日）の環境変数の段落が、常駐プロセスを通らない `codex exec` にも当てはまるように読める (2) `server/src/caller.ts` の冒頭のコメントが 4 行で、3 行までの規則を超える / 両方採用。T08 を足した。A1〜A3 と A6 は読み取り専用のため未実行と明記
+- 2026-10-12 / 全体 / push の前の review-shipping（`6a5568ae..c4acd4b0`）: 出荷可の判定、指摘 0 件。pack した 0.6.52 の README と trace の Skill はリポジトリと同じ内容で、`check-hooks-live.mjs` を展開先に向けても終了コード 0。`plugin/hooks/codex.json` は v0.6.51 と同じ blob（信頼し直しは要らない）。手元の Codex のログ 80 件（0.160〜0.162.1）はどれも 1 行目が `session_meta` で、`codex-tui` はターミナルだけ。未確認: Windows のジョブ、`release` の dry run、README の常駐プロセスについての記述（`daemon` サブコマンドがあることだけ確認）
 
 - 2026-10-12 / T06・T07 / 1 つのコミットにした。文書だけなので、コミットの前の Codex のレビューは省き、全差分のレビュー（12 段目）で見る
 - 2026-10-12 / T07 / 変更欄を直した。前: `README.md`, `README.ja.md`, `scripts/check-ai-config.mjs`, `.claude/skills/plugin-release/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`。後: `.claude/skills/plugin-release/SKILL.md` を外した（`.claude/skills/plugin-release` は `.agents/skills/plugin-release` へのリンクで、追跡している実ファイルは `.agents` 側だけ）

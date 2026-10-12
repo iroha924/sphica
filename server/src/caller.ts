@@ -3,9 +3,8 @@
 
 /**
  * Who called a record tool, read only from what the host passes to the MCP server, never from arguments the model writes.
- * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its session, thread, and turn in
- * x-codex-turn-metadata.
- * A value not classified here is unknown, and an unknown caller never adopts an AI decision.
+ * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its session, thread, and
+ * turn in x-codex-turn-metadata. A value not classified here is unknown, and an unknown caller never adopts an AI decision.
  */
 type Mode = "interactive" | "headless" | "sdk" | "unknown";
 
