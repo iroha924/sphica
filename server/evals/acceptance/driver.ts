@@ -289,7 +289,13 @@ export async function createDriver(world: World): Promise<Driver> {
         await projectId(),
         tool,
         callerOf({
-          "x-codex-turn-metadata": { session_id: by.session, turn_id: by.turn, turn_trigger: "user" },
+          "x-codex-turn-metadata": {
+            session_id: by.session,
+            thread_id: by.session,
+            turn_id: by.turn,
+            turn_trigger: "user",
+            thread_source: "user",
+          },
         }),
       );
     const toolUseId = `toolu-${++toolUses}`;

@@ -22,7 +22,7 @@ base: main
 
 3 つの値を送る Codex の呼び出しが対話になり、trace で AI の決定が採用される。子のスレッドと `codex exec` は採用されず、対話でない呼び出しには自動の trace の一覧が返らない。
 
-- [ ] T01: `callerOf` が Codex の本人のスレッドの対話を見分け、本人のスレッドでない呼び出しのターンを置かない。バージョンを上げる
+- [x] T01: `callerOf` が Codex の本人のスレッドの対話を見分け、本人のスレッドでない呼び出しのターンを置かない。バージョンを上げる
   - 種別: 修正
   - 計画: S1, S7
   - 依存: なし
@@ -30,22 +30,25 @@ base: main
   - red: `cd server && node --import ./test/isolate-home.ts --test test/caller.test.ts` → 直す前は、子のスレッド（`thread_source: "subagent"`、`thread_id` が `session_id` と違う）の呼び出しの `turn` が子のターンのままで null にならず、対話の呼び出しの mode が `unknown` のままで落ちる
   - 完了条件: `bun run verify` → 終了コード 0。その前に `bun run release:plan -- --base 47b5d0e2` の種別が `plugin` で、上げたバージョンが npm に無いこと（`npm view sphica versions --json`）を確かめる
   - コミット: `fix(record): tell an interactive Codex thread from a child thread, and bump the version`
+  - 結果: red を実測（直す前の `callerOf` で `node --import ./test/isolate-home.ts --test test/caller.test.ts` が 2 件 fail: 対話の mode が `unknown` のまま、子のスレッドの `turn` が `cx-child-t` のまま）。直した後は 7 pass / 0 fail。ステージした状態で `bun run release:plan -- --base 47b5d0e2` → `plugin`（inputs: `server/src/caller.ts`, `server/src/trace.ts`）。`npm view sphica versions` の最新は 0.6.51 で、0.6.52 に上げた。`bun run verify` → 終了コード 0（受け入れ 137 pass / 0 fail）
 
-- [ ] T02: 実測の形の `_meta` を付けた呼び出しを実際の record サーバーへ送り、採用が通る場合と通らない場合を確かめるテストを足す
+- [x] T02: 実測の形の `_meta` を付けた呼び出しを実際の record サーバーへ送り、採用が通る場合と通らない場合を確かめるテストを足す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（Codex の呼び出しが `interactive` になり、子のターンが null になる判定が要る）
-  - 変更: `server/test/codex-caller.test.ts`
+  - 変更: `server/test/codex-caller.test.ts`, `server/test/record-world.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/codex-caller.test.ts` → pass。対話の begin と save で別のターンの返事が AI の決定として active、子のスレッド・exec・`daemon_recovery` が混ざると candidate、子のスレッドの呼び出しの後は親セッションの返事が全部 candidate、不正な引数の呼び出しは `record_call` に残らず何も保存されない。続けて `bun run verify` → 終了コード 0
   - コミット: `test(record): send Codex's measured call metadata through the record server`
+  - 結果: `node --import ./test/isolate-home.ts --test test/codex-caller.test.ts` → 8 pass / 0 fail（T03 の 2 件を含む）。本人のスレッドの begin と save で別のターンの返事が `agent` の採用で active、trace を流したターンの返事・exec・`daemon_recovery`・`thread_source` 無し・`thread_id` 無し・子のスレッドは candidate、子のスレッドが `trace_pending` を呼んだ後は親セッションの返事が candidate、`session: 17` の `trace_begin` は `record_call` が 0 行。begin と save でセッションが違う場合は save が「This run was begun in another session」で断られる（candidate ではなく拒否）。`bun run verify` → 終了コード 0
 
-- [ ] T03: `trace_pending` の `auto: true` を、Codex の対話でない呼び出しには返さない
+- [x] T03: `trace_pending` の `auto: true` を、Codex の対話でない呼び出しには返さない
   - 種別: 変更
   - 計画: S3
   - 依存: T01（Codex の呼び出しの mode が `interactive` になる判定が要る。無いと Codex の全部の呼び出しを断ってしまう）, T02（実際の record サーバーへ `_meta` を送るテストの土台が要る）
   - 変更: `server/src/mcp-record.ts`, `server/test/codex-caller.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/codex-caller.test.ts` → pass。Codex の `unknown` と `headless` の `auto: true` は一覧を返さず、対話の `auto: true` は自分以外の一覧を返し、Claude Code の `auto: true` は今のまま。続けて `bun run verify` → 終了コード 0
   - コミット: `feat(record): refuse the automatic trace list to a Codex call that is not interactive`
+  - 結果: 止めを外した `mcp-record.ts` で `--test-name-pattern="automatic trace list goes only"` が fail（子のスレッドに一覧が返る）ことを確かめ、戻して pass。Codex の子のスレッド・exec・`daemon_recovery`・`thread_source` 無しの `auto: true` は「the automatic trace does nothing this time」、本人のスレッドは自分以外の一覧、Claude Code は今のまま。`bun run verify` → 終了コード 0
 
 ## P2: 新しい対話の Codex のセッションで自動の trace を案内する
 
@@ -88,3 +91,8 @@ trace の Skill と README が両ホストの今の動きと残る差を言い�
   - コミット: `docs: say what Codex adopts and traces on its own, and what the background server's environment decides`
 
 ## 記録
+
+- 2026-10-12 / T01〜T03 / 1 つのコミットにした（検査とレビューを 1 回にまとめるため）
+- 2026-10-12 / T02 / 変更欄を直した。前: `server/test/codex-caller.test.ts`。後: `server/test/codex-caller.test.ts`, `server/test/record-world.ts`（`reply` がホストの `_meta` を受け取る引数を足した）
+- 2026-10-12 / T01〜T03 / コミットの前の Codex のレビュー（`staged diff on 90bd2ed9`、新しい会話、high）: 指摘 0 件。ステージした 11 ファイル・plan・tasks を読み、`callerOf` の 15 通りを書き込みなしで実行したとのこと。`bun run verify` と子プロセスのテストは読み取り専用のため未実行と明記
+- 2026-10-12 / T01〜T03 / コミットの前の review-shipping: 出荷可の判定。pack した 0.6.52 をリポジトリの外で展開して確認（53 ファイル、`dist` 6 件、`check-tarball.mjs` 終了コード 0、`dist/mcp-record.js` に新しい文面と `thread_source` があり、hook の bundle には無い）。直す前の `src` で新しいテスト 15 件中 7 件が fail、止めを `if (false)` にすると一覧のテストが fail、`thread_id === session_id` を外すと子のスレッドのテストが fail。指摘 1 件: README.md:150 と trace の SKILL.md:61 が、tag の前に直っている必要がある（T06・T07 で直す予定どおり）。Windows は未実行

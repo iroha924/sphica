@@ -187,7 +187,8 @@ export async function callSession(
     .executeTakeFirst();
   if (!c?.host) return null;
   const session = c.host === "codex" ? c.caller_session : c.session_external;
-  // Codex names a child its own thread, so a session there is the caller's; Claude Code's hook says whether a subagent made the call
+  // Codex's owner is not proof of who called: a child thread's call carries the parent's session, and the call's mode tells them apart.
+  // Claude Code's hook says whether a subagent made the call
   return session ? { host: c.host, session, owner: c.host === "codex" || c.owner_turn === 1 } : null;
 }
 

@@ -76,7 +76,8 @@ async function projectOf(cwd: string | undefined, meta: unknown): Promise<Place 
  */
 async function called(name: string, cwd: string | undefined, meta: unknown) {
   const p = await projectOf(cwd, meta);
-  return { p, call: await logCall(conn(), p.projectId, name, callerOf(meta)) };
+  const by = callerOf(meta);
+  return { p, by, call: await logCall(conn(), p.projectId, name, by) };
 }
 
 /** Runs a tool body, turning a failure into an error reply the agent can read. A refused save is its own reply, already within size */
@@ -125,7 +126,10 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const { p, call } = await called("trace_pending", a.cwd, extra._meta);
+      const { p, by, call } = await called("trace_pending", a.cwd, extra._meta);
+      // The session-start notice reads the session's log and this reads the call: when they disagree, nothing is traced unasked
+      if (a.auto && by.host === "codex" && by.mode !== "interactive")
+        return "Sphica did not see a person start this Codex turn in the session's own thread (a child thread, codex exec, or a client it does not know), so the automatic trace does nothing this time.";
       // The caller's own session is still being written, so an automatic trace leaves it out
       const skip = a.auto ? await callSession(conn(), call) : undefined;
       return pendingText(conn(), p.projectId, undefined, { auto: a.auto, skip });

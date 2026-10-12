@@ -57,9 +57,13 @@ export async function recordWorld(
     return client;
   };
   let client = await start();
-  /** A tool's reply text, which must stay within the reply budget whatever was asked */
-  const reply = async (tool: string, args: Record<string, unknown> = {}) => {
-    const r = await client.callTool({ name: tool, arguments: { cwd: repo, ...args } });
+  /** A tool's reply text, which must stay within the reply budget whatever was asked. `meta` is what the host puts in the call */
+  const reply = async (tool: string, args: Record<string, unknown> = {}, meta?: Record<string, unknown>) => {
+    const r = await client.callTool({
+      name: tool,
+      arguments: { cwd: repo, ...args },
+      ...(meta ? { _meta: meta } : {}),
+    });
     const text = (r.content as { text: string }[]).map((c) => c.text).join("");
     assert.ok(
       Buffer.byteLength(text) <= READ_BUDGET,
