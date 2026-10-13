@@ -39,7 +39,7 @@ Your change goes into `main` as one new commit, with your GitHub account as its 
 
 ## Versions
 
-A change to what ships (the MCP servers, the CLI, the hooks, the plugin Skills, `README.md`) has to raise the version in the same pull request. Bring these four to the same number, one patch above the current one:
+A change to what ships (the MCP servers, the CLI, the hooks, the plugin Skills) has to raise the version in the same pull request. A change to `README.md` alone does not: it goes out with the next release. Bring these four to the same number, one patch above the current one:
 
 - `plugin/package.json`
 - `plugin/.claude-plugin/plugin.json`

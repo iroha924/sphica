@@ -75,7 +75,7 @@ that does not bump the version fails CI's version gate. Pull them into a release
 
 | Kind | Changes | Versions to move |
 |---|---|---|
-| `none` | Dev docs that do not ship, repository dev Skills, tests only (the root `README.md` goes into npm, so it is `plugin`) | None |
+| `none` | Dev docs that do not ship, repository dev Skills, tests only, and a change to the root `README.md` alone (it goes into npm, but ships with the next release) | None |
 | `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules | The npm package and the 3 places of the plugin channel |
 
 The source of truth for the classification is `scripts/lib/release-scope.mjs`; the version gate and
@@ -101,7 +101,9 @@ Once, before the first release, the owner sets these up in the web UI (without t
    (if main has moved ahead, the tree CI checked and the tag's tree do not match). Read the Codex review of the last head on the PR;
    fix or decline each finding and resolve every thread before tagging
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
-   Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
+   Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine.
+   From the tag push until the run finishes, push nothing to main, not even a README-only change: the run stops when the tag's commit
+   no longer contains main (`scripts/release-gate.mjs`), and the finish fails when the merge's tree differs from the tag's
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
    that `check`, `pr-body`, and `release` succeeded on that head, and that no review thread is left open (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).

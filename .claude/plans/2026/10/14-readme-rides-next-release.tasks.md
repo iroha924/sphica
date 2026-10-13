@@ -43,13 +43,14 @@ README.md だけの変更がバージョン検査を通り、doctor がそれを
 
 規範と手順が新しい検査と同じことを言い、書き換えた README が入る。
 
-- [ ] T03: 規範と手順の文書に README.md だけの例外を書く
+- [x] T03: 規範と手順の文書に README.md だけの例外を書く
   - 種別: 変更
   - 計画: S3
   - 依存: T01（検査が README.md を入力から外していないと、文書が先に違うことを言う）
   - 変更: `CLAUDE.md`, `AGENTS.md`, `.claude/rules/verification.md`, `.claude/agents/review-shipping.md`, `.agents/skills/plugin-release/SKILL.md`, `CONTRIBUTING.md`
   - 完了条件: `bun run verify:ai` → 通る。`rg -n "README.md" CLAUDE.md AGENTS.md .claude/rules/verification.md .claude/agents/review-shipping.md .agents/skills/plugin-release/SKILL.md CONTRIBUTING.md` → 6 つのファイルすべてに例外の行がある
   - コミット: `docs: say that a change to README.md alone ships with the next release`
+  - 結果: `bun run verify:ai` → 通った（AI config: 28 invariants、リンクのエラー 0）。`rg -c "README.md" CLAUDE.md AGENTS.md .claude/rules/verification.md .claude/agents/review-shipping.md .agents/skills/plugin-release/SKILL.md CONTRIBUTING.md` → 6 つのファイルすべてに例外の行がある（CLAUDE.md は 2 行）
 
 - [ ] T04: README.md と README.ja.md の書き換えを入れる
   - 種別: 変更
@@ -60,3 +61,6 @@ README.md だけの変更がバージョン検査を通り、doctor がそれを
   - コミット: `docs: center the README header, gather the settings, and drop history notes`
 
 ## 記録
+
+- 2026-10-14 / T01 / Codex のコミットのレビュー（c48b8dec、新しい会話）は指摘 0 件。read-only のためテストの実走は未検証と返った / 採否なし
+- 2026-10-14 / T03 / T02 の出荷レビューを待つ間に T03 を先にコミットした（依存は T01 だけ） / 並びはそのまま
