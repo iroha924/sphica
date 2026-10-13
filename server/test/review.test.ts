@@ -162,6 +162,40 @@ test("inside a hunk, an added or removed line that looks like a file header stay
   assert.deepEqual(parseDiff(diff), [{ path: "src/a.ts", added: ["++ b/decoy.ts", "real"], lines: [1, 2] }]);
 });
 
+test("a file after deleted ones keeps its added lines and their numbers, however long the deleted files were", () => {
+  const kept = [
+    "diff --git a/src/kept.ts b/src/kept.ts",
+    "--- a/src/kept.ts",
+    "+++ b/src/kept.ts",
+    "@@ -10,3 +10,4 @@",
+    " const x = 1;",
+    "+  const y = 2;",
+    " const z = 3;",
+    " export { x };",
+  ];
+  const gone = (file: string, n: number) => [
+    `diff --git a/${file} b/${file}`,
+    "deleted file mode 100644",
+    `--- a/${file}`,
+    "+++ /dev/null",
+    `@@ -1${n === 1 ? "" : `,${n}`} +0,0 @@`,
+    ...Array.from({ length: n }, (_, i) => `-line ${i}`),
+  ];
+  const alone = parseDiff(kept.join("\n"));
+  assert.deepEqual(alone, [{ path: "src/kept.ts", added: ["  const y = 2;"], lines: [11] }]);
+  const was = (file: string) => ({ path: file, added: [], lines: [], gone: true });
+  // With the deleted hunk left uncounted, 1 deleted line loses this file's added line and 3 deleted lines misnumber it
+  assert.deepEqual(
+    [1, 3].map((n) => parseDiff([...gone("src/gone.ts", n), ...kept].join("\n"))),
+    [1, 3].map(() => [was("src/gone.ts"), ...alone]),
+  );
+  assert.deepEqual(parseDiff([...gone("src/a.ts", 1), ...gone("src/b.ts", 3), ...kept].join("\n")), [
+    was("src/a.ts"),
+    was("src/b.ts"),
+    ...alone,
+  ]);
+});
+
 // A review judges its records 50 at a time: a check above that never passes records it was not given as judged
 test("review batch: 51 selected records and verdicts for the first 50 name the one left", async () => {
   const db = tempDb();

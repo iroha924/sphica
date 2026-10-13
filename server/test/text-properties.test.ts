@@ -133,6 +133,45 @@ test("parseDiff takes every added line of a hunk, even one that looks like a fil
   );
 });
 
+test("parseDiff reads a file the same after a deleted file of any length and content", () => {
+  const line = fc.oneof(
+    fc.string({ maxLength: 30 }).map((s) => s.replace(/[\r\n]/g, "")),
+    fc.constantFrom("--- a/x", "+++ b/y", "diff --git a/z b/z", "@@ -1 +1 @@", "-- a/x", "-- /dev/null"),
+  );
+  fc.assert(
+    fc.property(
+      fc.array(line, { minLength: 1, maxLength: 20 }),
+      fc.array(line, { minLength: 1, maxLength: 20 }),
+      fc.integer({ min: 1, max: 5000 }),
+      (removed, added, start) => {
+        const gone = [
+          "diff --git a/gone.ts b/gone.ts",
+          "deleted file mode 100644",
+          "--- a/gone.ts",
+          "+++ /dev/null",
+          `@@ -1,${removed.length} +0,0 @@`,
+          ...removed.map((l) => `-${l}`),
+        ];
+        const kept = [
+          "diff --git a/kept.ts b/kept.ts",
+          "--- a/kept.ts",
+          "+++ b/kept.ts",
+          `@@ -${start},1 +${start},${added.length + 1} @@`,
+          " context",
+          ...added.map((l) => `+${l}`),
+        ];
+        const alone = parseDiff(kept.join("\n"));
+        assert.deepEqual(alone, [{ path: "kept.ts", added, lines: added.map((_, i) => start + 1 + i) }]);
+        assert.deepEqual(parseDiff([...gone, ...kept].join("\n")), [
+          { path: "gone.ts", added: [], lines: [], gone: true },
+          ...alone,
+        ]);
+      },
+    ),
+    runs,
+  );
+});
+
 /** The fastest of 5 runs of mask, after one warm-up run: the least touched by other work on the machine (test files run in parallel). */
 function timed(input: string): number {
   mask(input);
