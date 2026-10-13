@@ -13,7 +13,7 @@
     "harvest": "issue a harvest draft for the pull request (fake gh serves world.json), write the record, check, save",
     "glean": "issue a glean draft in the given session, write the record, check, save",
     "edit_file": "change a world file in the temp repository and commit",
-    "search": "call the MCP search tool",
+    "search": "call the MCP search tool; with as_of { before: \"trace\" }, as of just before the latest trace step",
     "read": "call the MCP read tool",
     "status": "call the MCP status tool",
     "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
@@ -1319,6 +1319,37 @@
         },
         {
           "ranks_above": ["trace:s-ja-postgres/postgres", "trace:s-ja-storage/storage"]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-14",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "A search as of a time before a supersession shows the replaced decision as active then, says what it is now, and leaves out the successor saved later",
+      "given": [
+        {
+          "case": "status-02"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "pnpm installs",
+          "as_of": {
+            "before": "trace"
+          }
+        }
+      },
+      "then": [
+        {
+          "hit_state": {
+            "unit": "harvest:12/pnpm",
+            "lifecycle": "active",
+            "now": "superseded"
+          }
+        },
+        {
+          "hits_exclude": "trace:s-en-npm/npm"
         }
       ]
     },

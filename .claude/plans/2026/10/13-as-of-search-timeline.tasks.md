@@ -33,13 +33,26 @@ base: main
   - 結果: `bun run test` → 終了コード 0（1265 件 pass、`search.ts` の行の網羅 100%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 247 / 247
   - 結果: `bun run release:plan -- --base b38325c6` → `plugin`、4 か所とも 0.6.55。`npm view sphica@0.6.55 version` → 404
   - 結果: `python3 <scratchpad>/mutate.py` → `review-shipping` が「テストが実装を見分けていない」と挙げた 10 個の書き換え（その時点の置き換え先、後から足された anchor、3 つの上限、「後から保存」の境目）を、テストを 2 件足した後にそれぞれ当てて流すと 10 個とも落ちた。`review-shipping` に止める指摘は無い
-- [ ] T02: MCP の `search` に `as_of` を足す（入力の検証、返信の注記、description、受け入れケース）
+- [x] T02: MCP の `search` に `as_of` を足す（入力の検証、返信の注記、description、受け入れケース）
   - 種別: 追加
   - 計画: S1, S3
   - 依存: T01（`searchUnits` の asOf が無いと、引数を渡す先が無い）
-  - 変更: `server/src/mcp.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
+  - 変更: `server/src/mcp.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`, `server/test/search.test.ts`, `server/test/acceptance-cases.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
   - 完了条件: `bun run test && bun run acceptance` → どちらも終了コード 0。受け入れケース（as-of の検索）と入力のテスト（日付だけ、オフセット無し、年の端、`sources`・`asked` との組み合わせ）は、実装の前に流して落ちることを確かめてある
   - コミット: `feat(mcp): take as_of in search and say what the snapshot covers`
+  - 結果: red: `SPHICA_ACCEPTANCE_LAYER=retrieval node --test evals/acceptance/run.ts` → `server/src/search.ts` を T01 の前（b6d1ee02）に戻すと、足した retrieval-14 だけが落ちた（置き換えられた決定が superseded のまま返る）。戻すと 14 件 pass
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="as_of|as of a past time keeps" test/plugin.test.ts test/search.test.ts` → `mcp.ts` と `search.ts` を HEAD に戻すと 2 件とも落ちた（`as_of` が未知の引数として断られる、返信が frame から始まる）。戻すと通った
+  - 結果: `bun run test` → 終了コード 0（1267 件 pass）。`bun run verify` → 終了コード 0（静的検査、bundle、`sql:reach` 247 / 247、`sql:live`、hook と Codex の信頼の検査、受け入れ 139 件 pass）
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="search takes as_of" test/plugin.test.ts` → `review-shipping` の指摘（0 件のときの文が、as_of と一緒に使えない sources の検索を勧める）を直した後に pass。`review-shipping` に止める指摘は無く、v0.6.54 の bundle と比べて as_of 無しの返信 40,826 組に差が無いと報告した（こちらでは流し直していない）
+
+- [ ] T09: 後から保存された記録を保存の古い順に取り、索引の外の候補の上限のテストを見分けられる形にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の `searchAsOf` が要る）
+  - 変更: `server/src/search.ts`, `server/test/search.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="search as of a past time" test/search.test.ts` → 後から保存された一致が 201 件を超え、最古の 1 件の順位が低いとき、`later` の先頭が最古の記録でないので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。`later` が保存の古い順の先頭 10 件になり、索引の外の候補は 200 件ちょうどで止まることをテストが確かめる（上限を 20 に書き換えると落ちる）
+  - コミット: `fix(search): name the records saved later from the oldest, not by rank`
 
 ## P2: read の timeline
 
@@ -103,3 +116,6 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T01 / plan の D は「後から足された field の語で当たらないこと」を挙げていたが、schema が field の後からの追加を禁じている（trigger の文面 `field values are written with the unit`） / field には時刻の条件を付けず、記録の保存の時刻だけで判定する。そのテストは書かない
 - 2026-10-13 / T01 / 返す型 `AsOfNotes` を export すると knip が「使われていない export」で落とした / T02 で `mcp.ts` が使うまで export しない
 - 2026-10-13 / T01 / `review-shipping` の指摘（テストが見分けていない 10 か所） / 採用。T01 の中でテストを足した。その時点の置き換え先を選ぶ `orderBy` は、同じ時点で開いている行が 1 つしか無いので消した
+- 2026-10-13 / T02 / 変更欄を変えた。前: `server/src/mcp.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`。新: それに `server/test/search.test.ts`（返信の予算のテスト）と `server/test/acceptance-cases.test.ts`（retrieval の件数 13 → 14）を足した / 受け入れケースの件数はテストが固定していて、返信の組み立ては `search.ts` にある
+- 2026-10-13 / T01 / Codex のコミットのレビュー（dc5a4260）: F1（後から保存された記録を順位で 200 件に絞ってから時刻順に並べるので、最古の記録が落ちる。再現つき）と F2（索引の外の候補の上限のテストが 200 と 20 を見分けない）。どちらも採用 / 修正タスク T09 を足した
+- 2026-10-13 / T02 / `review-shipping` の指摘 2 件。0 件のときの文が sources の検索を勧める件は採用して T02 の中で直した。受け入れケースの step の説明が「MCP の search を呼ぶ」なのに driver は `searchUnits` を直接呼ぶ件は、今までの step と同じ作りで、MCP の境界は `plugin.test.ts` が見ているので直さない

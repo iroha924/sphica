@@ -726,7 +726,7 @@ function hitText(h: UnitHit): string {
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
   return [
     // A key cut for display is not one read takes: the id beside it is
-    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.now ? `, now ${h.now}` : ""}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
     preview(h.text, SHOWN.text, true),
     ...(h.why ? [`Why: ${preview(h.why, SHOWN.why, true)}`] : []),
     ...(h.revisit_when ? [`Revisit when: ${preview(h.revisit_when, SHOWN.revisit, true)}`] : []),
@@ -742,26 +742,59 @@ function hitText(h: UnitHit): string {
 const withNotes = (body: string, notes: string[]) => [framed(body), ...notes.filter(Boolean)].join("\n");
 
 /**
- * search's whole reply for record hits within READ_BUDGET: the hits in the frame, with Sphica's words for an AI's decision when one is
- * shown, then outside it the hits that did not fit, named by u<id> for read, and after (where the search stopped).
+ * What a search as of a past time says around its hits: first the time and what it covers, then what it left out. Sphica's own words,
+ * so they go outside the frame.
  */
-export function hitsReply(hits: UnitHit[], after: string): string {
+export function asOfLines(at: string, n: AsOfNotes | undefined): { lead: string; notes: string[] } {
+  const more = n?.laterMore
+    ? `, and ${n.laterMore} more${n.laterStopped ? " at least" : ""}`
+    : n?.laterStopped
+      ? ", and possibly more"
+      : "";
+  return {
+    lead: `As of ${at}: which records existed, and their states, anchors, aliases, and replacements, are as Sphica held them then (by when it saved them, not when the words were said); the order follows today's index. read shows each record as it is now, with its dated history.`,
+    notes: [
+      n?.later.length
+        ? `Saved after this time and not counted: ${n.later.map((l) => `u${l.id} (saved ${l.created_at})`).join(", ")}${more}.`
+        : "",
+      n?.extraStopped
+        ? `Records found only by an anchor or alias they have lost since were looked at up to ${EXTRA_MAX}; more may match.`
+        : "",
+    ].filter(Boolean),
+  };
+}
+
+/**
+ * search's whole reply for record hits within READ_BUDGET: the hits in the frame, with Sphica's words for an AI's decision when one is
+ * shown, then outside it the hits that did not fit, named by u<id> for read, and after (where the search stopped). A search as of a
+ * past time opens with that time and names what it left out.
+ */
+export function hitsReply(
+  hits: UnitHit[],
+  after: string,
+  asOf?: { at: string; notes: AsOfNotes | undefined },
+): string {
   const parts = hits.map(hitText);
+  const lines = asOf ? asOfLines(asOf.at, asOf.notes) : undefined;
   const reply = (kept: number) =>
-    withNotes(
-      [
-        ...parts.slice(0, kept),
-        ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
-      ].join("\n\n"),
-      [
-        leftOut(
-          hits.slice(kept).map((h) => `u${h.id}`),
-          "hits",
-        ),
-        after,
-        "Read a record by its key before relying on it.",
-      ],
-    );
+    [
+      ...(lines ? [lines.lead] : []),
+      withNotes(
+        [
+          ...parts.slice(0, kept),
+          ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
+        ].join("\n\n"),
+        [
+          leftOut(
+            hits.slice(kept).map((h) => `u${h.id}`),
+            "hits",
+          ),
+          ...(lines?.notes ?? []),
+          after,
+          "Read a record by its key before relying on it.",
+        ],
+      ),
+    ].join("\n");
   return reply(fitCount(parts, READ_BUDGET, reply));
 }
 

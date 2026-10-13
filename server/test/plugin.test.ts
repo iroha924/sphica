@@ -35,7 +35,7 @@ import { READ_BUDGET } from "../src/reply-budget.ts";
 import { checkedText } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { fakeCodex } from "./fake-codex.ts";
-import { at, run as extractionRun, hash, insert, message, project, tempDb } from "./temp-db.ts";
+import { at, run as extractionRun, hash, insert, manyAdopted, message, project, tempDb } from "./temp-db.ts";
 import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -1827,5 +1827,119 @@ test("an error the SDK builds itself, repeating what the caller sent, stays with
     assert.ok(!fine.isError);
   } finally {
     await w.done();
+  }
+});
+
+// as_of reaches the database as text compared with stored times, so only a time in their form may pass the tool's boundary
+test("search takes as_of only as a time with its offset, for record search alone, and says what the past view covers", async () => {
+  const db = tempDb();
+  const repo = tempDir("sphica-asof-");
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/asof.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/asof", "o/asof");
+  // Twelve records saved at one time; one is withdrawn two days later
+  manyAdopted(db, p, 12, (i) => ({ key: `trace:ext-s1/k${i}`, kind: "decision", stance: "do" }));
+  const withdrawn = db.owner.prepare("select id, run_id from unit where key = 'trace:ext-s1/k0'").get() as {
+    id: number;
+    run_id: number;
+  };
+  insert(db, "unit_state", {
+    unit_id: withdrawn.id,
+    from_state: "active",
+    to_state: "withdrawn",
+    at: at("2026-09-29T00:00:00Z"),
+    reason: "later withdrawal",
+    run_id: withdrawn.run_id,
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const search = async (args: Record<string, unknown>) => {
+    const r = await client.callTool({
+      name: "search",
+      arguments: { cwd: repo, query: "settled owner", limit: 20, ...args },
+    });
+    return { text: (r.content as { text: string }[])[0]?.text ?? "", isError: r.isError === true };
+  };
+  try {
+    // An offset is taken and the time is said back in UTC; the lead comes before the frame, in Sphica's own words
+    const then = await search({ as_of: "2026-09-28T09:00:00+09:00" });
+    assert.equal(then.isError, false);
+    assert.match(
+      then.text,
+      /^As of 2026-09-28T00:00:00\.000Z: which records existed, .* as Sphica held them then .*; the order follows today's index\. read shows each record as it is now, with its dated history\.\n<past-records id="[0-9a-f]+">\n/,
+    );
+    assert.equal(then.text.match(/^## trace:ext-s1\/k\d+ /gm)?.length, 12);
+    // The state is the one of that time, with today's beside it when it differs
+    assert.match(
+      then.text,
+      /^## trace:ext-s1\/k0 \(u\d+\): decision do, active, now withdrawn, the owner's decision$/m,
+    );
+    assert.match(then.text, /^## trace:ext-s1\/k1 \(u\d+\): decision do, active, the owner's decision$/m);
+    assert.doesNotMatch(then.text, /Saved after this time/);
+    // Without as_of the reply opens with the frame and shows today's state only
+    const now = await search({});
+    assert.match(now.text, /^<past-records id="[0-9a-f]+">\n/);
+    assert.match(now.text, /^## trace:ext-s1\/k0 \(u\d+\): decision do, withdrawn, the owner's decision$/m);
+    assert.doesNotMatch(now.text, /As of|now withdrawn/);
+
+    // Before the records were saved: none is a hit, and those of today are named after the answer, ten of them and a count
+    const before = await search({ as_of: "2026-09-26T00:00:00Z" });
+    assert.equal(before.isError, false);
+    const [answer, later, ...rest] = before.text.split("\n");
+    assert.match(
+      answer ?? "",
+      /^No record as of 2026-09-26T00:00:00\.000Z holds most of: settled, owner\. 0 weaker matches left out\. /,
+    );
+    // sources cannot be searched as of a time, so the way on is today's records, not a source search
+    assert.match(answer ?? "", / or without as_of for the records as they are now; /);
+    assert.doesNotMatch(answer ?? "", /search sources/);
+    assert.match((await search({ query: "nothingmatches" })).text, / or search sources; /);
+    assert.match(
+      later ?? "",
+      /^Saved after this time and not counted: (u\d+ \(saved 2026-09-27T00:00:00\.000Z\), ){9}u\d+ \(saved 2026-09-27T00:00:00\.000Z\), and 2 more\.$/,
+    );
+    assert.deepEqual(rest, []);
+
+    // Digits finer than milliseconds are dropped
+    assert.match(
+      (await search({ as_of: "2026-09-28T00:00:00.123999Z" })).text,
+      /^As of 2026-09-28T00:00:00\.123Z: /,
+    );
+
+    // Anything else is refused with the form to use: a date alone, no offset, no seconds, words, and a year that leaves four digits in UTC
+    for (const as_of of [
+      "2026-09-28",
+      "2026-09-28T00:00:00",
+      "2026-09-28T00:00Z",
+      "yesterday",
+      "0000-01-01T00:00:00+09:00",
+      "9999-12-31T23:59:59-14:00",
+    ]) {
+      const r = await search({ as_of });
+      assert.deepEqual(
+        [r.isError, r.text],
+        [
+          true,
+          "Nothing was searched: as_of must be a time with its offset, such as 2026-10-01T09:00:00+09:00 or 2026-10-01T00:00:00Z, from year 0000 to 9999 in UTC; a date alone is not taken.",
+        ],
+        as_of,
+      );
+    }
+    // It belongs to record search only
+    for (const other of [{ sources: true }, { asked: true }])
+      assert.deepEqual(await search({ as_of: "2026-09-28T00:00:00Z", ...other }), {
+        text: "as_of cannot be combined with sources or asked.",
+        isError: true,
+      });
+  } finally {
+    await client.close();
+    await db.done();
   }
 });

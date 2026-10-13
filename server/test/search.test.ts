@@ -1614,3 +1614,54 @@ test("search as of a past time says where its caps cut: the index's candidates, 
     await db.done();
   }
 });
+
+test("a search as of a past time keeps its lead and what it left out within the reply budget", () => {
+  const hit = (id: number): UnitHit => ({
+    id,
+    key: `trace:ext-s1/k${id}`,
+    kind: "decision",
+    stance: "do",
+    lifecycle: "active",
+    text: `budgetword ${"t".repeat(3000)}`,
+    why: "w".repeat(3000),
+    revisit_when: null,
+    options: [],
+    anchors: [],
+    matched: ["budgetword"],
+    aliasOnly: false,
+    ...(id === 1 ? { now: "superseded" } : {}),
+  });
+  const notes = {
+    later: Array.from({ length: 10 }, (_, i) => ({ id: 900 + i, created_at: at("2026-09-27T00:00:00Z") })),
+    laterMore: 190,
+    laterStopped: true,
+    extraStopped: true,
+  };
+  const reply = hitsReply(
+    Array.from({ length: 60 }, (_, i) => hit(i + 1)),
+    "Stopped after 2000 candidates by rank; more may match.",
+    { at: at("2026-09-28T00:00:00Z"), notes },
+  );
+  assert.ok(Buffer.byteLength(reply) <= 32 * 1024, String(Buffer.byteLength(reply)));
+  const [lead, opening] = reply.split("\n");
+  assert.match(lead ?? "", /^As of 2026-09-28T00:00:00\.000Z: /);
+  assert.match(opening ?? "", /^<past-records id="[0-9a-f]+">$/);
+  assert.match(reply, /^## trace:ext-s1\/k1 \(u1\): decision do, active, now superseded$/m);
+  // What Sphica says itself comes after the frame, in a fixed order: hits left out, saved later, the cap outside the index, where it stopped
+  const outside = reply.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "";
+  assert.match(
+    outside,
+    /^\n\d+ more hits left out to keep this reply within 32 KiB: read with refs \[[^\]]+\](, then read with refs \[[^\]]+\])*\.\nSaved after this time and not counted: u900 \(saved 2026-09-27T00:00:00\.000Z\), .*u909 \(saved 2026-09-27T00:00:00\.000Z\), and 190 more at least\.\nRecords found only by an anchor or alias they have lost since were looked at up to 200; more may match\.\nStopped after 2000 candidates by rank; more may match\.\nRead a record by its key before relying on it\.$/,
+  );
+  // A page of later matches cut with ten or fewer to name says more may follow, and a search with nothing to add says nothing
+  assert.match(
+    hitsReply([hit(2)], "", {
+      at: at("2026-09-28T00:00:00Z"),
+      notes: { ...notes, laterMore: 0, extraStopped: false },
+    }),
+    /u909 \(saved 2026-09-27T00:00:00\.000Z\), and possibly more\.\nRead a record/,
+  );
+  const quiet = hitsReply([hit(2)], "", { at: at("2026-09-28T00:00:00Z"), notes: undefined });
+  assert.doesNotMatch(quiet, /Saved after|looked at up to/);
+  assert.match(quiet, /^As of /);
+});
