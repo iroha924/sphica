@@ -52,13 +52,14 @@ README.md だけの変更がバージョン検査を通り、doctor がそれを
   - コミット: `docs: say that a change to README.md alone ships with the next release`
   - 結果: `bun run verify:ai` → 通った（AI config: 28 invariants、リンクのエラー 0）。`rg -c "README.md" CLAUDE.md AGENTS.md .claude/rules/verification.md .claude/agents/review-shipping.md .agents/skills/plugin-release/SKILL.md CONTRIBUTING.md` → 6 つのファイルすべてに例外の行がある（CLAUDE.md は 2 行）
 
-- [ ] T04: README.md と README.ja.md の書き換えを入れる
+- [x] T04: README.md と README.ja.md の書き換えを入れる
   - 種別: 変更
   - 計画: S4
   - 依存: T01（README.md が入力のままだと、後から足すコミットがバージョン検査の対象になる）
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `node scripts/check-markdown.mjs README.md README.ja.md` → 0 件。`mise exec -- node scripts/check-links.mjs` → エラー 0
   - コミット: `docs: center the README header, gather the settings, and drop history notes`
+  - 結果: `node scripts/check-markdown.mjs README.md README.ja.md` → 0 issues in 0 files。`mise exec -- node scripts/check-links.mjs` → エラー 0（日本語版の `#インストール`・`#設定`・`#セキュリティ` を含む）。prose-reviewer の指摘 6 件のうち、英日の食い違いと削りで落ちた但し書きを直した
 
 ## 記録
 

@@ -1,34 +1,40 @@
+<div align="center">
+
 # Sphica
 
-[![License](https://img.shields.io/github/license/iroha924/sphica)](https://github.com/iroha924/sphica/blob/main/LICENSE)
-[![CI](https://github.com/iroha924/sphica/actions/workflows/check.yml/badge.svg)](https://github.com/iroha924/sphica/actions/workflows/check.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/iroha924/sphica/badge)](https://scorecard.dev/viewer/?uri=github.com/iroha924/sphica)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14787/badge)](https://www.bestpractices.dev/projects/14787)
-[![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](https://www.npmjs.com/package/sphica#provenance)
-[![Dependabot: GitHub Actions](https://img.shields.io/badge/Dependabot-GitHub%20Actions-025E8C?logo=dependabot)](https://github.com/iroha924/sphica/blob/main/.github/dependabot.yml)
-
-What the badges cover: CI runs the checks in [Contributing](https://github.com/iroha924/sphica#contributing), and how each release is built and published is in [Security](https://github.com/iroha924/sphica#security). A passing badge does not mean the code is free of bugs or vulnerabilities.
+**Local memory of past implementation and decisions for Claude Code and Codex.**
 
 English | [日本語](https://github.com/iroha924/sphica/blob/main/README.ja.md)
 
-**Local memory of past implementation and decisions for Claude Code and Codex.**
 Sphica records your coding sessions, and keeps what was decided, rejected, deferred, and built, each record quoting the words it came from.
 Your agent finds those records when it searches, and sees the relevant ones on its own when it reads or edits a file they apply to (in Codex, before a shell command that names the file and before `apply_patch`).
 The database is a single SQLite file on your machine.
+
+[![npm](https://img.shields.io/npm/v/sphica?logo=npm&label=sphica)](https://www.npmjs.com/package/sphica)
+[![License](https://img.shields.io/github/license/iroha924/sphica)](https://github.com/iroha924/sphica/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/iroha924/sphica/badge)](https://scorecard.dev/viewer/?uri=github.com/iroha924/sphica)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14787/badge)](https://www.bestpractices.dev/projects/14787)
+[![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](https://www.npmjs.com/package/sphica#provenance)
+
+<a href="https://github.com/iroha924/sphica#install"><img alt="Install Sphica for free" src="https://img.shields.io/badge/Sphica-Install_for_free-2ea44f?style=for-the-badge" height="44"></a>
+
+<sub>What the badges cover: how each release is built and published is in [Security](https://github.com/iroha924/sphica#security). A badge does not mean the code is free of bugs or vulnerabilities.</sub>
+
+</div>
 
 ## Features
 
 - **Automatic recording.** Sphica keeps your prompts, the agent's final reply for each turn, and the paths of the files a turn changed (by the edit tools, or seen in `git status` at the turn's end).
 - **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from. A decision counts as adopted in two ways: you said so (your decision), or the agent decided it itself in that session and its reply says so (an AI's decision). An AI's decision is shown as one, never replaces yours, and is never used for public interfaces, security and permissions, releases, or forgetting.
-- **Traced without asking.** When you start a new session (an interactive one in Claude Code; one started from the terminal in Codex) and sessions from the last 14 days wait to be traced, the agent is asked to trace up to two of them, oldest first, after your request is done. Run `/sphica:trace` yourself to keep something right away, and `/sphica:trace pending` for older sessions. To turn the automatic trace off, set the plugin's `auto_trace` option to false in `/config` (Claude Code 2.1.269 or later), or set `"SPHICA_AUTO_TRACE": "off"` under `env` in Claude Code's `settings.json`; recording and your own `/sphica:trace` keep working. Either one off keeps it off, so to turn it back on, clear both. In Codex, set `SPHICA_AUTO_TRACE` to `off` in the environment Codex's background server starts with (see "What Sphica can't do yet" for when a value takes effect).
+- **Traced without asking.** When you start a new session (an interactive one in Claude Code; one started from the terminal in Codex) and sessions from the last 14 days wait to be traced, the agent is asked to trace up to two of them, oldest first, after your request is done. Run `/sphica:trace` yourself to keep something right away, and `/sphica:trace pending` for older sessions. To turn the automatic trace off, see [Settings](https://github.com/iroha924/sphica#settings); recording and your own `/sphica:trace` keep working.
 - **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and up to five issues the body says it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
 - **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
-- **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog (if another session is reading the database, it asks you to run it again to finish clearing the bytes). Records that cited them are judged again and leave active when nothing else supports them; a record's own text stays as it was.
-- **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. An AI's decision is marked as one, with a note that the agent may depart from it for a stated reason. Works in both Claude Code and Codex.
-- **Shown after a shell command changes a file (trial, off by default).** A script or command that rewrites a file without naming it gets past the delivery before the command. With the `shell_write_delivery` option on, Sphica compares the content of the files your decisions apply to before and after each shell command, and right after the command shows the decisions on the files whose content changed and that the agent has not seen in this conversation. Turn it on in `/config` (Claude Code 2.1.269 or later), or set `SPHICA_SHELL_WRITE_DELIVERY` to `on` in the environment the host starts from (either host; `off` turns it off whatever the option says). In Codex, trust the new hook in `/hooks` after updating. It keeps content hashes and one line per command in `~/.sphica/shell-state/`.
+- **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog. Records that cited them are judged again and leave active when nothing else supports them; a record's own text stays as it was.
+- **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. An AI's decision is marked as one, with a note that the agent may depart from it for a stated reason.
+- **Shown after a shell command changes a file (trial, off by default).** A script or command that rewrites a file without naming it gets past the delivery before the command. With the `shell_write_delivery` setting on, Sphica compares the content of the files your decisions apply to before and after each shell command, and right after the command shows the decisions on the files whose content changed and that the agent has not seen in this conversation. [Settings](https://github.com/iroha924/sphica#settings) says how to turn it on.
 - **Search in Japanese and English.** Records are made with search words in both languages, so a question in either language is more likely to find them.
 - **Find what you asked before.** Ask the agent whether you asked something like this before: `search` with `asked: true` shows your earlier messages in other sessions, the records that quote them (with what replaced them), and says "no recorded decision" when none was recorded, including a matter you raised in several sessions.
-- **See how a decision changed, and what held at a past time.** Ask the agent how a decision came to be: `read` with `timeline: true` shows the decisions it replaced or was replaced by, when each change took effect and why, and the findings, dead ends, and questions saved by the same trace or harvest or tied to the same code, oldest first. It is an overview; the quoted words are in the full record. Ask what was decided as of a time: `search` with `as_of` (a time with its offset, such as `2026-10-01T09:00:00+09:00`) searches the records as Sphica held them then, by the states and replacements of that time, and names apart the ones saved later that match now (the first ten, then a count). The time is when Sphica saved a record, not when the words were said, so a session traced late or a pull request harvested late counts from the day it was saved.
+- **See how a decision changed, and what held at a past time.** Ask the agent how a decision came to be: `read` with `timeline: true` shows the decisions it replaced or was replaced by, when each change took effect and why, and the findings, dead ends, and questions saved by the same trace or harvest or tied to the same code, oldest first. Ask what was decided as of a time: `search` with `as_of` (a time with its offset, such as `2026-10-01T09:00:00+09:00`) searches the records as Sphica held them then, by the states and replacements of that time, and names apart the ones saved later that match now (oldest first, up to ten, then a count). The time is when Sphica saved a record, not when the words were said, so a session traced late or a pull request harvested late counts from the day it was saved.
 - **See what is live, and what needs a look.** Ask for the overview: `view: "live"` lists every active decision and constraint by the directory it applies to; `view: "look"` lists records whose file is gone or whose symbol is not found, conditions you said would bring a rejected option back, and lines in your instruction files whose record was replaced. Nothing is expired or changed on its own.
 - **See what Sphica showed your agent.** Ask what Sphica has been showing: `view: "delivery"` (with `days`, 1 to 90, 7 by default) counts the deliveries the hooks logged by event and by main agent or subagent, lists the records shown most, and gives recent sessions with each record's key, so you can judge whether each helped. It says what the log leaves out, and marks a record "named later" only when a later reply wrote its key.
 - **Track your own fields on records (trial).** Say in a session which extra field to keep on records (the affected tenant, a p95 figure); trace then saves a value only when the conversation writes it, with the quote. `/sphica:fields` shows each field and how many records carry a value.
@@ -83,7 +89,7 @@ sphica init
 
 This creates `~/.sphica/sphica.db` and registers the repository. Running it again keeps the database and the registration as they are. If the repository has no `origin` remote, give it a name: `sphica init --name <name>`.
 
-If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor. This applies to pull requests harvested after binding; ones harvested before keep your words as a contributor's. Only the first account is bound: if `gh` is later signed in to another one, init says so and adds nothing, and there is no command to change it (move the database aside and run init again). Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
+If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor (in pull requests harvested after binding). Only the first account is bound, and there is no command to change it: move the database aside and run init again. Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
 
 **4. Check the setup**
 
@@ -111,26 +117,35 @@ To bring back earlier decisions, ask the agent:
 
 Without being asked, Sphica adds a few past records to what the agent sees, each marked as a past record rather than an instruction:
 
-- At session start: the current work and project-wide constraints, and, when earlier sessions wait to be traced, a request to trace them after your request is done (in a new interactive Claude Code session, or a new Codex session started from the terminal).
+- At session start: the current work and project-wide constraints, and, when earlier sessions wait to be traced, a request to trace them after your request is done.
 - On a prompt that names a recorded code symbol, file path, or option.
 - Before the agent reads or edits a file a decision applies to, and before a shell command that names such a file (naming it is not proof the command reads it). A read shows each record once per session.
-- After a shell command that changed the content of such a file, when the `shell_write_delivery` option is on (off by default): the decisions on it the agent has not seen in this conversation.
-- Before a review. When you run your own review command (any name containing `review`, or a name listed, comma-separated, in the plugin's
-  `review_commands` option in `/config` (Claude Code 2.1.269 or later) or the `SPHICA_REVIEW_COMMANDS` environment variable), it gets the decisions your local
-  change touches. When `review_commands` names any command, `SPHICA_REVIEW_COMMANDS` is not read. `/sphica:review` checks them itself.
+- After a shell command that changed the content of such a file, when the `shell_write_delivery` setting is on (off by default): the decisions on it the agent has not seen in this conversation.
+- Before a review. When you run your own review command (any name containing `review`, or a name listed in the review commands [setting](https://github.com/iroha924/sphica#settings)), it gets the decisions your local change touches. `/sphica:review` checks them itself.
 
-In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, before a shell command that names such a file (Codex reads files through shell commands, so this covers reads), and, with the option on, after a shell command that changed one.
+In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, before a shell command that names such a file (Codex reads files through shell commands, so this covers reads), and, with the setting on, after a shell command that changed one.
 Before a review, Codex gets the same decisions in three cases: its built-in review (`/review`, `codex review`), a review skill you name in the prompt (`$my-review`), and a review skill the agent picks itself, when it prints the skill's file with one plain command such as `cat <path>/SKILL.md`. A skill is a review when its name contains `review` or is listed in `SPHICA_REVIEW_COMMANDS`. `$sphica:review` checks them itself.
 
 The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is less likely to be mistaken for "never decided".
+
+## Settings
+
+| Setting | Default | Claude Code option | Environment variable |
+|---|---|---|---|
+| Automatic trace | on | `auto_trace` | `SPHICA_AUTO_TRACE` (`off`) |
+| Delivery after a shell command changes a file (trial) | off | `shell_write_delivery` | `SPHICA_SHELL_WRITE_DELIVERY` (`on` or `off`) |
+| Your own review commands whose names do not contain `review`, comma-separated | none | `review_commands` | `SPHICA_REVIEW_COMMANDS` |
+
+- **Claude Code.** Set the plugin's options in `/config` (Claude Code 2.1.269 or later), or set the variables in the environment Claude Code starts from; for the automatic trace, `"SPHICA_AUTO_TRACE": "off"` under `env` in `settings.json` works too. The automatic trace stays off when either the option or the variable says off, so to turn it back on, turn the option on and unset the variable. `SPHICA_SHELL_WRITE_DELIVERY` wins over the option, on or off. When `review_commands` names any command, `SPHICA_REVIEW_COMMANDS` is not read.
+- **Codex.** Codex plugins have no options page, so the settings are the environment variables. In a session that runs through Codex's background server (the terminal does by default), Sphica's hooks see the environment that server started with, not the terminal you open later: a value you set afterwards takes effect the next time the server starts (`codex app-server daemon restart` starts it again; work running in Codex may be interrupted). `codex exec` does not use that server, so its hooks see the environment it was started from. A background server started from inside an agent's shell (for example `! codex` in Claude Code) keeps that agent's variables too: Sphica then takes every session that runs through it for that agent's child and records nothing until the server starts again.
 
 ## What gets recorded and where it goes
 
 - **Where.** The database is `~/.sphica/sphica.db`. Captured sessions wait in a local queue, `~/.sphica/spool`, until they are written to it. Each machine has its own database; nothing is shared between machines.
 - **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. In Codex, a session is recorded only when Codex's own session log shows the messages come from the session's own thread: what Codex's built-in review is asked (its instructions, the subject of the commit it names) is not recorded, and neither is a `codex exec --ephemeral` run, which keeps no log. When Sphica cannot confirm a session, it records nothing of it; Codex's terminal shows Sphica's notice once, and `codex exec` shows none. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn are not kept, nor are files created and deleted within one turn without the edit tools.
-- **What was shown.** Each automatic delivery is logged by which records it showed, not their text.
+- **What was shown.** Each automatic delivery is logged by which records it showed, not their text. With the delivery after a shell command on, Sphica also keeps content hashes and one line per command in `~/.sphica/shell-state/`.
 - **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held sessions are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
-- **Secrets.** In your prompts, pull request text, and the file lines `/sphica:glean` cites, only secrets with a recognizable shape are masked (excerpts saved before 0.5.7 stay as they were until you forget them):
+- **Secrets.** In your prompts, pull request text, and the file lines `/sphica:glean` cites, only secrets with a recognizable shape are masked:
   - keys with known prefixes
   - `KEY=…` and `"password": …` assignments
   - credentials in URLs
@@ -149,11 +164,9 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 - In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` can write only when Codex tells Sphica which directory the session is in. Current Codex does. When it does not, they write nothing and tell you why.
 - Showing a record does not make the agent follow it.
 - Whether the agent decided something itself is judged from what its reply says, so it can be wrong.
-- An AI's decision is adopted only when the trace runs in an interactive session: Claude Code's terminal, or a Codex turn a person started in the session's own thread. For Codex, Sphica reads what Codex reports with each tool call; this was measured with Codex's terminal, and another Codex client that reports the same is treated alike. In headless and SDK runs, `codex exec`, and a Codex child thread it stays a candidate, and once a Codex child thread has called one of Sphica's record tools, no reply of that session is adopted.
-- The automatic trace is a request the agent may skip. In Codex it goes only to new sessions started from the terminal; in other Codex clients and in `codex exec`, Codex tells you when sessions wait.
-- In Codex, Sphica's settings are environment variables (`SPHICA_AUTO_TRACE`, `SPHICA_SHELL_WRITE_DELIVERY`, `SPHICA_REVIEW_COMMANDS`; Codex plugins have no options page). In a session that runs through Codex's background server (the terminal does by default), Sphica's hooks see the environment that server started with, not the terminal you open later: a value you set afterwards takes effect the next time the server starts (`codex app-server daemon restart` starts it again; work running in Codex may be interrupted). `codex exec` does not use that server, so its hooks see the environment it was started from. A background server started from inside an agent's shell (for example `! codex` in Claude Code) keeps that agent's variables too: Sphica then takes every session that runs through it for that agent's child and records nothing until the server starts again.
-- When Sphica cannot tell which turn ran one of its record tools, every reply Claude Code's agent writes in that project from then on stays a candidate. If the hook only timed out, it keeps what it saw and the next recording sends it; from then on, replies of other turns can be adopted again (when the hook knew the turn), while the turn that ran the tool stays out. If the hook was turned off, the host sent no tool call id, or the call came before Sphica was installed, nothing can be sent later and the stop stays for good. Records already saved as candidates are not adopted afterwards. `sphica doctor` lists the calls behind a stop and since when. Your decisions are not affected.
-- The automatic trace uses your subscription's usage.
+- An AI's decision is adopted only when the trace runs in an interactive session: Claude Code's terminal, or a Codex turn a person started in the session's own thread (measured with Codex's terminal). In headless and SDK runs, `codex exec`, and a Codex child thread it stays a candidate (recorded, but not adopted), and once a Codex child thread has called one of Sphica's record tools, no reply of that session is adopted.
+- The automatic trace is a request the agent may skip, and it uses your subscription's usage. In Codex it goes only to new sessions started from the terminal; in other Codex clients and in `codex exec`, Codex tells you when sessions wait.
+- When Sphica cannot tell which turn ran one of its record tools, every reply Claude Code's agent writes in that project from then on stays a candidate, and records already saved as candidates are not adopted afterwards. If the hook only timed out, replies of other turns can be adopted again once the next recording sends what the hook saw (when the hook knew the turn). If the hook was turned off, the host sent no tool call id, or the call came before Sphica was installed, the stop stays for good. `sphica doctor` lists the calls behind a stop and since when. Your decisions are not affected.
 - The agent never withdraws an AI's decision. When a later record contradicts it, the AI's decision is held back from being shown until you settle it, and so is the later record unless it is your decision.
 - A code location in a record is checked against your working tree when it is read. Finding the code name (a function name, say) the record points to does not mean the decision still holds.
 
@@ -179,7 +192,7 @@ codex plugin marketplace upgrade sphica
 codex plugin add sphica@sphica
 ```
 
-Restart open sessions afterwards. When an update changes the database (0.6.0 does), update the CLI first, then run `sphica init` once: it migrates the database in place and keeps your records. Until then Sphica says it is unavailable and tells you so. An older CLI cannot read the migrated database: if one still says to move it aside, update that CLI instead.
+Restart open sessions afterwards. When an update changes the database, update the CLI first, then run `sphica init` once: it migrates the database in place and keeps your records. Until then Sphica is unavailable and tells you so. An older CLI cannot read the migrated database: if one still says to move it aside, update that CLI instead.
 
 ## Uninstalling
 
@@ -200,7 +213,7 @@ npm uninstall -g sphica
 Run `sphica doctor` first. It shows which part is out of date or not working. Common cases:
 
 - **`sphica: command not found`.** The plugin does not put the CLI on your PATH. Run `npm i -g sphica`.
-- **Nothing is recorded.** Check that `sphica doctor` lists the repository under Projects. In Codex, also check the "Codex hooks" line, or `/hooks`, for hooks that are not trusted.
+- **Nothing is recorded.** Check that `sphica doctor` lists the repository under Projects. In Codex, also check the "Codex hooks" line, or `/hooks`, for hooks that are not trusted; if Codex was started from inside another agent's shell, see Codex under [Settings](https://github.com/iroha924/sphica#settings).
 - **The MCP servers report an older version.** Restart the session, or run `/reload-plugins` in Claude Code.
 - **A search finds nothing.** Search matches words. Try other words, the other language, an identifier, or fewer words. Ask the agent to check `status`: sessions not traced yet are searchable only as captured text.
 - **`doctor` says the full-text index is broken.** Run `sphica doctor --reindex`.
@@ -212,6 +225,7 @@ Run `sphica doctor` first. It shows which part is out of date or not working. Co
 |---|---|
 | `sphica init` | Create the database, bind the GitHub account `gh` is signed in to, and register the current repository |
 | `sphica doctor` | Check versions, the database, recording, and each registered project |
+| `sphica doctor --reindex` | Rebuild the full-text index when `doctor` says it is broken |
 | `sphica doctor --audit-quotes` | List saved adoptions and reasons that rest on quoted words. It only reads: nothing is changed |
 | `sphica uninstall` | Delete `~/.sphica` and show how to remove the plugin and the CLI |
 
