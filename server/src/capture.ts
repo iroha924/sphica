@@ -8,13 +8,15 @@
 // While the database is unreachable the records stay queued and are resent idempotently next time (ids are derived from the input).
 //
 // **Prompts you did not type are never recorded as your messages.** In a prior case, prompts meant for another agent
-// made up 97.2% of the database as "user messages". There are five checks, none of them guesses.
+// made up 97.2% of the database as "user messages". There are six checks, none of them guesses.
 //   - turns inside a subagent carry agent_id in the hook input
 //   - children started by Claude Code (claude -p or codex exec run from Bash) inherit SPHICA_PARENT_SESSION, which the parent's
 //     SessionStart wrote to CLAUDE_ENV_FILE. If it differs from its own session id, it is a child
 //     (to keep a launch from being recorded, set a value that matches no session. The value is that session's id so that, if this
 //     variable ever reaches the hook's own environment, it matches your own session id and recording does not stop)
 //   - another Codex started from a Codex shell inherits the parent's CODEX_THREAD_ID. If it differs from the hook input's session id, it is a child
+//   - a Codex hook call counts only when the session log it names says it came from the session's own thread. A child thread without
+//     agent_id (the built-in review) sends the same input, and a call whose log says neither is not recorded
 //   - headless runs (claude -p) and Agent SDK runs have a CLAUDE_CODE_ENTRYPOINT starting with sdk- (sdk-cli, sdk-ts, sdk-py), checked
 //     before the marker. Attended hosts set other values (cli, claude-desktop), so only sdk- values are excluded. An SDK agent started
 //     outside the Bash tool that inherits cli and no marker cannot be told apart
@@ -25,10 +27,12 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Kysely } from "kysely";
+import { childThread, codexThread, ownThread } from "./codex-log.ts";
 import { dbFile, inTransaction, iso, sqliteCode } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
+import { markOnce } from "./once.ts";
 import { panel, plain } from "./panel.ts";
 import { identify, normalizeKey, patchPaths, relativeTo } from "./project.ts";
 import { sphicaHome } from "./sqlite.ts";
@@ -496,16 +500,55 @@ async function attemptAsync<T>(fn: () => Promise<T>): Promise<T | undefined> {
   }
 }
 
+/**
+ * Whose turn a hook call is. Codex sends the same input for a person's own thread and for a child thread without an agent id (its
+ * built-in review, whose prompt can carry a commit subject anyone wrote), so there the session log must say it is the session's own
+ * thread; a log that does not say either way leaves the turn unconfirmed, and nothing of it is recorded as the owner's.
+ */
+function whoseTurn(host: Host, input: HookInput): "owner" | "other" | "unconfirmed" {
+  if (!isOwnerTurn(input, undefined, undefined, host === "codex" ? process.env.CODEX_THREAD_ID : undefined))
+    return "other";
+  if (host !== "codex") return "owner";
+  const thread = codexThread(input);
+  if (ownThread(input, thread)) return "owner";
+  return childThread(input, thread) === null ? "unconfirmed" : "other";
+}
+
+/**
+ * Told once per session: without it, a Codex session Sphica cannot confirm as the owner's shows only as history that is missing later.
+ * A session started with --ephemeral names no log at all, and its own prompts look the same as its review's.
+ */
+const unconfirmed = (input: HookInput): string | null =>
+  !markOnce("unconfirmed", `codex\0${input.session_id}`)
+    ? null
+    : typeof input.transcript_path === "string"
+      ? panel(
+          "sphica: this Codex session is not recorded",
+          ["Its session log does not show that these messages are yours"],
+          "Update Sphica and Codex; if it stays, report it",
+        )
+      : panel(
+          "sphica: this Codex session is not recorded",
+          [
+            "Codex named no session log (as with --ephemeral), so Sphica cannot confirm these messages are yours",
+          ],
+          "To record a session, start Codex without --ephemeral",
+        );
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export async function onHook(
   host: Host,
   input: HookInput,
 ): Promise<{ flush: boolean; notice?: string | null }> {
   const event = input.hook_event_name;
-  const owner = () =>
-    isOwnerTurn(input, undefined, undefined, host === "codex" ? process.env.CODEX_THREAD_ID : undefined);
+  const whose = whoseTurn(host, input);
+  // Said on a prompt only: the other events of the same session would say it again
+  if (whose !== "owner")
+    return {
+      flush: false,
+      notice: whose === "unconfirmed" && event === "UserPromptSubmit" ? unconfirmed(input) : null,
+    };
   if (event === "SessionStart") {
-    if (!owner()) return { flush: false };
     // Pass this session's id on to children the agent starts from Bash.
     const file = process.env.CLAUDE_ENV_FILE;
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
@@ -516,7 +559,6 @@ export async function onHook(
     attempt(pruneBaselines);
     return { flush: false, notice: captureNotice() };
   }
-  if (!owner()) return { flush: false };
   // Interrupt is cut off after at most 3 seconds. No new records are made, so only the queue is sent without checking git or the project.
   if (event === "Interrupt") {
     const turn = input.prompt_id ?? input.turn_id;

@@ -35,14 +35,19 @@ base: main
   - 結果: `bun run verify` → 1 回目は Biome の整形 2 件で落ち（`bun run fix` で直した）、2 回目は `deliver: ./deliver.js is 445640 bytes, over its budget of 445000` で落ち（上限を 450,000 に上げた）、3 回目は終了コード 0（受け入れ 137 件 pass）
   - 結果: `node scripts/check-tarball.mjs <tgz>` → `review-shipping` が `npm pack` の tarball に流して 0。止める指摘なし。`deliver.js` だけが 694 バイト増え、ほかの 5 つの bundle は同じ。旧 `codexInteractive` と 48,580 通りの入力で比べ、違いは「文字列でない `session_id` が文字列でない `payload.id` と一致する」12 通りだけで、新しいほうが対話でないと答える（ホストは文字列しか送らない）
 
-- [ ] T02: Codex の capture は、ログで本人のスレッドだと確かめられたときだけ記録し、判定できないときは通知する
+- [x] T02: Codex の capture は、ログで本人のスレッドだと確かめられたときだけ記録し、判定できないときは通知する
   - 種別: 修正
   - 計画: S2
   - 依存: T01（ログの 1 行目を読む `codexThread` が要る）
-  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `scripts/check-hooks-live.mjs`
+  - 変更: `server/src/capture.ts`, `server/src/once.ts`, `server/src/deliver.ts`, `server/test/capture.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/load.ts`, `server/test/acceptance-cases.test.ts`, `scripts/check-hooks-live.mjs`, `scripts/lib/bundle-budget.mjs`
   - red: `cd server && node --import ./test/isolate-home.ts --test test/capture.test.ts` → 直す前は、子のスレッドのログを持つ UserPromptSubmit が spool に `speaker: "owner"` の発言を置き、「何も置かない」のテストが落ちる。`cd server && node --test --test-timeout=60000 evals/acceptance/run.ts` → 足した capture のケース（組み込みの review のプロンプトが source にならない）が、source ができて落ちる
   - 完了条件: `bun run verify` → 終了コード 0。capture のテストで、本人のスレッドのログでは SessionStart・UserPromptSubmit・PostToolUse・Stop・Interrupt が今までどおり動く / 子のスレッドのログでは何も置かず通知も出ない / ログが無い・256 KiB を超える・JSON でない・`id` が違うときは何も置かず、UserPromptSubmit で通知が 1 セッションに 1 回だけ出る。Codex の capture を流すほかのテスト・driver・`check-hooks-live.mjs` は、`rg` で拾った全部の入力にログを付けてある
   - コミット: `fix(capture): record a Codex hook call only when its log says it is the session's own thread`
+  - 結果: `cd server && node --test --test-timeout=60000 evals/acceptance/run.ts` → 直す前（capture.ts は元のまま、ケースと driver だけ足した状態）は tests 138、fail 1。capture-18 が `session:s-en-review-thread#1.owner was recorded` で落ちた。直した後は pass 138
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="recorded only when its session log" test/capture.test.ts` → capture.ts だけ `git stash` で元に戻して流すと fail 1（`Stop sends nothing`: 子のスレッドの Stop が送信を始める。元のコードが子の呼び出しを本人のものとして扱っている）。戻した後、ファイル全体で tests 72、pass 72
+  - 結果: `bun run verify` → 1 回目は新しいテストの型エラー（`source` は `HookInput` に無い）、2 回目は `cli: ./cli.js is 632532 bytes, over its budget of 632000` で落ち、上限を 636,000 に上げて 3 回目は終了コード 0。通知の文面を分けた後にもう 1 回流して終了コード 0（受け入れ 138 件 pass）。bundle は capture 390,172 / cli 632,796 / deliver 446,878 / mcp-record 1,772,997 バイト
+  - 結果: `node dist/capture.js codex` → `review-shipping` が pack した配布物に実機の形の入力を渡した: 本人のスレッドのプロンプトと Stop は 2 件が待ち行列に入り、review の子のログでは何も入らず、無いファイルでは通知が 1 回。Claude Code は `transcript_path` の有無によらず今までどおり。`node scripts/check-tarball.mjs <tgz>` は 0
+  - 結果: `rg -n 'onHook\(' server scripts` → Codex の capture を流すのは `server/test/capture.test.ts`、受け入れの `driver.ts`、`scripts/check-hooks-live.mjs` の 3 か所で、全部にログを付けた（ほかの `"codex"` は配信・record サーバー・評価）
 
 ## P2: 子のスレッドを、親とは別の会話として配信を数える
 
@@ -93,3 +98,7 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 
 - 2026-10-13 / T01 / 変更欄を変えた。前: `server/src/codex-log.ts`, `server/src/deliver.ts`, `server/test/codex-log.test.ts` と 4 つのバージョンのファイル。後: それに `server/test/codex-log-file.ts`（テスト用のログを書く helper。T02 以降の capture と配信のテストでも使う）、`server/test/deliver.test.ts`（手元の helper をやめて共有のものを import）、`scripts/lib/bundle-budget.mjs` を足した / 理由: helper を 2 か所に持たないため。`plugin/dist/deliver.js` が 445,640 バイトになり上限 445,000 を超えたので、上限を 450,000 に上げた（T03・T05 でも deliver は増える。足りなければそのコミットで理由を書いて上げる）
 - 2026-10-13 / T01 / `bun run release:plan` は staged の差分（`git diff <base> --cached`）を見る。コミット前に変更を stage してから流さないと `none` と出る / stage してから流して `plugin` を確かめた
+- 2026-10-13 / T02 / 変更欄を変えた。前: `server/src/capture.ts`, `server/test/capture.test.ts`, 受け入れの `cases.json`・`driver.ts`, `server/test/acceptance-cases.test.ts`, `scripts/check-hooks-live.mjs`。後: それに `server/src/once.ts` と `server/src/deliver.ts`（1 セッションに 1 回の印 `markOnce` を deliver から共有の module に出した。capture は deliver を import できない）、`server/evals/acceptance/load.ts`（セッションの `thread` 欄）、`scripts/lib/bundle-budget.mjs`（`cli.js` が 632,532 バイトになり上限 632,000 を超えたので 636,000 に上げた。CLI は capture.ts を bundle する）を足した / plan の方針 2 は印を「capture のセッションごとのディレクトリ」に置くとしていたが、そこはターンの起点のファイルだけを置く決まり（knowledge-schema の Skill）なので、配信と同じ一時ディレクトリの印にした
+- 2026-10-13 / T02 / 実測を足した（Codex 0.162.1、TUI、1 回中 1 回）: 走っているターンを Esc で止めると Interrupt の hook が出て、入力は `cwd, hook_event_name, model, permission_mode, session_id, transcript_path, turn_id`。ログの 1 行目は `payload.id === session_id`、`thread_source` は `user`。capture が読む 5 つのイベント全部が `transcript_path` を持つ
+- 2026-10-13 / T02 / `review-shipping` の指摘: `codex exec --ephemeral` は `transcript_path` が null で、修正後は記録されなくなる（今は記録される）。Claude も実測し、review の子も同じ欄になることを確かめた / 持ち主に聞き、記録しないと決まった。plan を直し（変更履歴）、通知の文面をログのパスが無いときと有るときで分け、テストに null の入力を足した。README への記載は T06
+- 2026-10-13 / T02 / `review-shipping` の指摘のうち採らなかったもの: 通知の印が一時ディレクトリにあり、TMPDIR が呼び出しごとに違うと通知がもう 1 回出る / 配信の印と同じ性質で、記録は止まらないので変えない

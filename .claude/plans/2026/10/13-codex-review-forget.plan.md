@@ -29,12 +29,13 @@ approved_at: 2026-10-13
 - README には今の挙動だけを書き、バージョン番号と経緯を書かない（`trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/readme-current-only`）
 - 観測された事例の無い防止策は計画に入れない（memory `observed-need-before-building`）
 - 持ち主の実環境の常駐プロセスを止める・起動し直す操作はしない
+- `codex exec --ephemeral` のセッションは記録しない。Codex がログのパスを渡さず、本人のプロンプトと組み込みの review の子のプロンプトを見分けられないため。最初のプロンプトで、記録しないことと `--ephemeral` を外せば記録されることを 1 回通知し、README に書く（実装中に持ち主が追加、2026-10-13）
 - record ツールへの PreToolUse hook は今回も足さない。Sphica の質問の記録 `trace:ddaa270f-07bd-4d5a-85d0-43e9e78db0f9/codex-record-hook-open` は open のまま残す（Codex との議論の後に持ち主が追加、2026-10-13）
 
 ## 目的
 
 - Codex の組み込みの review のプロンプト（定型文、commit の subject、custom instructions）が、source に保存されない
-- 本人のスレッド（`codex exec`、TUI、resume、fork）の発言は、今までどおり保存される
+- ログを残すセッションの本人のスレッド（`codex exec`、TUI、resume、fork）の発言は、今までどおり保存される。`--ephemeral` のセッションは保存されず、最初のプロンプトでその理由が 1 回通知される
 - 対話でも headless でも、Codex の組み込みの review を始めると、review する側のモデルの最初の入力に「この変更に当たる過去の決定」か「当たるものは無い」か「照合できなかった理由」が入る。同じ親セッションから review を 2 回始めても、2 回とも入る
 - プロンプトに `$<review を含む名前>`（または `SPHICA_REVIEW_COMMANDS` に挙げた名前）を書くと、そのターンに同じものが入り、プロンプトが名指しした symbol・path の記録も今までどおり入る
 - モデルが review の skill の `SKILL.md` を shell で名指しすると、その shell の前に同じものが入る。Sphica 自身の `skills/review/SKILL.md` では入らない
@@ -74,6 +75,8 @@ review（一時の `CODEX_HOME` に、入力を書き出す hook を全イベン
 - R6. 合成のプロンプトの文面: uncommitted は `Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.`、`--commit <sha>` は `Review the code changes introduced by commit <sha>. Provide prioritized, actionable findings.`、`--title "<t>"` を付けるか TUI の「Review a commit」で選ぶと `… commit <sha> ("<t>"). Provide …` で、TUI では `<t>` に commit の subject がそのまま入った。custom instructions は渡した文そのまま
 - R7. `codex exec resume <id>` と `codex exec fork <id>` の SessionStart・UserPromptSubmit は、1 行目が `payload.id === session_id`、`thread_source: "user"`（fork は新しい `session_id` と `forked_from_id`）。1 行目は 22,997 バイトと 23,235 バイト
 - R8. 常駐プロセス経由の対話の 1 行目は `originator: "codex-tui"`、`thread_source: "user"`、`payload.id == session_id`（2026-10-12 の実測、前の計画の A・B1）
+- R9. TUI で走っているターンを Esc で止めると Interrupt の hook が出て、入力に `transcript_path` があり、1 行目は `payload.id === session_id`、`thread_source: "user"`。capture が読む 5 つのイベント全部が `transcript_path` を持つ
+- R10. `codex exec --ephemeral` は、SessionStart・UserPromptSubmit・Stop の `transcript_path` が null。`codex exec --ephemeral review --uncommitted` の子の UserPromptSubmit・PreToolUse・PostToolUse も null で、`agent_id` も無く、本人のプロンプトと同じ欄になる（`review-shipping` と Claude がそれぞれ実測）
 - 未検証: `codex review`（`--dangerously-bypass-hook-trust` が無い。ソース読みでは `codex exec review` と同じ経路）
 
 欠陥の再現:
@@ -103,7 +106,7 @@ review（一時の `CODEX_HOME` に、入力を書き出す hook を全イベン
    - 子のスレッド: `threadSource === "subagent"` かつ `parent === input.session_id` かつ `id` が `agentOf` と同じ文字の制限（`^[\x21-\x7e]{1,200}$`）を通る
 2. **capture（修正）**: host が codex のとき、`onHook` の `owner()` は今の `isOwnerTurn` に加えて「本人のスレッド」を求める。SessionStart・UserPromptSubmit・PostToolUse・Stop・Interrupt の全部に当たる
    - 子のスレッドだと確かめられた: 黙って何もしない（保存しない、ターンを開かない、送らない）
-   - 判定できない（`transcript_path` が無い・読めない・形が違う・`id` が合わない）: 何もせず、UserPromptSubmit のときに理由を `systemMessage` で 1 セッションに 1 回出す（文面は `panel` で、`sphica doctor` を案内する。印は capture のセッションごとのディレクトリに置く）
+   - 判定できない（`transcript_path` が無い・読めない・形が違う・`id` が合わない）: 何もせず、UserPromptSubmit のときに理由を `systemMessage` で 1 セッションに 1 回出す（文面は `panel`。ログのパスが無いときは `--ephemeral` を外せば記録されること、ログがあるのに確かめられないときは Sphica と Codex の更新を案内する。印は配信と同じ一時ディレクトリの `markOnce`。capture のセッションごとのディレクトリは、ターンの起点のファイルだけを置く決まりなので使わない）
    - Codex の capture を流すテスト・受け入れの driver・`scripts/check-hooks-live.mjs` は、入力にログを付ける形に直す（今は `transcript_path` の無い入力を渡している箇所がある。`rg` で全部拾う）
 3. **配信の会話の識別**: `deliver` の最初で 1 回だけ決め、全経路で使う。`agent_id` があればそれ、無くて host が codex で子のスレッドだと確かめられたらその子の id、それ以外は null（親）。使う場所は、配信のログの `agent_id`、`beforeRead` の既読と予算（`sinceRestart`）、shell の snapshot のキーと shell の後の配信（`afterShell`）、review の重複抑制のキー。ログが読めないときは今までどおり親として扱う（配信は権限を与えないので止めない）。`source.subagent` が `review` 以外の子にも同じ識別を使う。決めた識別は hook の入力の `agent_id` とは別に持ち、「`agent_id` の付いた呼び出しには review を届けない」の判定（方針 4）には元の `agent_id` を使う
 4. **review の入口（Codex）**: `reviewCall` に host とログの結果を渡す。Claude Code の分岐は変えない
@@ -114,7 +117,7 @@ review（一時の `CODEX_HOME` に、入力を書き出す hook を全イベン
 5. **Codex では review を通常の配信に足す**: review の文面は、その hook 呼び出しの通常の配信（prompt / pre_read / pre_edit）と別に作り、review を先にしてつなぐ。shell が名指ししたファイルが無くても、`rels` が空でも、review の照合は走る。重複抑制が止めるのは review の部分だけ。pre_read は今の `lockedPlan` のまま。配信のログは部分ごとに 1 行。組み込みの review の子のプロンプトも通常の prompt の配信を通す（custom instructions が symbol や path を名指しすることがある）
 6. **重複抑制のキー**: 3 の識別を使う。組み込みの review は子の id ごと（親が同じでも review のたびに届く）、明示・暗黙は今までどおり親の会話ごと
 7. **forget**: コードは変えない。README の `(Claude Code; the confirmation dialog it needs may not appear in Codex)` を、対話の Codex でも動くこと、headless（`codex exec`、`claude -p`）では確認を出せないので何も消えないことに直す。forget の Skill の「some Codex versions」の段も同じ内容にする。A8 が通らなければ、実測した範囲（確認のフォームまで）だけを書く
-8. **README（英語・日本語）**: 「Before a review (Claude Code only)」と「There is no review hook in Codex」を直し、Codex の 3 つの入口、照合の範囲、拾えない読み方（パスを書かずに `SKILL.md` を読む）、名前の追加は `SPHICA_REVIEW_COMMANDS` だけであること（Codex の環境変数の一覧にも足す）、組み込みの review に渡した指示は記録されないこと、ログが読めないと Codex のセッションは記録されず通知が出ることを書く
+8. **README（英語・日本語）**: 「Before a review (Claude Code only)」と「There is no review hook in Codex」を直し、Codex の 3 つの入口、照合の範囲、拾えない読み方（パスを書かずに `SKILL.md` を読む）、名前の追加は `SPHICA_REVIEW_COMMANDS` だけであること（Codex の環境変数の一覧にも足す）、組み込みの review に渡した指示は記録されないこと、`--ephemeral` のセッションは記録されないこと、ログが読めないと Codex のセッションは記録されず通知が出ることを書く
 9. **リリースノート**: 更新前に Codex の組み込みの review を使った人向けに、定型文の冒頭（`Review the current code changes`、`Review the code changes`）で `search`（`sources: true`）→ `read` で確かめる → `/sphica:forget` の手順を書く。検索では custom instructions を網羅できないこと、消した source を引用していた記録の本文は残ることを添える
 10. **順序とバージョン**: 変更を作る → `bun run release:plan -- --base v0.6.52` → npm と 3 つの manifest を 0.6.53 に上げる（パッケージに入る最初のコミットに入れる。pre-commit がそれより前のコミットを断る）
 11. **push しない**: 作業ブランチは手元だけに置く。タスクごとのレビューも全差分のレビューも手元の Codex で済ませ、終わってから push、PR、CI、リリースを続けて行う。issue #333 へのコメントと PR 本文はそのときに出す
@@ -124,6 +127,7 @@ review（一時の `CODEX_HOME` に、入力を書き出す hook を全イベン
 - 採用: 今ある UserPromptSubmit と Bash の PreToolUse で拾う。棄却: `codex.json` に review 用の hook を足す（Codex に review や skill のイベントが無く、足しても拾えるものが増えない。信頼し直しだけが増える）
 - 採用: 組み込みの review はログの 1 行目で見分ける。棄却: 合成のプロンプトの文面で見分ける（文面が変わると黙って外れる）
 - 採用: capture は、本人のスレッドだと確かめられたときだけ記録する。棄却: 子だと確かめられたときだけ落とし、読めなければ今までどおり持ち主の発言として保存する（確かめられない文に採用の権限を与える経路が残る。Codex の指摘 C13）
+- 採用: `--ephemeral` のセッションは記録しない。棄却: ログのパスが null のときだけ今までどおり保存する（`codex exec --ephemeral review --commit … --title …` の合成のプロンプトが持ち主の発言として残る経路が残る）
 - 採用: 子のスレッドの id を配信の全経路の会話の識別に使う。棄却: review と prompt の配信だけに使う（子が読んだ別のファイルの記録が、親に見せたことになる。C14）
 - 採用: 組み込みの review の重複抑制は子の id ごと。棄却: 親の session ごと（2 回目の review の新しいモデルに届かない。C1）
 - 採用: Sphica 自身の review の skill は、解決したパスで除く。棄却: ディレクトリ名で除く（配布物のパスは `skills/review/SKILL.md` で、名前は `review`。C2）
@@ -171,3 +175,5 @@ review（一時の `CODEX_HOME` に、入力を書き出す hook を全イベン
 なし
 
 ## 変更履歴
+
+- 2026-10-13 / 目的・持ち主の決定・前提（R9、R10）・方針 2 と 8・採った案に、`codex exec --ephemeral` のセッションを記録しないことを足した。方針 2 の通知の印の置き場を、配信と同じ一時ディレクトリにした / T02 の出荷前レビューで、ephemeral のセッションは hook の `transcript_path` が null で、本人のプロンプトと review の子のプロンプトを見分けられないと分かった。計画の目的は `codex exec` が今までどおり保存されるとしていた / Go 要。持ち主が AskUserQuestion で「記録しない」を選んだ（2026-10-13）

@@ -8,7 +8,6 @@
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
 // through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
@@ -21,6 +20,7 @@ import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db
 import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
+import { markOnce } from "./once.ts";
 import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
@@ -37,7 +37,7 @@ import {
 } from "./shell-state.ts";
 import { RevisionMismatch, sphicaHome } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
-import { head, reason, sha256 } from "./text.ts";
+import { head, reason } from "./text.ts";
 import { pendingSessions } from "./trace.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
@@ -1023,28 +1023,6 @@ async function beforeReview(
 /** Whether this session was already told about this change (a review skill is often called more than once per change). */
 function toldBefore(session: string, key: string): boolean {
   return !markOnce("review", `${session}\0${key}`);
-}
-
-/**
- * Marks a key once, in a per-user directory (a shared /tmp holds other users' markers). True the first time; only an existing mark
- * counts as seen, so a directory that cannot be written never silences a delivery.
- */
-function markOnce(kind: string, key: string): boolean {
-  const user = (() => {
-    try {
-      return os.userInfo().username;
-    } catch {
-      return String(process.getuid?.() ?? "user");
-    }
-  })();
-  const dir = path.join(os.tmpdir(), `sphica-${sha256(user).toString("hex").slice(0, 12)}`, kind);
-  try {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dir, sha256(key).toString("hex").slice(0, 24)), "", { flag: "wx" });
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "EEXIST";
-  }
 }
 
 /** Whether this session was already told Sphica is unavailable (said once per session, never as "nothing applies"). */

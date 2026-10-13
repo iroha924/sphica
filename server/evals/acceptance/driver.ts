@@ -43,6 +43,7 @@ import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import { ftsQuery } from "../../src/text.ts";
 import { logCall } from "../../src/trace.ts";
+import { childLog, codexLog } from "../../test/codex-log-file.ts";
 import type { Step, World } from "./load.ts";
 
 export type Driver = {
@@ -325,10 +326,17 @@ export async function createDriver(world: World): Promise<Driver> {
     if (captured.has(id)) return;
     captured.add(id);
     const host: Host = s.host === "codex" ? "codex" : "claude-code";
+    // Codex names the session's log in every hook call, and capture reads whose thread it is from the log's first line
+    const log =
+      host !== "codex"
+        ? undefined
+        : s.thread
+          ? childLog(s.id, `${s.id}-${s.thread}`, s.thread)
+          : codexLog(s.id);
     const hook = (turn: string, input: Record<string, unknown>) =>
       onHook(host, {
         session_id: s.id,
-        ...(host === "codex" ? { turn_id: turn } : { prompt_id: turn }),
+        ...(host === "codex" ? { turn_id: turn, transcript_path: log } : { prompt_id: turn }),
         cwd: repo,
         ...input,
       });
