@@ -106,13 +106,14 @@ base: main
 
 README と plugin の文面が、新しい 2 つの引数を説明する。
 
-- [ ] T05: README と plugin の文面に as_of と timeline を足す
+- [x] T05: README と plugin の文面に as_of と timeline を足す
   - 種別: 追加
   - 計画: S3
   - 依存: T02（`as_of` の形と返信の注記が決まっていないと書けない）, T04（`timeline` の返信の形が決まっていないと書けない）
-  - 変更: `README.md`, `plugin/README.md`
-  - 完了条件: `bun run verify:ai && bun run english` → どちらも終了コード 0。`rg -n "as_of|timeline" README.md plugin/README.md` → 両方のファイルに同じ説明がある
+  - 変更: `README.md`, `README.ja.md`
+  - 完了条件: `bun run verify:ai && bun run english` → どちらも終了コード 0。`rg -n "as_of|timeline" README.md README.ja.md` → 両方のファイルに同じ説明がある
   - コミット: `docs: describe as_of search and the timeline view`
+  - 結果: `bun run verify:ai && bun run english` → どちらも終了コード 0。`rg -c "as_of|timeline" README.md README.ja.md` → 両方に 1 行ずつ（機能の一覧の同じ位置に、同じ内容の項目）
 
 ## P4: 評価の道具とタスク
 
@@ -168,3 +169,4 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T08 / タスクは `history-sync`（search 条件、3 回）。prompt は日本語、記録は英語
 - 2026-10-13 / T11 / `review-shipping`: 止める指摘なし。場所が 200 を超えると残りを黙って捨てる件は採用し、返信の注記に書くようにした（anchor の古い順に 200）。場所が 2 つ以上あると同じ場所の問い合わせが path の索引を使わない件（記録 3 万件で 1 回 250 ms と報告）は採用し、path の条件を先に置いて索引で引くようにした（テストで実行計画を確かめる）。テストが見分けていない書き換えは、テストを 1 本足して塞いだ
 - 2026-10-13 / T05 / `review-shipping`: README の「後から保存された記録は別に名前を出す」は、実際は今の検索に当たるものだけを 10 件まで出す / 両方の README をそう直した
+- 2026-10-13 / T05 / 変更欄と完了条件を変えた。前: `README.md`, `plugin/README.md`。新: `README.md`, `README.ja.md` / `plugin/README.md` は bundle が作る追跡外の写し（`.gitignore`）で、手で直すファイルではない。日本語の README が別にある。plugin の Skill と reviewers の文面は `rg` で確かめ、`search` と `read` の引数を並べている箇所が無かったので変えていない
