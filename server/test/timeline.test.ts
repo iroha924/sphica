@@ -359,6 +359,35 @@ test("a timeline shows what was added to a record later at the time it was added
         run_id: row.run_id,
         added_at: saved,
       });
+    // Another run added evidence in the very millisecond of the save: what a record was saved with is told by its run, not the clock
+    const afterwards = run(db, p);
+    const sameTime = message(db, p, { id: "m4", text: "Added at once." });
+    insert(db, "unit_evidence", {
+      unit_id: unit,
+      source_id: sameTime,
+      span_start: 0,
+      span_end: 5,
+      role: "explains",
+      run_id: afterwards,
+      added_at: saved,
+    });
+    // The same for an adoption and an anchor another run added in that millisecond: each is its own line, not part of the save
+    insert(db, "unit_adoption", {
+      unit_id: unit,
+      source_id: sameTime,
+      span_start: 0,
+      span_end: 5,
+      route: "owner_statement",
+      run_id: afterwards,
+      added_at: saved,
+    });
+    insert(db, "unit_anchor", {
+      unit_id: unit,
+      path: "src/same.ts",
+      role: "applies_to",
+      run_id: afterwards,
+      added_at: saved,
+    });
     // Everything below happens at one later time, so the order of the lines is the fixed order of their kinds
     insert(db, "unit_adoption", {
       unit_id: unit,
@@ -366,7 +395,7 @@ test("a timeline shows what was added to a record later at the time it was added
       span_start: 0,
       span_end: 3,
       route: "owner_statement",
-      run_id: row.run_id,
+      run_id: afterwards,
       added_at: later,
     });
     insert(db, "unit_evidence", {
@@ -375,7 +404,7 @@ test("a timeline shows what was added to a record later at the time it was added
       span_start: 5,
       span_end: 34,
       role: "explains",
-      run_id: row.run_id,
+      run_id: afterwards,
       added_at: later,
     });
     // Retracted a day after it was added: the retraction is told at its own time
@@ -388,7 +417,7 @@ test("a timeline shows what was added to a record later at the time it was added
       unit_id: unit,
       path: "src/client/retry.ts",
       role: "applies_to",
-      run_id: row.run_id,
+      run_id: afterwards,
       added_at: later,
     });
     db.owner
@@ -411,6 +440,7 @@ test("a timeline shows what was added to a record later at the time it was added
       span_end: 3,
       added_at: later,
     });
+    const rivalRun = run(db, p);
     const rival = insert(db, "unit", {
       project_id: p,
       key: "trace:ext-s1/server",
@@ -418,7 +448,7 @@ test("a timeline shows what was added to a record later at the time it was added
       stance: "do",
       text: "Retry in the server.",
       extraction: "supported",
-      run_id: run(db, p),
+      run_id: rivalRun,
       created_at: saved,
       content_hash: hash(3),
     });
@@ -428,7 +458,7 @@ test("a timeline shows what was added to a record later at the time it was added
       span_start: 0,
       span_end: 20,
       role: "states",
-      run_id: row.run_id,
+      run_id: rivalRun,
       added_at: saved,
     });
     insert(db, "unit_link", {
@@ -481,7 +511,10 @@ test("a timeline shows what was added to a record later at the time it was added
       `  Adoption: s${reply} (the assistant)`,
       `${saved} ${them} saved: decision do, Retry in the server.`,
       `  Evidence: s${other}`,
+      `${saved} ${me} evidence added: s${sameTime} (explains)`,
+      `${saved} ${me} adopted: s${sameTime} (the owner, owner_statement)`,
       `${saved} ${me} became active: r`,
+      `${saved} ${me} anchor added: src/same.ts (applies_to); no source recorded for this change`,
       // One time, in the fixed order: evidence, adoption, state, replacement taking effect, replacement ending, anchors, conflict
       `${later} ${me} evidence added: s${owner} (explains)`,
       `${later} ${me} adopted: s${owner} (the owner, owner_statement)`,
@@ -793,7 +826,7 @@ test("a timeline keeps every stored string on its own line, inside the frame", a
       path: "src/odd.ts",
       symbol: `symbol${forged}${"s".repeat(500)}`,
       role: "applies_to",
-      run_id: runId,
+      run_id: run(db, p),
       added_at: at("2026-09-28T00:00:00Z"),
     });
     db.owner

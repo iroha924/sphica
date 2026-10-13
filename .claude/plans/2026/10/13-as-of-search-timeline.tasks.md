@@ -127,7 +127,7 @@ base: main
   - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="stays within the budget" test/timeline.test.ts` → 直す前は落ちた（2 つ目の ref の長さが 127 のとき返信が 32,770 バイト）。測る処理を戻した後は pass
   - 結果: `bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0
 
-- [ ] T16: timeline の「保存の時点にあったもの」を、時刻ではなく run で見分ける
+- [x] T16: timeline の「保存の時点にあったもの」を、時刻ではなく run で見分ける
   - 種別: 修正
   - 計画: S2
   - 依存: T03（直す対象の `timelineRefs` が要る）
@@ -135,15 +135,18 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="what was added to a record later" test/timeline.test.ts` → 別の run が保存と同じミリ秒に足した根拠が、保存の行の Evidence に混ざる（`and 3 more`）ので落ちる
   - 完了条件: `bun run test` → 終了コード 0。保存の行の根拠と adoption は記録自身の run が書いたものだけで、別の run が足したものは、同じ時刻でも追加の行に出る
   - コミット: `fix(read): tell what a record was saved with by its run, not by the clock`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="what was added to a record later" test/timeline.test.ts` → 直す前は落ちた（保存の行が `and 3 more` になり、同じミリ秒に別の run が足した根拠が混ざる）。直した後は pass
+  - 結果: `python3 <scratchpad>/mutate-gh.py` → 保存の行・根拠の追加・adoption の追加・anchor の追加を時刻の比較へ戻す書き換え 4 個が、4 個とも落ちた
+  - 結果: `bun run test` → 終了コード 0（1281 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
-- [ ] T17: 過去の時点の検索で、採用の元の発言が後から forget された決定に「adopted by no one」と出さない
+- [ ] T17: 過去の時点の検索で、決定に「adopted by no one」と言わず、記録に残っていることだけを言う
   - 種別: 修正
   - 計画: S1
   - 依存: T02（直す対象の、過去の時点の検索の返信が要る）
   - 変更: `server/src/search.ts`, `server/test/search.test.ts`
-  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="forgotten since" test/search.test.ts` → adoption の元の発言を forget した後、その前の時点で検索すると、当時 active だった決定に印が付かず「adopted by no one」と出るので落ちる
-  - 完了条件: `bun run test` → 終了コード 0。その時点で active だったのに、その時点の adoption が残っていない決定・制約は、`adopted then by words forgotten since` と出る
-  - コミット: `fix(search): do not say nobody adopted a decision whose adopting words were forgotten since`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="a past view does not say nobody adopted" test/search.test.ts` → adoption の元の発言を forget した後、その前の時点で検索すると、当時 active だった決定に「adopted by no one」と出るので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。過去の時点の検索で、その時点に有効な adoption が記録に無い決定・制約は `no adoption in effect then is on record` と出る（採用されなかったのか、後から forget・撤回されたのかは言わない）。今の検索は今までどおり `adopted by no one`
+  - コミット: `fix(search): in a past view, say what is on record instead of that nobody adopted a decision`
 
 ## P3: 利用者向けの文面
 
@@ -257,3 +260,5 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T13, T14 / Codex の直しの再レビュー（53d3c1b8..5ff7b278）: 4 件のうち 3 件は塞がれたと確認（timeline の予算は 300 通りで最大がちょうど 32,768 バイト）。残り 1 件（id の無い戻りが先にあると、後の終わっていない呼び出しが打ち消される）を採用 / 修正タスク T15 を足した。実際の Codex のログの item には id がある（評価の実行ログで確認）ので、id の無いログだけの話
 - 2026-10-13 / 全体 / PR #338 を作成（dc7b9d48）。CI は全項目 pass。GitHub の Codex のレビュー: セキュリティは指摘なし、コードは P2 が 4 件。(1) `report.ts` が、引数の無い実行の機能の使用回数を 0 と数える、(2) `timeline.ts` が、保存の時点のものを時刻で決めるので、別の run が同じミリ秒に足したものが保存の行に混ざる、(3) `judge.ts` が、記録の本文に timeline の見出しがある全文の read を timeline と数える、(4) `search.ts` が、adoption の元の発言を forget した後の過去の時点の検索で、当時 active だった決定に「adopted by no one」と出す / 4 件とも採用。(1)(3) は T18、(2) は T16、(4) は T17。(3) のうち「長い key が切られると見落とす」は直さない（評価の gold の key は短く、200 バイトを超える key はどの返信でも切られる）
 - 2026-10-13 / T18 / (1) は T14 の直しの残り（集計側だけ unknown にして、表示側が 0 に戻していた）。評価の集計の「分からないものの扱い」を小分けに直す形が T14・T15・T18 と続いた / 今回は集計から表示まで同じ規則で通した。GitHub の Codex に追加のレビューは頼まず、配布物に入る T16・T17 は `review-shipping` で確かめる
+- 2026-10-13 / T17 / 名前・red・完了条件を変えた。前: 「当時 active だったのに adoption が残っていない決定は `adopted then by words forgotten since` と出す」（状態と adoption から forget を推し量る）。新: 上のとおり、推し量らずに記録に残っていることだけを言う / `review-shipping` が、推し量りが外れる場合を 3 つ挙げた（撤回の時刻と状態の時刻が 1 ms ずれる、撤回の理由の発言だけを forget する、revision 5 の移行で降格した記録）うえ、superseded の決定では元の指摘が残ると示した（2 つは再現つき）。記録 `trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/successor-inference`（状態や採用から推し量る作りは穴が出続けた）と同じ形なので、推し量る案を捨てた
+- 2026-10-13 / T16, T17 / `review-shipping`: 止める指摘なし。run で見分ける規則は、保存・glean・harvest・forget・reconcile・移行のどの書き込みでも成り立つと報告した（こちらでは読み直していない）。テストが見分けていない書き換え（同じミリ秒の adoption と anchor）は、テストを足して塞いだ

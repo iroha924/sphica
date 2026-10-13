@@ -147,6 +147,7 @@ async function linesOf(
           "unit_id",
           "source_id",
           "role",
+          "run_id",
           "added_at",
           "retracted_at",
           "retraction_reason",
@@ -163,6 +164,7 @@ async function linesOf(
           "a.unit_id",
           "a.source_id",
           "a.route",
+          "a.run_id",
           "a.added_at",
           "a.retracted_at",
           "a.retraction_reason",
@@ -184,6 +186,7 @@ async function linesOf(
           "a.path",
           "a.symbol",
           "a.role",
+          "a.run_id",
           "a.added_at",
           "a.retired_at",
           "to.path as to_path",
@@ -284,7 +287,8 @@ async function linesOf(
   const lines: Line[] = [];
 
   for (const u of units) {
-    const first = (e: { added_at: string }) => e.added_at <= u.created_at;
+    // What the record was saved with is what its own run wrote: another run can add to it in the very millisecond of the save
+    const first = (e: { run_id: number }) => e.run_id === u.run_id;
     const sources = [
       ...new Set(evidence.filter((e) => e.unit_id === u.id && first(e)).map((e) => e.source_id)),
     ];
@@ -324,7 +328,7 @@ async function linesOf(
   for (const e of evidence) {
     const u = unit.get(e.unit_id);
     if (!u) continue;
-    if (e.added_at > u.created_at)
+    if (e.run_id !== u.run_id)
       lines.push({
         at: e.added_at,
         order: ORDER.evidence,
@@ -345,7 +349,7 @@ async function linesOf(
     const u = unit.get(a.unit_id);
     if (!u) continue;
     const who = `s${a.source_id} (${preview(speaker(a), SHOWN.who)}, ${a.route})`;
-    if (a.added_at > u.created_at)
+    if (a.run_id !== u.run_id)
       lines.push({
         at: a.added_at,
         order: ORDER.adoption,
@@ -427,7 +431,7 @@ async function linesOf(
     const where = (path: string, symbol: string | null) =>
       `${preview(path, SHOWN.path)}${symbol ? ` ${preview(symbol, SHOWN.symbol)}` : ""}`;
     // An anchor carries no source of its own; a record's evidence is not the reason for a later change to it
-    if (a.added_at > u.created_at)
+    if (a.run_id !== u.run_id)
       lines.push({
         at: a.added_at,
         order: ORDER.anchor,
