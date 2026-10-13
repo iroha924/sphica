@@ -42,6 +42,7 @@ import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import { ftsQuery } from "../../src/text.ts";
+import { timelineRefs } from "../../src/timeline.ts";
 import { logCall } from "../../src/trace.ts";
 import { childLog, codexLog } from "../../test/codex-log-file.ts";
 import type { Step, World } from "./load.ts";
@@ -262,8 +263,10 @@ export async function createDriver(world: World): Promise<Driver> {
   let lastRead = "";
   /** A time after every write so far and before the latest glean's, for reading as of just before it (writes carry the real clock). */
   let beforeGlean = "";
-  const search = async (query: string) =>
-    (await searchUnits(db(), await projectId(), { question: query, limit: 10 })).hits;
+  /** The same for the latest trace, for searching as of just before it. */
+  let beforeTrace = "";
+  const search = async (query: string, asOf?: string) =>
+    (await searchUnits(db(), await projectId(), { question: query, limit: 10, asOf })).hits;
   /** The last check output, for expectations about what check reported. */
   let checked = "";
   /** What the last trace or harvest save reported, for expectations about why a record waits. */
@@ -674,7 +677,13 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.search && typeof step.search === "object") {
-        found = await search(String((step.search as { query: string }).query));
+        const s = step.search as { query: string; as_of?: { before: "trace" } };
+        if (s.as_of)
+          assert.ok(
+            s.as_of.before === "trace" && beforeTrace,
+            "as_of searches as of just before a trace step",
+          );
+        found = await search(String(s.query), s.as_of ? beforeTrace : undefined);
         return;
       }
       if (step.asked && typeof step.asked === "object") {
@@ -708,6 +717,10 @@ export async function createDriver(world: World): Promise<Driver> {
         const r = await exportOf(x.records, x.path);
         if (!("document" in r)) assert.fail(r.error);
         exported = r.document;
+        return;
+      }
+      if (Array.isArray(step.timeline)) {
+        lastRead = await timelineRefs(db(), await projectId(), step.timeline as string[]);
         return;
       }
       if (Array.isArray(step.read)) {
@@ -866,8 +879,13 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (step.harvest && typeof step.harvest === "object")
         return harvest(step.harvest as { pr: number; record: Record<string, unknown> });
-      if (step.trace && typeof step.trace === "object")
+      if (step.trace && typeof step.trace === "object") {
+        const tick = () => new Promise((r) => setTimeout(r, 2));
+        await tick();
+        beforeTrace = new Date().toISOString();
+        await tick();
         return trace(step.trace as { session: string; record: Record<string, unknown> });
+      }
       if (step.session && typeof step.session === "object") {
         // A session a case gives inline happened: it goes through the hooks like any other
         const s = step.session as Session;
@@ -1125,6 +1143,23 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.ok(
           at >= 0 && at < Number(e.within ?? 10),
           `${e.hits_include} not within ${e.within}: ${found.map((h) => h.key).join(", ")}`,
+        );
+        return;
+      }
+      if (typeof e.hits_exclude === "string") {
+        assert.ok(
+          !found.some((h) => h.key === e.hits_exclude),
+          `${e.hits_exclude} is among the hits: ${found.map((h) => h.key).join(", ")}`,
+        );
+        return;
+      }
+      if (e.hit_state && typeof e.hit_state === "object") {
+        const want = e.hit_state as { unit: string; lifecycle: string; now?: string };
+        const hit = found.find((h) => h.key === want.unit);
+        assert.deepEqual(
+          [hit?.lifecycle, hit?.now],
+          [want.lifecycle, want.now],
+          `${want.unit}: ${found.map((h) => `${h.key} ${h.lifecycle}`).join(", ")}`,
         );
         return;
       }

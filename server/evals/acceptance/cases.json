@@ -13,8 +13,9 @@
     "harvest": "issue a harvest draft for the pull request (fake gh serves world.json), write the record, check, save",
     "glean": "issue a glean draft in the given session, write the record, check, save",
     "edit_file": "change a world file in the temp repository and commit",
-    "search": "call the MCP search tool",
+    "search": "call the MCP search tool; with as_of { before: \"trace\" }, as of just before the latest trace step",
     "read": "call the MCP read tool",
+    "timeline": "call the MCP read tool with timeline: true for the given refs",
     "status": "call the MCP status tool",
     "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
@@ -1319,6 +1320,68 @@
         },
         {
           "ranks_above": ["trace:s-ja-postgres/postgres", "trace:s-ja-storage/storage"]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-14",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "A search as of a time before a supersession shows the replaced decision as active then, says what it is now, and leaves out the successor saved later",
+      "given": [
+        {
+          "case": "status-02"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "pnpm installs",
+          "as_of": {
+            "before": "trace"
+          }
+        }
+      },
+      "then": [
+        {
+          "hit_state": {
+            "unit": "harvest:12/pnpm",
+            "lifecycle": "active",
+            "now": "superseded"
+          }
+        },
+        {
+          "hits_exclude": "trace:s-en-npm/npm"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-15",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "The timeline of a successor shows the decision it replaced, when the replacement took effect, and the reason, in one reply",
+      "given": [
+        {
+          "case": "status-02"
+        }
+      ],
+      "when": {
+        "timeline": ["trace:s-en-npm/npm"]
+      },
+      "then": [
+        {
+          "read_contains": "## Timeline of trace:s-en-npm/npm"
+        },
+        {
+          "read_contains": "saved: decision do, Use npm again"
+        },
+        {
+          "read_contains": "Why: pnpm broke Windows contributors"
+        },
+        {
+          "read_contains": ") replaced harvest:12/pnpm"
+        },
+        {
+          "read_contains": "became superseded: superseded by trace:s-en-npm/npm"
         }
       ]
     },
@@ -8060,6 +8123,180 @@
                   "quote": "更新（延長）は 1 回だけできるようにして。"
                 }
               ]
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_sync_1": {
+      "capture": "s-en-sync-1",
+      "trace": {
+        "session": "s-en-sync-1",
+        "record": {
+          "units": [
+            {
+              "key": "every5",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Sync the shelf to the server every 5 minutes",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-1#1.owner",
+                  "quote": "Sync the shelf to the server every 5 minutes.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-sync-1#1.owner",
+                  "quote": "Sync the shelf to the server every 5 minutes."
+                }
+              ],
+              "no_code_surface": "The sync schedule is not in this repository yet",
+              "aliases": [
+                "同期",
+                "同期の間隔",
+                "同期のタイミング",
+                "sync",
+                "sync interval",
+                "sync schedule",
+                "shelf sync",
+                "本棚の同期"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_sync_2": {
+      "capture": "s-en-sync-2",
+      "trace": {
+        "session": "s-en-sync-2",
+        "record": {
+          "units": [
+            {
+              "key": "battery",
+              "kind": "finding",
+              "text": "Syncing every 5 minutes drained phone batteries: the radio never slept between syncs",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-2#1.owner",
+                  "quote": "Syncing every 5 minutes drained phone batteries: the radio never slept between syncs.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["電池", "バッテリー", "同期", "battery", "radio", "sync"]
+            },
+            {
+              "key": "push",
+              "kind": "dead_end",
+              "text": "A push channel in place of timed syncs was tried and dropped: the provider closes idle sockets after 60 seconds",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-2#2.owner",
+                  "quote": "We tried a push channel instead and dropped it: the provider closes idle sockets after 60 seconds.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["プッシュ", "push channel", "socket", "ソケット", "同期", "sync"]
+            },
+            {
+              "key": "german-label",
+              "kind": "finding",
+              "text": "The export button label is cut off in German",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-2#3.owner",
+                  "quote": "the export button label is cut off in German.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["ドイツ語", "ラベル", "German", "label", "export button", "エクスポート"]
+            },
+            {
+              "key": "every30",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Sync the shelf every 30 minutes",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-2#4.owner",
+                  "quote": "Sync the shelf every 30 minutes instead.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-sync-2#4.owner",
+                  "quote": "This replaces the 5 minute rule."
+                }
+              ],
+              "no_code_surface": "The sync schedule is not in this repository yet",
+              "aliases": [
+                "同期",
+                "同期の間隔",
+                "同期のタイミング",
+                "sync",
+                "sync interval",
+                "sync schedule",
+                "shelf sync",
+                "本棚の同期"
+              ],
+              "supersedes": "trace:s-en-sync-1/every5"
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_sync_3": {
+      "capture": "s-en-sync-3",
+      "trace": {
+        "session": "s-en-sync-3",
+        "record": {
+          "units": [
+            {
+              "key": "late-edits",
+              "kind": "finding",
+              "text": "With a sync every 30 minutes, readers saw edits from their other devices half an hour late and overwrote them",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-3#1.owner",
+                  "quote": "Readers saw edits from their other devices half an hour late and overwrote them.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["上書き", "遅れ", "同期", "overwrite", "late edits", "devices", "sync"]
+            },
+            {
+              "key": "foreground",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Sync the shelf when the app comes to the foreground, and every 30 minutes only while it stays open",
+              "evidence": [
+                {
+                  "source": "session:s-en-sync-3#2.owner",
+                  "quote": "Sync the shelf when the app comes to the foreground, and every 30 minutes only while it stays open.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-sync-3#2.owner",
+                  "quote": "This replaces the plain 30 minute rule."
+                }
+              ],
+              "no_code_surface": "The sync schedule is not in this repository yet",
+              "aliases": [
+                "同期",
+                "同期の間隔",
+                "同期のタイミング",
+                "sync",
+                "sync interval",
+                "sync schedule",
+                "shelf sync",
+                "本棚の同期"
+              ],
+              "supersedes": "trace:s-en-sync-2/every30"
             }
           ]
         }

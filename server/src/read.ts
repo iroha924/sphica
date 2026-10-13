@@ -47,15 +47,12 @@ export async function readUnit(
   return (await unitView(db, projectId, ref, root, asOf, renames))?.text ?? null;
 }
 
-/** A record as readUnit shows it, with its id so a long one can be continued by u<id>. */
-async function unitView(
+/** The record a ref names in this project: by key (`trace:<session>/<key>`, `harvest:<n>/<key>`, `glean:<key>`) or by `u<id>`. */
+export async function unitByRef(
   db: Reads,
   projectId: number,
   ref: string,
-  root: string | null,
-  asOf: string | undefined,
-  renames: Renames,
-): Promise<{ id: number; text: string } | null> {
+): Promise<Selectable<DB["unit"]> | undefined> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
     .selectFrom("unit")
@@ -64,7 +61,7 @@ async function unitView(
     .where(byId ? "id" : "key", "=", byId ? Number(byId[1]) : ref)
     .executeTakeFirst();
   // A key without its origin prefix (ext-s1/storage) reads the record when exactly one origin has it
-  const bare =
+  return (
     u ??
     (byId
       ? undefined
@@ -78,7 +75,20 @@ async function unitView(
             ["trace:", "harvest:", "glean:"].map((o) => o + ref),
           )
           .execute()
-          .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
+          .then((rows) => (rows.length === 1 ? rows[0] : undefined)))
+  );
+}
+
+/** A record as readUnit shows it, with its id so a long one can be continued by u<id>. */
+async function unitView(
+  db: Reads,
+  projectId: number,
+  ref: string,
+  root: string | null,
+  asOf: string | undefined,
+  renames: Renames,
+): Promise<{ id: number; text: string } | null> {
+  const bare = await unitByRef(db, projectId, ref);
   // As of a past time, a record created later does not exist yet
   if (!bare || (asOf && bare.created_at > asOf)) return null;
   return { id: bare.id, text: await describe(db, bare, root, asOf, renames) };

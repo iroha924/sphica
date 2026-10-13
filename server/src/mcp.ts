@@ -24,11 +24,12 @@ import { readRefs } from "./read.ts";
 import { READ_BUDGET, withinBudget } from "./reply-budget.ts";
 import { parseDiff, REVIEW_BATCH, reviewBatch, selectReply } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
-import { hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
+import { asOfLines, hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
 import { stopOnOverflow } from "./stdio-limit.ts";
 import { head, reason } from "./text.ts";
+import { timelineRefs } from "./timeline.ts";
 
 requireRuntime();
 const db = openReader();
@@ -81,6 +82,21 @@ const server = new McpServer(
   },
 );
 
+/** Times as the database stores them: a search as of a time compares them as text */
+const STORED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const AS_OF_FORM =
+  "as_of must be a time with its offset, such as 2026-10-01T09:00:00+09:00 or 2026-10-01T00:00:00Z, from year 0000 to 9999 in UTC; a date alone is not taken";
+
+/** A time given with its offset, as the database writes times (UTC to the millisecond; finer digits are dropped); null when it is not one. */
+function storedTime(raw: string): string | null {
+  if (!z.iso.datetime({ offset: true }).safeParse(raw).success) return null;
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return null;
+  // An offset at either end of the years moves the UTC year out of four digits, which no longer sorts as text
+  const iso = at.toISOString();
+  return STORED_TIME.test(iso) ? iso : null;
+}
+
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
 // Without it a host that names no workspace gets the server's working directory, and the caller could not tell it looked at another project.
@@ -121,7 +137,9 @@ server.registerTool(
       "Finds records (decisions, constraints, implementations, findings, dead ends, questions) whose text holds most of the query's words, " +
       "active ones first. Use short queries of the subject's words (identifiers, option names, the domain terms). sources: true searches the " +
       "captured conversation and pull request text instead. asked: true finds the owner's earlier messages like the query in other sessions, " +
-      "with the records that quote each and whether a decision was recorded. An empty result also says how many weaker matches were left out. " +
+      "with the records that quote each and whether a decision was recorded. as_of searches the records as Sphica held them at a past time: " +
+      "only those saved by then, by their states, anchors, aliases, and replacements of that time, ranked by today's index; records saved " +
+      "later that match are named apart. An empty result also says how many weaker matches were left out. " +
       `Each hit is a preview, and a reply stays within ${READ_BUDGET / 1024} KiB: hits that do not fit are named after the results, by u<id> or s<id>, for read.`,
     inputSchema: z
       .object({
@@ -152,6 +170,15 @@ server.registerTool(
           .describe(
             "With asked: this session's id, so its own messages are left out (in Codex pass CODEX_THREAD_ID from your shell; Codex gives MCP servers none)",
           ),
+        as_of: z
+          .string()
+          .min(1)
+          .max(64)
+          .optional()
+          .describe(
+            "A past time with its offset, such as 2026-10-01T09:00:00+09:00 or 2026-10-01T00:00:00Z (digits finer than milliseconds are dropped; " +
+              "a date alone is refused). The time is when Sphica saved a record or a change to it, not when the words were said. Not with sources or asked",
+          ),
         limit: z.number().int().min(1).max(20).optional(),
       })
       .strict(),
@@ -162,6 +189,10 @@ server.registerTool(
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
       const limit = a.limit ?? 8;
+      if (a.as_of !== undefined && (a.asked || a.sources))
+        return text("as_of cannot be combined with sources or asked.", true);
+      const asOf = a.as_of === undefined ? undefined : storedTime(a.as_of);
+      if (asOf === null) return text(`Nothing was searched: ${AS_OF_FORM}.`, true);
       if (a.asked) {
         if (a.sources || a.path !== undefined) return text("asked cannot be combined with sources or path.");
         // The calling session's own words never come back as earlier ones. Codex gives MCP servers no session id, so the agent passes it
@@ -197,15 +228,27 @@ server.registerTool(
         lifecycles: a.lifecycles,
         path: a.path,
         limit,
+        asOf,
       });
       if (r.refused) return text(`Nothing was searched: ${r.refused}`, true);
-      if (!r.hits.length)
+      const past = asOf === undefined ? undefined : { at: asOf, notes: r.asOf };
+      if (!r.hits.length) {
+        // A past view says what it is even when it finds nothing: its time is when Sphica saved, not when the words were said
+        const lines = past ? asOfLines(past.at, past.notes) : undefined;
         return text(
-          `No record ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
-            (r.stopped ? "Search with more specific words. " : "") +
-            "Search again with other words or the other language, or search sources; status says whether sessions are still untraced.",
+          [
+            ...(lines ? [lines.lead] : []),
+            `No record ${past ? `as of ${past.at} ` : ""}${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
+              (r.stopped ? "Search with more specific words. " : "") +
+              // sources cannot be searched as of a time, so a past view points to today's records instead
+              (past
+                ? "Search again with other words or the other language, or without as_of for the records as they are now; status says whether sessions are still untraced."
+                : "Search again with other words or the other language, or search sources; status says whether sessions are still untraced."),
+            ...(lines?.notes ?? []),
+          ].join("\n"),
         );
-      return text(hitsReply(r.hits, stoppedAfter(r)));
+      }
+      return text(hitsReply(r.hits, stoppedAfter(r), past));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }
@@ -219,6 +262,9 @@ server.registerTool(
     description:
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
       "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source. " +
+      "It shows a record as it is now, also after a search with as_of. timeline: true gives an overview instead of the full record: the " +
+      "records it replaced or was replaced by, what happened to each and when, with each reason and its sources, and the findings, dead " +
+      "ends, and questions saved by the same runs or anchored at the same places, oldest first. " +
       `A reply stays within ${READ_BUDGET / 1024} KiB: when it stops, it names the refs to read next, the one it cut first.`,
     inputSchema: z
       .object({
@@ -230,6 +276,13 @@ server.registerTool(
             "Record keys, u<id>, or s<id>; s<id>@<byte> and u<id>@<byte>:<digest>, as a reply names them, go on from where it stopped",
           ),
         cwd: CWD,
+        timeline: z
+          .boolean()
+          .optional()
+          .describe(
+            "true: the timeline of each record in refs (keys or u<id> only) instead of its full text. A summary, not the quoted words; " +
+              "what does not fit is named after it by u<id>",
+          ),
       })
       .strict(),
     annotations: READ_ONLY,
@@ -238,7 +291,9 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
-      return text(await readRefs(db, p.id, a.refs, p.root));
+      return text(
+        a.timeline ? await timelineRefs(db, p.id, a.refs) : await readRefs(db, p.id, a.refs, p.root),
+      );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

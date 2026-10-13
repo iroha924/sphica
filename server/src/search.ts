@@ -5,7 +5,7 @@
 // when it holds more than half of the question's content terms (text.ts queryTerms). Weaker matches are counted, not shown, so a question
 // with no answer comes back empty instead of returning whatever shares one word with it.
 
-import { sql } from "kysely";
+import { type SqlBool, sql } from "kysely";
 import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
@@ -22,6 +22,10 @@ const SOURCE_PAGE = 50;
 const SOURCE_SCAN_MAX = 600;
 const SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 const LIFE_ORDER: Record<string, number> = { active: 0, candidate: 1, superseded: 2, withdrawn: 3 };
+// As of a past time: candidates today's index cannot find by the words they held then, and records saved later that match now
+const EXTRA_MAX = 200;
+const EXTRA_RANK = Number.MAX_SAFE_INTEGER;
+const LATER_SHOWN = 10;
 
 export type UnitHit = {
   id: number;
@@ -41,8 +45,15 @@ export type UnitHit = {
   successorOf?: string;
   /** The id of that replaced unit: what read takes when its key is too long to show whole */
   successorOfId?: number;
-  /** Whose decision a decision or constraint is now */
+  /** Whose decision a decision or constraint is now, or as of the time searched */
   authority?: Authority;
+  /** Searched as of a past time: the state the record has now, when it differs from its state then */
+  now?: string;
+  /**
+   * Searched as of a past time: a decision or constraint with no adoption in effect then on record. Nobody may have adopted it, or
+   * the words that did were forgotten or retracted since; the rows that are left cannot tell which, so the reply does not say
+   */
+  noAdoptionKept?: true;
 };
 
 export type UnitQuery = {
@@ -52,34 +63,37 @@ export type UnitQuery = {
   /** Only units anchored to this repository path */
   path?: string | undefined;
   limit: number;
+  /**
+   * Only records saved by this time, judged by the states, anchors, aliases, fields, replacements, and adoption of that time.
+   * The order still follows today's index, whose ranks count every record held now.
+   */
+  asOf?: string | undefined;
 };
 
-const strong = (matched: number, of: number) => matched * 2 > of;
+/** What a search as of a past time left out, for the caller to say. */
+type AsOfNotes = {
+  /** Records saved after that time that match now, oldest first; not hits, since nothing says they were known then */
+  later: { id: number; created_at: string }[];
+  laterMore: number;
+  laterStopped: boolean;
+  /** Whether the candidates today's index no longer finds by their words of that time were cut at their cap */
+  extraStopped: boolean;
+};
 
-const PATH_REFUSED =
-  "path must be relative to the repository root, such as src/x.ts: absolute paths, .., backslashes, and empty parts are refused";
-
-export async function searchUnits(
-  db: Reads,
-  projectId: number,
-  q: UnitQuery,
-): Promise<{
+type Found = {
   hits: UnitHit[];
   weaker: number;
   terms: string[];
   stopped: boolean;
   read: number;
   refused?: string;
-}> {
-  const wanted = queryTerms(q.question);
-  // Anchors are stored by these rules, so a path written another way would match nothing and look like no record
-  const path = q.path === undefined ? undefined : repoPath(q.path);
-  if (path === null)
-    return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0, refused: PATH_REFUSED };
-  const match = ftsQuery(q.question);
-  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  asOf?: AsOfNotes;
+};
+
+/** The index's matches for a query in this project, each joined to its record. */
+const indexed = (db: Reads, projectId: number, match: string) =>
   // cross join fixes the order: the index's matches drive, instead of every row of the project running MATCH once (seconds on large projects)
-  let query = db
+  db
     .selectFrom(
       sql<{
         rowid: number;
@@ -91,6 +105,10 @@ export async function searchUnits(
     .innerJoin("unit as u", "u.id", "f.rowid")
     .where("u.project_id", "=", projectId)
     .where("u.extraction", "=", "supported");
+
+/** The index's matches narrowed by the caller's filters as the records are now. */
+function filtered(db: Reads, projectId: number, q: UnitQuery, path: string | undefined, match: string) {
+  let query = indexed(db, projectId, match);
   if (q.kinds?.length) query = query.where("u.kind", "in", q.kinds);
   if (q.lifecycles?.length) query = query.where("u.lifecycle", "in", q.lifecycles);
   if (path)
@@ -103,6 +121,24 @@ export async function searchUnits(
           .where("a.retired_at", "is", null),
       ),
     );
+  return query;
+}
+
+const strong = (matched: number, of: number) => matched * 2 > of;
+
+const PATH_REFUSED =
+  "path must be relative to the repository root, such as src/x.ts: absolute paths, .., backslashes, and empty parts are refused";
+
+export async function searchUnits(db: Reads, projectId: number, q: UnitQuery): Promise<Found> {
+  const wanted = queryTerms(q.question);
+  // Anchors are stored by these rules, so a path written another way would match nothing and look like no record
+  const path = q.path === undefined ? undefined : repoPath(q.path);
+  if (path === null)
+    return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0, refused: PATH_REFUSED };
+  const match = ftsQuery(q.question);
+  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  if (q.asOf !== undefined) return searchAsOf(db, projectId, q, q.asOf, wanted, path, match);
+  const query = filtered(db, projectId, q, path, match);
   // The order is taken in one statement, after every filter, so a write between pages shifts nothing and matches a filter drops
   // never crowd out the ones it keeps. Hits are sorted at the end, so every candidate up to the cap is read; the row past the cap
   // only tells whether more remain.
@@ -188,6 +224,189 @@ export async function searchUnits(
   };
 }
 
+/**
+ * searchUnits as of a past time. Candidates come from today's index, plus the records it can no longer find by their words of that
+ * time (an anchor retired since, an alias set replaced since), and each is judged by what it held then.
+ */
+async function searchAsOf(
+  db: Reads,
+  projectId: number,
+  q: UnitQuery,
+  asOf: string,
+  wanted: string[],
+  path: string | undefined,
+  match: string,
+): Promise<Found> {
+  const life = sql<string>`coalesce((select t.to_state from unit_state as t where t.unit_id = u.id and t.at <= ${asOf} order by t.id desc limit 1), 'candidate')`;
+  const held = sql<SqlBool>`u.created_at <= ${asOf}${q.kinds?.length ? sql` and u.kind in (${sql.join(q.kinds)})` : sql``}${
+    q.lifecycles?.length ? sql` and ${life} in (${sql.join(q.lifecycles)})` : sql``
+  }${
+    path
+      ? sql` and exists (select 1 from unit_anchor as a where a.unit_id = u.id and a.path = ${path} and a.added_at <= ${asOf} and (a.retired_at is null or a.retired_at > ${asOf}))`
+      : sql``
+  }`;
+  const lostWords = sql<SqlBool>`(exists (select 1 from unit_anchor as a where a.unit_id = u.id and a.added_at <= ${asOf} and a.retired_at > ${asOf})
+    or (exists (select 1 from unit_alias as x where x.unit_id = u.id and x.added_at > ${asOf})
+      and exists (select 1 from unit_alias as x where x.unit_id = u.id and x.added_at <= ${asOf})))`;
+  const units = () =>
+    db
+      .selectFrom("unit as u")
+      .where("u.project_id", "=", projectId)
+      .where("u.extraction", "=", "supported")
+      .where(held);
+
+  const ranked = await indexed(db, projectId, match)
+    .where(held)
+    .select(["u.id", "f.rank"])
+    .orderBy("f.rank")
+    .orderBy("u.id")
+    .limit(UNIT_SCAN_MAX + 1)
+    .execute();
+  const stopped = ranked.length > UNIT_SCAN_MAX;
+  const taken = ranked.slice(0, UNIT_SCAN_MAX);
+  const known = new Set(taken.map((r) => r.id));
+  const lost = (
+    await units()
+      .where(lostWords)
+      .select("u.id")
+      .orderBy("u.id")
+      .limit(EXTRA_MAX + taken.length + 1)
+      .execute()
+  ).filter((r) => !known.has(r.id));
+  const extra = lost.slice(0, EXTRA_MAX).map((r) => ({ id: r.id, rank: EXTRA_RANK }));
+
+  let weaker = 0;
+  let read = 0;
+  const hits: (UnitHit & { rank: number })[] = [];
+  for (const [list, counted] of [
+    [taken, true],
+    [extra, false],
+  ] as const)
+    for (let at = 0; at < list.length; at += UNIT_PAGE) {
+      const part = list.slice(at, at + UNIT_PAGE);
+      const order = new Map(part.map((r, i) => [r.id, { i, rank: r.rank }]));
+      const rows = (
+        await units()
+          .select([
+            "u.id",
+            "u.key",
+            "u.kind",
+            "u.stance",
+            life.as("lifecycle"),
+            "u.lifecycle as now",
+            "u.text",
+            "u.why",
+            "u.scope_note",
+            "u.revisit_when",
+            "u.content_hash",
+          ])
+          .where(
+            "u.id",
+            "in",
+            part.map((r) => r.id),
+          )
+          .execute()
+      )
+        .map((r) => ({ ...r, rank: order.get(r.id)?.rank ?? EXTRA_RANK }))
+        .sort((a, b) => (order.get(a.id)?.i ?? 0) - (order.get(b.id)?.i ?? 0));
+      const left = await judgeUnits(db, rows, wanted, hits, asOf);
+      // A record the index did not match is not a weaker match of the question: it was only looked at
+      if (counted) {
+        read += rows.length;
+        weaker += left;
+      }
+    }
+  const shown = new Set(hits.map((h) => h.id));
+  for (const h of [...hits].filter((x) => x.lifecycle === "superseded"))
+    for (const n of await liveSuccessors(db, h.id, asOf))
+      if (
+        !shown.has(n.id) &&
+        (!q.kinds?.length || (q.kinds as string[]).includes(n.kind)) &&
+        (!q.lifecycles?.length || (q.lifecycles as string[]).includes(n.lifecycle))
+      ) {
+        shown.add(n.id);
+        hits.push({
+          ...n,
+          options: [],
+          anchors: [],
+          matched: [],
+          aliasOnly: false,
+          successorOf: h.key,
+          successorOfId: h.id,
+          rank: h.rank,
+        });
+      }
+  hits.sort(
+    (a, b) =>
+      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
+      b.matched.length - a.matched.length ||
+      a.rank - b.rank,
+  );
+  const top = hits.slice(0, q.limit);
+  const whose = await authorityOf(
+    db,
+    top.filter((h) => ["decision", "constraint"].includes(h.kind)).map((h) => h.id),
+    asOf,
+  );
+
+  // Saved after that time and matching now, by the caller's filters as the records are now: named apart, never counted as hits.
+  // Read oldest first, not best first, up to the same cap as the candidates: the ones named are those saved soonest after the time
+  const after = await filtered(db, projectId, q, path, match)
+    .where("u.created_at", ">", asOf)
+    .select(["u.id", "u.created_at"])
+    .orderBy("u.created_at")
+    .orderBy("u.id")
+    .limit(UNIT_SCAN_MAX + 1)
+    .execute();
+  const laterHits: (UnitHit & { rank: number })[] = [];
+  for (let at = 0; at < Math.min(after.length, UNIT_SCAN_MAX); at += UNIT_PAGE) {
+    const part = after.slice(at, Math.min(at + UNIT_PAGE, UNIT_SCAN_MAX));
+    const order = new Map(part.map((r, i) => [r.id, i]));
+    const rows = (
+      await filtered(db, projectId, q, path, match)
+        .select([
+          "u.id",
+          "u.key",
+          "u.kind",
+          "u.stance",
+          "u.lifecycle",
+          "u.text",
+          "u.why",
+          "u.scope_note",
+          "u.revisit_when",
+          "u.content_hash",
+          "f.rank",
+        ])
+        .where(
+          "u.id",
+          "in",
+          part.map((r) => r.id),
+        )
+        .execute()
+    ).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    await judgeUnits(db, rows, wanted, laterHits);
+  }
+  const savedAt = new Map(after.map((r) => [r.id, r.created_at]));
+  const later = laterHits.map((h) => ({ id: h.id, created_at: savedAt.get(h.id) ?? "" }));
+  return {
+    hits: top.map(({ rank: _rank, ...h }) => ({
+      ...h,
+      authority: whose.get(h.id),
+      ...(whose.get(h.id) === "none" ? { noAdoptionKept: true as const } : {}),
+    })),
+    weaker,
+    terms: wanted,
+    stopped,
+    read,
+    asOf: {
+      later: later.slice(0, LATER_SHOWN),
+      laterMore: Math.max(later.length - LATER_SHOWN, 0),
+      laterStopped: after.length > UNIT_SCAN_MAX,
+      extraStopped: lost.length > EXTRA_MAX,
+    },
+  };
+}
+
 export type Successor = {
   id: number;
   key: string;
@@ -197,23 +416,37 @@ export type Successor = {
   text: string;
   why: string | null;
   revisit_when: string | null;
+  now?: string;
 };
 
 /**
  * The record in effect at the end of a record's chain of replacements, following open replacement rows until a record nothing replaces.
  * A record has at most one open row into it, so the chain is a line; a proposal waiting for the place has no row and is never shown.
+ * As of a past time, a row is open when that time falls in its period, and the successor carries the state it had then.
  */
-export async function liveSuccessors(db: Reads, id: number): Promise<Successor[]> {
+export async function liveSuccessors(db: Reads, id: number, asOf?: string): Promise<Successor[]> {
   const seen = new Set([id]);
   let end: Successor | undefined;
   for (let at = id; ; ) {
-    const next = await db
-      .selectFrom("unit_replacement as h")
-      .innerJoin("unit as n", "n.id", "h.from_unit")
-      .where("h.to_unit", "=", at)
-      .where("h.ended_at", "is", null)
-      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
-      .executeTakeFirst();
+    const next =
+      asOf === undefined
+        ? await db
+            .selectFrom("unit_replacement as h")
+            .innerJoin("unit as n", "n.id", "h.from_unit")
+            .where("h.to_unit", "=", at)
+            .where("h.ended_at", "is", null)
+            .select([
+              "n.id",
+              "n.key",
+              "n.kind",
+              "n.stance",
+              "n.lifecycle",
+              "n.text",
+              "n.why",
+              "n.revisit_when",
+            ])
+            .executeTakeFirst()
+        : await pastSuccessor(db, at, asOf);
     // Rows only open along acyclic intents; the visited set keeps a damaged database from looping a read
     if (!next || seen.has(next.id)) break;
     seen.add(next.id);
@@ -221,6 +454,33 @@ export async function liveSuccessors(db: Reads, id: number): Promise<Successor[]
     at = next.id;
   }
   return end ? [end] : [];
+}
+
+/** The record whose replacement of `id` was in effect at `asOf`, with the state it had then. */
+async function pastSuccessor(db: Reads, id: number, asOf: string): Promise<Successor | undefined> {
+  const n = await db
+    .selectFrom("unit_replacement as h")
+    .innerJoin("unit as n", "n.id", "h.from_unit")
+    .where("h.to_unit", "=", id)
+    .where("h.started_at", "<=", asOf)
+    .where((eb) => eb.or([eb("h.ended_at", "is", null), eb("h.ended_at", ">", asOf)]))
+    .select([
+      "n.id",
+      "n.key",
+      "n.kind",
+      "n.stance",
+      sql<string>`coalesce((select t.to_state from unit_state as t where t.unit_id = n.id and t.at <= ${asOf} order by t.id desc limit 1), 'candidate')`.as(
+        "lifecycle",
+      ),
+      "n.lifecycle as now",
+      "n.text",
+      "n.why",
+      "n.revisit_when",
+    ])
+    .executeTakeFirst();
+  if (!n) return undefined;
+  const { now, ...rest } = n;
+  return now === rest.lifecycle ? rest : { ...rest, now };
 }
 
 type UnitRow = {
@@ -235,14 +495,20 @@ type UnitRow = {
   revisit_when: string | null;
   content_hash: Uint8Array | Buffer;
   rank: number;
+  /** The state now, on a row whose lifecycle is the one of a past time */
+  now?: string;
 };
 
-/** Runs the term check on one page of candidates, adding the hits; returns how many were weaker. */
+/**
+ * Runs the term check on one page of candidates, adding the hits; returns how many were weaker. With `asOf`, a candidate is judged by the
+ * anchors and alias set it had at that time (options and field values are written with the record and never added later).
+ */
 async function judgeUnits(
   db: Reads,
   rows: UnitRow[],
   wanted: string[],
   hits: (UnitHit & { rank: number })[],
+  asOf?: string,
 ): Promise<number> {
   const ids = rows.map((r) => r.id);
   const [options, anchors, aliases, fields] = ids.length
@@ -257,13 +523,19 @@ async function judgeUnits(
           .selectFrom("unit_anchor")
           .select(["unit_id", "path", "symbol", "role"])
           .where("unit_id", "in", ids)
-          .where("retired_at", "is", null)
+          .$if(asOf === undefined, (a) => a.where("retired_at", "is", null))
+          .$if(asOf !== undefined, (a) =>
+            a
+              .where("added_at", "<=", asOf ?? "")
+              .where((eb) => eb.or([eb("retired_at", "is", null), eb("retired_at", ">", asOf ?? "")])),
+          )
           .orderBy("id")
           .execute(),
         db
           .selectFrom("unit_alias")
           .select(["unit_id", "terms", "content_hash"])
           .where("unit_id", "in", ids)
+          .$if(asOf !== undefined, (a) => a.where("added_at", "<=", asOf ?? ""))
           .orderBy("id", "desc")
           .execute(),
         db
@@ -321,6 +593,7 @@ async function judgeUnits(
       matched,
       aliasOnly: matched.every((w) => !own.has(w)),
       rank: r.rank,
+      ...(r.now !== undefined && r.now !== r.lifecycle ? { now: r.now } : {}),
     });
   }
   return weaker;
@@ -474,7 +747,7 @@ function hitText(h: UnitHit): string {
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
   return [
     // A key cut for display is not one read takes: the id beside it is
-    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.now ? `, now ${h.now}` : ""}${h.noAdoptionKept ? ", no adoption in effect then is on record" : h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
     preview(h.text, SHOWN.text, true),
     ...(h.why ? [`Why: ${preview(h.why, SHOWN.why, true)}`] : []),
     ...(h.revisit_when ? [`Revisit when: ${preview(h.revisit_when, SHOWN.revisit, true)}`] : []),
@@ -490,26 +763,62 @@ function hitText(h: UnitHit): string {
 const withNotes = (body: string, notes: string[]) => [framed(body), ...notes.filter(Boolean)].join("\n");
 
 /**
- * search's whole reply for record hits within READ_BUDGET: the hits in the frame, with Sphica's words for an AI's decision when one is
- * shown, then outside it the hits that did not fit, named by u<id> for read, and after (where the search stopped).
+ * What a search as of a past time says around its hits: first the time and what it covers, then what it left out. Sphica's own words,
+ * so they go outside the frame.
  */
-export function hitsReply(hits: UnitHit[], after: string): string {
+export function asOfLines(at: string, n: AsOfNotes | undefined): { lead: string; notes: string[] } {
+  const more = n?.laterMore
+    ? `, and ${n.laterMore} more${n.laterStopped ? " at least" : ""}`
+    : n?.laterStopped
+      ? ", and possibly more"
+      : "";
+  return {
+    lead: `As of ${at}: which records existed, and their states, anchors, aliases, and replacements, are as Sphica held them then (by when it saved them, not when the words were said); the order follows today's index. read shows each record as it is now, with its dated history.`,
+    notes: [
+      n?.later.length
+        ? `Saved after this time and not counted: ${n.later.map((l) => `u${l.id} (saved ${l.created_at})`).join(", ")}${more}.`
+        : // An empty list with the reading cut is not "none saved later"
+          n?.laterStopped
+          ? `Records saved after this time were read up to ${UNIT_SCAN_MAX} from the oldest and none matched; newer ones were not read.`
+          : "",
+      n?.extraStopped
+        ? `Records found only by an anchor or alias they have lost since were looked at up to ${EXTRA_MAX}; more may match.`
+        : "",
+    ].filter(Boolean),
+  };
+}
+
+/**
+ * search's whole reply for record hits within READ_BUDGET: the hits in the frame, with Sphica's words for an AI's decision when one is
+ * shown, then outside it the hits that did not fit, named by u<id> for read, and after (where the search stopped). A search as of a
+ * past time opens with that time and names what it left out.
+ */
+export function hitsReply(
+  hits: UnitHit[],
+  after: string,
+  asOf?: { at: string; notes: AsOfNotes | undefined },
+): string {
   const parts = hits.map(hitText);
+  const lines = asOf ? asOfLines(asOf.at, asOf.notes) : undefined;
   const reply = (kept: number) =>
-    withNotes(
-      [
-        ...parts.slice(0, kept),
-        ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
-      ].join("\n\n"),
-      [
-        leftOut(
-          hits.slice(kept).map((h) => `u${h.id}`),
-          "hits",
-        ),
-        after,
-        "Read a record by its key before relying on it.",
-      ],
-    );
+    [
+      ...(lines ? [lines.lead] : []),
+      withNotes(
+        [
+          ...parts.slice(0, kept),
+          ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
+        ].join("\n\n"),
+        [
+          leftOut(
+            hits.slice(kept).map((h) => `u${h.id}`),
+            "hits",
+          ),
+          ...(lines?.notes ?? []),
+          after,
+          "Read a record by its key before relying on it.",
+        ],
+      ),
+    ].join("\n");
   return reply(fitCount(parts, READ_BUDGET, reply));
 }
 

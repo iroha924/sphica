@@ -30,12 +30,18 @@ import {
 import { type Checkout, evalCache, homeFence, pinCheckout } from "../evals/cloud/codex-home.ts";
 import { codexHarness, currentFence, repoPlaces, tempRoots } from "../evals/cloud/codex-run.ts";
 import {
+  CALLS_UNTOLD,
   claudeStreamCalls,
   foundInClaudeStream,
   goldSignalsFromClaudeStream,
+  goldSignalsFromCodex,
   lookedOutside,
   searchedBeforeEdit,
   searchLoading,
+  sphicaCallsFromClaudeStream,
+  sphicaCallsFromCodex,
+  timelineSignalsFromClaudeStream,
+  timelineSignalsFromCodex,
 } from "../evals/cloud/judge.ts";
 
 /** Pins a test checkout's git directory beside it, as the runners do before the agent starts. */
@@ -269,7 +275,16 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
   );
   fs.writeFileSync(
     path.join(run, "events.jsonl"),
-    [use("a", "mcp__sphica__search"), result("a", "No record holds most of: x"), done].join("\n"),
+    [
+      use("a", "mcp__sphica__search", { query: "x", as_of: "2026-10-01T00:00:00Z" }),
+      result(
+        "a",
+        "As of 2026-10-01T00:00:00.000Z: …\nNo record as of 2026-10-01T00:00:00.000Z holds most of: x",
+      ),
+      use("b", "mcp__sphica__read", { refs: ["u1"], timeline: true }),
+      result("b", "u1: not found in this project"),
+      done,
+    ].join("\n"),
   );
   fs.writeFileSync(path.join(run, "answer.md"), "final answer");
   fs.writeFileSync(path.join(run, "patch.diff"), "");
@@ -306,7 +321,15 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
     excluded: string | null;
     answer: string;
     answer_format: string;
-    signals: { searches: number; empty_searches: number; turns: number; seconds: number } | null;
+    signals: {
+      searches: number;
+      empty_searches: number;
+      turns: number;
+      seconds: number;
+      calls: Record<string, number> | null;
+      as_of_searches: number | null;
+      timeline_reads: number | null;
+    } | null;
   }[];
   const r1 = rows.find((r) => r.run === "r1");
   assert.ok(!rows.some((r) => r.run === "r3"), "a linked run is left out");
@@ -318,9 +341,285 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
     [r1?.signals?.searches, r1?.signals?.empty_searches, r1?.signals?.turns, r1?.signals?.seconds],
     [1, 1, 3, 7],
   );
+  // Each call is told apart in a stream, so the calls per tool and the use of as_of and timeline are counts, not unknown
+  assert.deepEqual(
+    [r1?.signals?.calls, r1?.signals?.as_of_searches, r1?.signals?.timeline_reads],
+    [{ search: 1, read: 1 }, 1, 1],
+  );
   assert.equal(
     rows.find((r) => r.run === "r2")?.excluded,
     "no result.json (the run stopped before it finished)",
+  );
+});
+
+const timeline = [
+  "Timelines are overviews, oldest first: each line sums up a record or a change to it.",
+  '<past-records id="aaaaaaaaaaaa">',
+  "## Timeline of trace:s/npm (u3)",
+  "2026-10-01T00:00:00.000Z trace:s/utc (u9) saved: constraint do, Store UTC",
+  "2026-10-02T00:00:00.000Z trace:s/npm (u3) replaced trace:s/utc (u9)",
+  "2026-10-03T00:00:00.000Z trace:s/utc-extra (u11) saved [same run]: finding, Another record",
+  '</past-records id="aaaaaaaaaaaa">',
+].join("\n");
+const full = "trace:s/utc (u9, revision 2): constraint do, superseded\nStore UTC";
+
+test("Sphica's calls are counted per tool with their use of as_of and timeline, and are untold when a log cannot tell calls apart", () => {
+  const stream = [
+    use("a", "mcp__sphica__search", { query: "x" }),
+    result("a", hit),
+    use("b", "mcp__sphica__search", { query: "x", as_of: "2026-10-01T00:00:00Z" }),
+    result("b", hit),
+    use("c", "mcp__sphica__read", { refs: ["u3"], timeline: true }),
+    result("c", timeline),
+    use("d", "mcp__sphica__read", { refs: ["u9"], timeline: false }),
+    result("d", full),
+    use("e", "mcp__sphica__status"),
+    result("e", "ok"),
+    use("f", "Read", { file_path: "x" }),
+    result("f", "text"),
+    done,
+  ];
+  assert.deepEqual(sphicaCallsFromClaudeStream(stream.join("\n")), {
+    calls: { search: 2, read: 2, status: 1 },
+    as_of_searches: 1,
+    timeline_reads: 1,
+  });
+  // A stream that told every call and held none of Sphica's is zero calls; one cut before its end, damaged, or missing is untold
+  assert.deepEqual(sphicaCallsFromClaudeStream([use("f", "Read"), result("f", "t"), done].join("\n")), {
+    calls: {},
+    as_of_searches: 0,
+    timeline_reads: 0,
+  });
+  assert.deepEqual(sphicaCallsFromClaudeStream(stream.slice(0, -1).join("\n")), CALLS_UNTOLD);
+  assert.deepEqual(sphicaCallsFromClaudeStream([...stream, "{broken"].join("\n")), CALLS_UNTOLD);
+  assert.deepEqual(sphicaCallsFromClaudeStream(null), CALLS_UNTOLD);
+
+  const call = (type: string, server: string, tool: string, extra: Record<string, unknown>) =>
+    ev({ type, item: { type: "mcp_tool_call", server, tool, ...extra } });
+  const codex = [
+    call("item.started", "sphica", "search", { arguments: { query: "x", as_of: "2026-10-01T00:00:00Z" } }),
+    call("item.completed", "sphica", "search", { result: { content: [{ text: hit }] } }),
+    call("item.started", "sphica", "read", { arguments: { refs: ["u3"], timeline: true } }),
+    call("item.completed", "sphica", "read", { result: { content: [{ text: timeline }] } }),
+    call("item.started", "sphica", "read", { arguments: { refs: ["u9"] } }),
+    call("item.completed", "sphica", "read", { result: { content: [{ text: full }] } }),
+    // Another server's tool of the same name is not Sphica's
+    call("item.started", "other", "search", { arguments: { as_of: "x" } }),
+    ev({ type: "turn.completed" }),
+  ];
+  assert.deepEqual(sphicaCallsFromCodex(codex.join("\n")), {
+    calls: { search: 1, read: 2 },
+    as_of_searches: 1,
+    timeline_reads: 1,
+  });
+  // A call counts where it starts, so one that never came back is still a call
+  assert.deepEqual(sphicaCallsFromCodex(codex.slice(0, 3).join("\n")).calls, { search: 1, read: 1 });
+  assert.deepEqual(sphicaCallsFromCodex([...codex, "{broken"].join("\n")), CALLS_UNTOLD);
+  assert.deepEqual(sphicaCallsFromCodex(""), CALLS_UNTOLD);
+  // A call logged without its arguments is still a call, but whether it took as_of or timeline is not told: unknown, never zero
+  assert.deepEqual(
+    sphicaCallsFromCodex(
+      [
+        call("item.started", "sphica", "read", {}),
+        call("item.started", "sphica", "search", { arguments: { query: "x" } }),
+      ].join("\n"),
+    ),
+    { calls: { read: 1, search: 1 }, as_of_searches: 0, timeline_reads: null },
+  );
+  assert.deepEqual(
+    sphicaCallsFromClaudeStream(
+      [
+        ev({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", id: "a", name: "mcp__sphica__search" }] },
+        }),
+        result("a", hit),
+        use("b", "mcp__sphica__read", { refs: ["u9"] }),
+        result("b", full),
+        done,
+      ].join("\n"),
+    ),
+    { calls: { search: 1, read: 1 }, as_of_searches: null, timeline_reads: 0 },
+  );
+});
+
+test("a record named in a timeline is told apart from one read in full", () => {
+  const gold = ["trace:s/utc", "trace:s/npm", "trace:s/other", "s/utc"];
+  const named = { "trace:s/utc": "yes", "trace:s/npm": "yes", "trace:s/other": "no", "s/utc": "no" };
+  const stream = [
+    use("c", "mcp__sphica__read", { refs: ["u3"], timeline: true }),
+    result("c", timeline),
+    done,
+  ];
+  // Named in the heading or in a line; a longer key that starts the same, and a key that only ends the same, are other records
+  assert.deepEqual(timelineSignalsFromClaudeStream(gold, stream.join("\n")), named);
+  assert.equal(
+    timelineSignalsFromClaudeStream(["trace:s/utc-extra"], stream.join("\n"))["trace:s/utc-extra"],
+    "yes",
+  );
+  // A timeline is an overview: the record it names was not read, and a full read is not a timeline
+  const signals = goldSignalsFromClaudeStream("search", ["trace:s/utc"], [], null, stream.join("\n"));
+  assert.equal(signals["trace:s/utc"]?.read, "no");
+  const read = [use("d", "mcp__sphica__read", { refs: ["u9"] }), result("d", full), done].join("\n");
+  assert.equal(timelineSignalsFromClaudeStream(["trace:s/utc"], read)["trace:s/utc"], "no");
+  assert.equal(
+    goldSignalsFromClaudeStream("search", ["trace:s/utc"], [], null, read)["trace:s/utc"]?.read,
+    "yes",
+  );
+  // A record's own text that quotes a timeline line, outside a timeline reply, is not a timeline
+  const quoted = [
+    use("d", "mcp__sphica__read", { refs: ["u9"] }),
+    result("d", `${full}\n2026-10-02T00:00:00.000Z trace:s/npm (u3) replaced trace:s/utc (u9)`),
+    done,
+  ].join("\n");
+  assert.equal(timelineSignalsFromClaudeStream(["trace:s/npm"], quoted)["trace:s/npm"], "no");
+  // A record's text that quotes another record's name, shown in a real timeline, does not name that record: only the record a line is
+  // about, the one it says was replaced or is in conflict, and the heading count
+  const quoting = [
+    "Timelines are overviews, oldest first: each line sums up a record or a change to it.",
+    '<past-records id="aaaaaaaaaaaa">',
+    "## Timeline of trace:s/npm (u3)",
+    "2026-10-01T00:00:00.000Z trace:s/npm (u3) saved: finding, The report quoted trace:s/gold (u99) as an example",
+    "  Why: trace:s/why (u98) said so",
+    "2026-10-02T00:00:00.000Z trace:s/npm (u3) became active: superseded by trace:s/reason (u97) once",
+    "2026-10-03T00:00:00.000Z trace:s/npm (u3) stopped replacing trace:s/old (u2): trace:s/ended (u96) was withdrawn",
+    "2026-10-04T00:00:00.000Z trace:s/npm (u3) conflicts with trace:s/rival (u4): resolved, as trace:s/note (u95) says",
+    "2026-10-05T00:00:00.000Z trace:s/next (u5) proposed to replace trace:s/npm (u3); it has not taken effect",
+    "at some time (not recorded) trace:s/undated (u6) replaced trace:s/npm (u3)",
+    '</past-records id="aaaaaaaaaaaa">',
+  ].join("\n");
+  const asked = [
+    "trace:s/npm",
+    "trace:s/old",
+    "trace:s/rival",
+    "trace:s/next",
+    "trace:s/undated",
+    "trace:s/gold",
+    "trace:s/why",
+    "trace:s/reason",
+    "trace:s/ended",
+    "trace:s/note",
+  ];
+  assert.deepEqual(
+    timelineSignalsFromClaudeStream(
+      asked,
+      [use("c", "mcp__sphica__read", { refs: ["u3"], timeline: true }), result("c", quoting), done].join(
+        "\n",
+      ),
+    ),
+    Object.fromEntries(asked.map((k, i) => [k, i < 5 ? "yes" : "no"])),
+  );
+  // A stream that cannot prove "no" says unknown
+  assert.equal(
+    timelineSignalsFromClaudeStream(["trace:s/other"], stream.slice(0, -1).join("\n"))["trace:s/other"],
+    "unknown",
+  );
+  assert.equal(
+    timelineSignalsFromClaudeStream(["trace:s/utc"], stream.slice(0, -1).join("\n"))["trace:s/utc"],
+    "yes",
+  );
+
+  const completed = (tool: string, text: string, args?: Record<string, unknown>) =>
+    ev({
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool,
+        ...(args ? { arguments: args } : {}),
+        result: { content: [{ text }] },
+      },
+    });
+  const codex = [
+    completed("read", timeline, { refs: ["u3"], timeline: true }),
+    completed("search", hit, { query: "x" }),
+  ].join("\n");
+  // A full read whose record text happens to hold a timeline's lead and heading is not a timeline: the call did not ask for one,
+  // and a timeline's reply opens with the lead, before the frame
+  const forged = `<past-records id="bbbbbbbbbbbb">\ntrace:s/utc (u9, revision 2): constraint do, active\n${timeline}\n</past-records id="bbbbbbbbbbbb">`;
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", forged, { refs: ["u9"] }))["trace:s/npm"],
+    "no",
+  );
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", timeline, { refs: ["u3"] }))["trace:s/npm"],
+    "no",
+  );
+  assert.equal(
+    timelineSignalsFromClaudeStream(
+      ["trace:s/npm"],
+      [use("d", "mcp__sphica__read", { refs: ["u9"] }), result("d", forged), done].join("\n"),
+    )["trace:s/npm"],
+    "no",
+  );
+  // A read logged without its arguments, whose reply reads as a timeline naming the record: whether it asked for one is not told
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", timeline))["trace:s/npm"],
+    "unknown",
+  );
+  assert.equal(
+    timelineSignalsFromClaudeStream(
+      ["trace:s/npm"],
+      [
+        ev({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", id: "d", name: "mcp__sphica__read" }] },
+        }),
+        result("d", timeline),
+        done,
+      ].join("\n"),
+    )["trace:s/npm"],
+    "unknown",
+  );
+  assert.deepEqual(timelineSignalsFromCodex(gold, codex), named);
+  assert.equal(goldSignalsFromCodex("search", ["trace:s/utc"], [], null, codex)["trace:s/utc"]?.read, "no");
+  // A search result that holds a timeline's words is not a read with timeline
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("search", timeline, { query: "x" }))["trace:s/npm"],
+    "no",
+  );
+  assert.equal(timelineSignalsFromCodex(["trace:s/other"], `${codex}\n{broken`)["trace:s/other"], "unknown");
+  assert.equal(timelineSignalsFromCodex(["trace:s/other"], null)["trace:s/other"], "unknown");
+  // A Sphica call that started and never came back leaves the log unable to prove "no"
+  const pending = ev({
+    type: "item.started",
+    item: {
+      id: "item_9",
+      type: "mcp_tool_call",
+      server: "sphica",
+      tool: "read",
+      arguments: { refs: ["u3"], timeline: true },
+    },
+  });
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/other"], `${codex}\n${pending}`)["trace:s/other"],
+    "unknown",
+  );
+  assert.equal(timelineSignalsFromCodex(["trace:s/utc"], `${codex}\n${pending}`)["trace:s/utc"], "yes");
+  // The same call once it came back proves "no" again; a call logged without an id is matched by count
+  const back = ev({
+    type: "item.completed",
+    item: {
+      id: "item_9",
+      type: "mcp_tool_call",
+      server: "sphica",
+      tool: "read",
+      result: { content: [{ text: full }] },
+    },
+  });
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/other"], `${codex}\n${pending}\n${back}`)["trace:s/other"],
+    "no",
+  );
+  const unnamed = ev({
+    type: "item.started",
+    item: { type: "mcp_tool_call", server: "sphica", tool: "read" },
+  });
+  assert.equal(timelineSignalsFromCodex(["trace:s/other"], unnamed)["trace:s/other"], "unknown");
+  // A return whose start is missing from the log does not pay for a later call that never came back
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/other"], `${completed("search", hit)}\n${unnamed}`)["trace:s/other"],
+    "unknown",
   );
 });
 

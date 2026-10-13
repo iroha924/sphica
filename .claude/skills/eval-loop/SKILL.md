@@ -63,7 +63,10 @@ Loop progress:
    the fired rows by task and condition in firing order, and keeps a fired row with no branch as an excluded row with its task and condition,
    so the denominator holds every run asked for. Per run: the hidden tests (not run for a swapped build), the patch, the final answer,
    `delivered`, `found`, Codex's `answer_format`, `excluded` with the reason, and per gold key `gold_signals` (`in_delivery`, `in_search`,
-   `read`). A signal that cannot be told (no log, a broken event, a result not tied to one tool) is unknown, never no
+   `read`). A signal that cannot be told (no log, a broken event, a result not tied to one tool) is unknown, never no. Beside them:
+   `gold_timeline` per gold key (a read with `timeline: true` named the record; an overview, so never counted as `read`), and in `signals`
+   the Sphica calls per tool (`calls`), `as_of_searches`, and `timeline_reads`, each null when the log cannot tell one call from another
+   (a routine log)
 5. `node evals/cloud/grade.ts --loop <build dir>/loop.json` grades each result row blind through `grade.schema.json` (Codex with its own HOME and
    CODEX_HOME) and again with Claude (`claude -p` in an empty directory with no settings sources, MCP servers, tools, or skills; `--second none`
    skips it). The grader sees the task, `expect`, `against`, the record shown (counterfactual tasks' gold runs only), the answer, and the patch;
@@ -148,7 +151,9 @@ Local loop progress:
   repository. M2's check runs a Biome copy in each run's temp tree; a run that changed its copy is excluded, and a check that could not
   load Biome is counted in its own column. Run `node evals/review/run.ts --preflight` after a Codex or Claude Code update, or a change
   to the runner
-- `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
+- `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two. Each side's
+  line ends with how the runs used Sphica's tools: the mean and each run's total calls, the mean per tool, and the searches that took
+  `as_of` and reads that took `timeline`, over the runs whose calls could be told apart
 - Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
   delivers. No agent run is needed
 
