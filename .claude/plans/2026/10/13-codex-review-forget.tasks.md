@@ -69,21 +69,27 @@ base: main
 
 組み込みの review、プロンプトの `$名前`、モデルが shell で読む review の skill の 3 つで、ローカルの変更が触れる過去の決定が届く。`plugin/hooks/codex.json` は変えない。
 
-- [ ] T04: Codex の 3 つの入口から review の呼び出しを見分ける関数を足す
+- [x] T04: Codex の 3 つの入口から review の呼び出しを見分ける関数を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（組み込みの review を見分けるのに `codexThread` の結果が要る）
   - 変更: `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts` → pass。組み込み（子のスレッドで `subagent` が `review`）は `review` を返す / `$my-review` と `SPHICA_REVIEW_COMMANDS` に挙げた名前は返す / `$sphica:review`・`review` を含まない名前・文中の `a$review`・`agent_id` の付いた呼び出しは返さない / `cat …/skills/my-review/SKILL.md` は返し、この bundle の `skills/review/SKILL.md` を解決したパスは返さない / Codex では `CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS` を読まない / Claude Code の `reviewCall` の既存のテストは変えずに通る。続けて `bun run verify` → 終了コード 0
   - コミット: `feat(review): tell a Codex review from its built-in review thread, a named skill, or a skill file the model reads`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts` → pass。`codexReviewCall` のテスト 1 件が、組み込み・`$名前`・SKILL.md を読む shell の 3 つの入口と、当たらない入力（`$sphica:review`、変数の形の `$REVIEW_DIR`、`find`・`git add`・`wc`・リダイレクトでの書き込み、`agent_id` 付き、ほかの子のスレッド、Sphica 自身の skill のパス）を見ている。Claude Code の `reviewCall` の既存のテストは変えていない
+  - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）（T05 と同じ作業ツリーで流した）
 
-- [ ] T05: Codex では review を通常の配信に足し、重複抑制を会話の識別ごとにする
+- [x] T05: Codex では review を通常の配信に足し、重複抑制を会話の識別ごとにする
   - 種別: 変更
   - 計画: S4, S5
   - 依存: T03（子の id での会話の識別が要る。無いと組み込みの review の 2 回目が親の重複抑制で止まる）, T04（review の呼び出しを見分ける関数が要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver-codex.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/review-bridge.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0。テストで、組み込みの review で review の文面が返る / 親が同じで子が違う 2 回はどちらにも返る / 同じ子への 2 回目は返らない / `$my-review` で review と prompt の両方が返り、同じ変更の 2 回目は prompt だけ返る / skill の `SKILL.md` を名指しした shell で review が返り、同じ shell が名指しした別のファイルの記録も返る / shell が名指ししたファイルが無くても review は返る / Claude Code の review の配信は変わらない。`node server/evals/scale/run.ts` を流し、T01 の表と並べて、記録 1 万件で 1 回 1 秒以内のまま
   - コミット: `feat(deliver): give Codex's reviews the past decisions the local change touches`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts test/deliver-codex.test.ts test/deliver.test.ts` → tests 87、pass 87。組み込みの review は子ごとに届き、同じ子の 2 回目は出ない / `$my-review` は review と prompt の両方、同じ変更の 2 回目は prompt だけ / SKILL.md を読む shell は名指しのファイルが無くても review が届く / 時間切れは「読めなかった」と出て、その呼び出し本来の配信は返る
+  - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 449,871 バイト（上限 450,000）
+  - 結果: `node server/evals/scale/run.ts` → 直した後の作業ツリーで終了コード 0、99 行とも problems none。記録 1 万件（uniform）の中央値は prompt 143〜191 ms（前 130〜172）、read 69 ms（前 64）、名指しの shell 133 ms（前 124）、review 304〜313 ms（前 263〜272）、session start 78 ms（前 79）で、どれも 1 秒以内
+  - 結果: `node dist/deliver.js codex` → `review-shipping` が pack した配布物で、直す前の作業ツリーを測った: 3 つの入口とも文面が返り、review が足す時間は約 200 ms（62 ms → 267 ms）。Claude Code は 39 通りの hook 入力で、HEAD と出力・配信の行・1 回きりの印が同じ。git を遅くすると 5 秒で止められて何も出ない場合があった（下の記録の指摘 1・2。直した後の実機での確認は T06）
 
 ## P4: 文書と、配布前の確認
 
@@ -108,3 +114,10 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 - 2026-10-13 / T02 / Codex のタスクごとのレビュー（新しい会話、コミット 8f844ca2、high）: 指摘 0 件。読んだだけで、テストは流していないと申告 / 採否の判断は不要
 - 2026-10-13 / T03 / `review-shipping` の指摘 3 件の採否。(1) review の重複抑制のキーが session のまま → T05 で直す（計画どおり）。(2) revision と unavailable の 1 回きりの印は session ごとで、子と親が共有する（この変更の前から同じ）→ 変えない。会話ごとにすると Claude Code の subagent ごとに通知が出るようになり、子が親より先に revision の食い違いに当たる場面は見ていない。(3) `Entry` のコメントが subagent だけを言っていた → 直した。`db/schema.sql` の `delivery.agent_id` のコメントは schema のファイルなので触っていない
 - 2026-10-13 / T03 / 配信の一覧（`server/src/delivery-view.ts`）は `agent_id` のある行を subagent と数えるので、Codex の review の子は `subagent <スレッドの id>` と出る / 数え方としては合っているので変えない
+- 2026-10-13 / T03 / Codex のタスクごとのレビュー（新しい会話、コミット 75cfd805、既定の effort）: 指摘 0 件。読んだだけで、テストは流していないと申告 / 採否の判断は不要
+- 2026-10-13 / T05 / 変更欄を変えた。前: `server/src/deliver.ts`, `server/test/deliver-codex.test.ts`。後: `server/src/deliver.ts`, `server/test/review-bridge.test.ts` / review の照合は既定ブランチ（origin/HEAD）のある checkout が要り、その fixture は `review-bridge.test.ts` にある
+- 2026-10-13 / T04, T05 / 1 つのコミットで終える。T04 の関数を使うのは T05 の配信だけで、出荷前レビューと Codex のレビューを 1 回ずつにするため
+- 2026-10-13 / T05 / review の配信の受け入れケースは足していない。受け入れの review の層は MCP の `review_select` を見ていて、hook からの review の配信は Claude Code の分も `server/test/review-bridge.test.ts`（実際の SQLite と git の checkout）で見ている。Codex の分も同じ場所に足した
+- 2026-10-13 / T04, T05 / `review-shipping` の指摘 6 件の採否。(1) review が先に走り、git が遅いと 5 秒の上限でその呼び出し本来の配信ごと止められる → 直した。本来の配信を先に作り、review は hook の開始から 3.5 秒までで打ち切る（文面の順は review が先のまま）。(2) 1 回きりの印を出力の前に付けるので、その後に止められると同じ変更が二度と届かない → (1) の順序で、印の後に残るのは配信のログの書き込みだけになった（Claude Code の今の経路と同じ）。印の順は変えていない。(3) 名前の規則が広すぎる → 絞った。プロンプトでは変数の形（大文字・数字・`_` だけ）を skill と見ない。shell では、ファイルを表示するコマンド（`cat`・`sed`・`head`・`tail`・`nl`・`less`・`more`・`bat`・`type`・`Get-Content`・`gc`）がそのパスを読み、そこへリダイレクトしていないときだけ当てる。残るもの: `$reviewers` のような小文字の名前と、`preview` を含む名前（Claude Code の今の規則と同じ「review を含む」）。(4) Sphica 自身の skill は、リンク越しのプラグインのパスでは見分けられない → hook が起動されたときのパス（`process.argv[1]`）の隣も見るようにした。`cd` してからの相対パスや大文字小文字の違いは見分けられず、Sphica 自身の review の前に文面が 1 回出る。(5) テストの無い行 → `realpathSync` は消した。review のときに snapshot を取らない条件（`!call`）は、取っても見える違いが時間だけなのでテストを足していない。(6) `toldBefore` のコメント → 直した
+- 2026-10-13 / T05 / 時間切れのときに `localChange` が「既定ブランチが無い」「履歴を共有していない」と言う箇所を見つけ、時間切れと言うように直した（git が時間で止められたときだけ。Claude Code の経路にも効く）/ review の打ち切りを 3.5 秒にしたことで当たりやすくなるため
+- 2026-10-13 / T05 / plan の方針 4・5 を直した（変更履歴）。範囲は狭まる向きなので Go は取り直していない

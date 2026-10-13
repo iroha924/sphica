@@ -1,11 +1,14 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// The bridge into the user's own review commands (Claude Code, a prototype): which hook calls are a review, and the local change to check.
-// A typed /name reaches UserPromptExpansion; a skill the model calls reaches PreToolUse on Skill, which typing /name bypasses.
+// The bridge into the user's own review commands (a prototype): which hook calls are a review, and the local change to check.
+// Claude Code: a typed /name reaches UserPromptExpansion; a skill the model calls reaches PreToolUse on Skill, which typing /name bypasses.
+// Codex has no event for a review or a skill: its built-in review shows as a prompt in a child thread, a skill the user names as $name
+// in the prompt, and a skill the model picks as a shell command that names the skill's file.
 import fs from "node:fs";
 import path from "node:path";
 import type { HookInput } from "./capture.ts";
+import { type CodexThread, childThread } from "./codex-log.ts";
 import { baseRef, listFiles, mergeBase, refusalText, type Unread, unreadOf, worktreeDiff } from "./git.ts";
 import { type FileDiff, parseDiff } from "./review.ts";
 import { sha256 } from "./text.ts";
@@ -23,6 +26,19 @@ const DIFF_DEADLINE = 5_000;
 const MAX_FILES = 500;
 const MAX_UNTRACKED_BYTES = 256 * 1024;
 
+/** The command names a comma-separated setting lists, lowercased; anything that is not a command name is left out */
+const names = (list: string | undefined): string[] =>
+  (list ?? "")
+    .split(",")
+    .map((n) => n.trim().toLowerCase())
+    .filter((n) => NAME.test(n));
+
+/** Whether a command or skill of this name is a review of the user's own: one that says so in its name, or one the user listed */
+const isReview = (name: string, named: string[]): boolean => {
+  const lower = name.toLowerCase();
+  return lower !== "sphica:review" && (named.includes(lower) || lower.includes("review"));
+};
+
 /** The review command this hook call starts, or null. Sphica's own review is left out: it already checks the change itself. */
 export function reviewCall(input: ReviewInput): { name: string; args: string } | null {
   let name: unknown;
@@ -36,18 +52,84 @@ export function reviewCall(input: ReviewInput): { name: string; args: string } |
     args = input.tool_input?.args;
   }
   if (typeof name !== "string" || !NAME.test(name)) return null;
-  const lower = name.toLowerCase();
-  if (lower === "sphica:review") return null;
-  const names = (list: string | undefined) =>
-    (list ?? "")
-      .split(",")
-      .map((n) => n.trim().toLowerCase())
-      .filter((n) => NAME.test(n));
   // The plugin's review_commands setting (Claude Code exports only a saved value); without a valid command name in it, the environment variable
   const option = names(process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS);
   const named = option.length > 0 ? option : names(process.env.SPHICA_REVIEW_COMMANDS);
-  if (!named.includes(lower) && !lower.includes("review")) return null;
+  if (!isReview(name, named)) return null;
   return { name, args: typeof args === "string" ? args.slice(0, 1000) : "" };
+}
+
+/** A skill named in a prompt as $name, at the start or after white space, so `a$b` and a price are not one */
+const NAMED_SKILL = /(?<!\S)\$([\w.:/-]{1,100})/g;
+/** A name written as shells write a variable ($REVIEW_DIR), which no skill is */
+const VARIABLE = /^[A-Z0-9_]+$/;
+/** A skill's file as a shell command names it, in either slash: the directory under skills/ is the skill's name */
+const SKILL_FILE = /skills[\\/]([\w.-]{1,100})[\\/]SKILL\.md(?![\w.-])/g;
+/** Commands that print a file. Finding, staging, or counting a skill's file is not reading the skill */
+const READERS = new Set([
+  "cat",
+  "sed",
+  "head",
+  "tail",
+  "nl",
+  "less",
+  "more",
+  "bat",
+  "type",
+  "get-content",
+  "gc",
+]);
+const slashes = (p: string): string => p.replaceAll("\\", "/");
+/** The command a part of a shell line starts with, by its name alone: `/bin/cat` and `cat.exe` are cat */
+const starts = (part: string): string =>
+  (
+    slashes(part.trim().split(/\s+/)[0] ?? "")
+      .split("/")
+      .pop() ?? ""
+  )
+    .toLowerCase()
+    .replace(/\.exe$/, "");
+
+/**
+ * The review a Codex hook call starts, or null. `thread` is what the session log's first line says of the call; `own` holds the paths
+ * of Sphica's own review skill, which checks the change itself. Names beyond those holding "review" come from SPHICA_REVIEW_COMMANDS
+ * alone: Codex has no plugin setting.
+ */
+export function codexReviewCall(
+  input: ReviewInput,
+  thread: CodexThread | null,
+  own: string[] = [],
+): { name: string; args: string } | null {
+  // Reviews inside a subagent are left to the conversation that started it
+  if (input.agent_id) return null;
+  const named = names(process.env.SPHICA_REVIEW_COMMANDS);
+  if (input.hook_event_name === "UserPromptSubmit") {
+    // The built-in review's prompt is written by Codex, whatever it says; no other child thread is a review
+    if (childThread(input, thread) !== null)
+      return thread?.subagent === "review" ? { name: "review", args: "" } : null;
+    const prompt = typeof input.prompt === "string" ? input.prompt : "";
+    for (const m of prompt.matchAll(NAMED_SKILL)) {
+      // A name ends a sentence as often as not: `$my-review.` names my-review
+      const name = (m[1] ?? "").replace(/[.:/-]+$/, "");
+      if (NAME.test(name) && !VARIABLE.test(name) && isReview(name, named))
+        return { name, args: prompt.slice(0, 1000) };
+    }
+    return null;
+  }
+  if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") return null;
+  const command = input.tool_input?.command;
+  if (typeof command !== "string") return null;
+  const mine = own.map(slashes);
+  // Each part of the line on its own: only one that prints the file reads the skill, and one that redirects into it writes it
+  for (const part of command.split(/&&|\|\||[;|&\n]/)) {
+    if (!READERS.has(starts(part))) continue;
+    for (const m of part.matchAll(SKILL_FILE)) {
+      const upTo = slashes(part.slice(0, m.index + m[0].length));
+      if (part.slice(0, m.index).includes(">") || mine.some((file) => upTo.endsWith(file))) continue;
+      if (isReview(m[1] ?? "", named)) return { name: m[1] ?? "", args: "" };
+    }
+  }
+  return null;
 }
 
 /** A local change, with a digest of what was read so a review of the same change is told once */
@@ -63,29 +145,41 @@ function unreadText(why: Unread): string {
 
 /**
  * The local change a review covers: the working tree against the merge base with the default branch (origin/HEAD, else the upstream),
- * plus untracked files. When the base or the whole change cannot be read, says why instead of checking a smaller range.
+ * plus untracked files. When the base or the whole change cannot be read by `until`, says why instead of checking a smaller range.
  */
-export async function localChange(root: string, args: string): Promise<Change> {
+export async function localChange(
+  root: string,
+  args: string,
+  until: number = Date.now() + DIFF_DEADLINE,
+): Promise<Change> {
   if (/^\s*#?\d+\s*$|(^|\s)#\d+\b|\/pull\/\d+/.test(args))
     return { problem: "it names a pull request, and Sphica sees only the local change" };
-  // One deadline for every git the review's change takes, the isolated diff included
-  const until = Date.now() + DIFF_DEADLINE;
+  // One deadline for every git the review's change takes, the isolated diff included: `until`, when the hook has less time than that
   const left = () => Math.max(1, until - Date.now());
   let base = "";
+  // A git that ran out of time found nothing either way: that is said as time, not as a branch or a history that is missing
+  let late = false;
   for (const which of ["origin/HEAD", "upstream"] as const) {
     try {
       base = baseRef(root, which, { timeout: left() });
       if (base) break;
-    } catch {
+    } catch (e) {
       // try the next
+      late ||= unreadOf(e).unread === "timeout";
     }
   }
-  if (!base) return { problem: "there is no default branch (origin/HEAD) or upstream to compare with" };
+  if (!base)
+    return {
+      problem: late
+        ? unreadText({ unread: "timeout" })
+        : "there is no default branch (origin/HEAD) or upstream to compare with",
+    };
   let from: string;
   try {
     from = mergeBase(root, "HEAD", base, { timeout: left() });
-  } catch {
-    return { problem: `HEAD shares no history with ${base}` };
+  } catch (e) {
+    const why = unreadOf(e);
+    return { problem: why.unread === "timeout" ? unreadText(why) : `HEAD shares no history with ${base}` };
   }
   // Prefixes and quoting pinned against settings that change what diff prints; names hold every changed path, including binary and
   // empty files that print no ---/+++ lines

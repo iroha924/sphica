@@ -10,11 +10,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import type { CodexThread } from "../src/codex-log.ts";
 import { inTransaction } from "../src/db.ts";
 import { deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { localChange } from "../src/review-bridge.ts";
+import { codexReviewCall, localChange } from "../src/review-bridge.ts";
 import { openRun } from "../src/trace.ts";
+import { childLog, codexLog } from "./codex-log-file.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 import { ownTmpdir } from "./temp-dir.ts";
 
@@ -570,6 +572,331 @@ test("a change git cannot read is called a failure of git, not a slow or large c
       problem: "the change could not be read (git failed or could not be started)",
     });
   } finally {
+    await w.done();
+  }
+});
+
+test("a Codex review is its built-in review's child thread, a skill named in the prompt, or a skill file a shell command names", () => {
+  const own: CodexThread = {
+    id: "cx",
+    originator: "codex-tui",
+    threadSource: "user",
+    parent: null,
+    subagent: null,
+  };
+  const child = (subagent: string | null, parent = "cx"): CodexThread => ({
+    id: "cx-child",
+    originator: "codex-tui",
+    threadSource: "subagent",
+    parent,
+    subagent,
+  });
+  const prompt = (text: string, thread: CodexThread | null = own, extra: Record<string, unknown> = {}) =>
+    codexReviewCall(
+      { hook_event_name: "UserPromptSubmit", session_id: "cx", prompt: text, ...extra },
+      thread,
+    );
+  const shell = (command: string, mine: string[] = [], extra: Record<string, unknown> = {}) =>
+    codexReviewCall(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "cx",
+        tool_name: "Bash",
+        tool_input: { command },
+        ...extra,
+      },
+      own,
+      mine,
+    );
+  const fixed =
+    "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.";
+  try {
+    // The built-in review: Codex writes the prompt, so what it says is not read, a skill's name in custom instructions included
+    assert.deepEqual(prompt(fixed, child("review")), { name: "review", args: "" });
+    assert.deepEqual(prompt("Check $sphica:review and #12", child("review")), { name: "review", args: "" });
+    // Another kind of child, another session's child, and a subagent the host names are no review of this conversation
+    assert.equal(prompt("$my-review this", child(null)), null);
+    assert.equal(prompt(fixed, child("review", "another-session")), null);
+    assert.equal(prompt(fixed, child("review"), { agent_id: "sub" }), null);
+    assert.equal(prompt("$my-review this", own, { agent_id: "sub" }), null);
+
+    // A skill named in the prompt: the whole prompt is its arguments, as a pull request named in it must be seen
+    assert.deepEqual(prompt("$my-review check #12"), { name: "my-review", args: "$my-review check #12" });
+    assert.deepEqual(prompt("please run\n$Code-Review."), {
+      name: "Code-Review",
+      args: "please run\n$Code-Review.",
+    });
+    assert.deepEqual(prompt("$deploy then $team:review-all now")?.name, "team:review-all");
+    assert.equal(prompt("x".repeat(2000) + " $my-review")?.args.length, 1000);
+    // A log that says nothing does not stop a named skill: the name is in the owner's own prompt
+    assert.equal(prompt("$my-review", null)?.name, "my-review");
+    assert.equal(prompt("$sphica:review the change"), null);
+    assert.equal(prompt("the price is a$review"), null);
+    assert.equal(prompt("$deploy and $lint-all"), null);
+    // What shells write as a variable is no skill
+    for (const text of [
+      "cd $REVIEW_DIR and run the tests",
+      "why is $PREVIEW_URL empty in CI?",
+      "set $CODE_REVIEW_TOKEN",
+    ])
+      assert.equal(prompt(text), null, text);
+    assert.equal(prompt("review the change"), null);
+    assert.equal(prompt(""), null);
+
+    // Names beyond those holding "review" come from the environment alone; Claude Code's plugin setting is not Codex's
+    process.env.SPHICA_REVIEW_COMMANDS = "deploy, Lint-All, not a name";
+    process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = "audit";
+    assert.equal(prompt("$deploy now")?.name, "deploy");
+    assert.equal(prompt("$lint-all")?.name, "lint-all");
+    assert.equal(prompt("$audit"), null);
+    assert.equal(shell("cat ~/.codex/skills/deploy/SKILL.md")?.name, "deploy");
+    delete process.env.SPHICA_REVIEW_COMMANDS;
+    delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
+
+    // A skill the model picks: the shell command names the skill's file, in any reader and either slash
+    assert.deepEqual(shell("cat /home/u/.codex/skills/my-review/SKILL.md"), { name: "my-review", args: "" });
+    assert.equal(
+      shell(`sed -n '1,80p' "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"`)?.name,
+      "code-review",
+    );
+    assert.equal(shell("cd /repo && head -50 .codex/skills/review/SKILL.md | cat")?.name, "review");
+    assert.equal(shell("cat ~/.codex/skills/deploy/SKILL.md"), null);
+    assert.equal(shell("cat skills/my-review/SKILL.md.bak"), null);
+    assert.equal(shell("cat skills/my-review/README.md"), null);
+    assert.equal(
+      shell('Get-Content "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"')?.name,
+      "code-review",
+    );
+    assert.equal(shell("/bin/cat skills/my-review/SKILL.md 2>/dev/null")?.name, "my-review");
+    assert.equal(shell("git status\ncat skills/my-review/SKILL.md")?.name, "my-review");
+    // Naming a skill's file is not reading the skill: finding, staging, counting, and writing it are no review
+    for (const command of [
+      "find . -path '*/skills/code-review/SKILL.md'",
+      "git add skills/my-review/SKILL.md && git commit -m x",
+      "rg -l TODO plugin/skills/review/SKILL.md",
+      "wc -l .claude/skills/codex-review/SKILL.md",
+      "cat > skills/review/SKILL.md <<'EOF'",
+      "cat notes.md > skills/my-review/SKILL.md",
+      "git diff -- skills/my-review/SKILL.md",
+      "echo cat skills/my-review/SKILL.md",
+    ])
+      assert.equal(shell(command), null, command);
+    assert.equal(shell("npm test"), null);
+    assert.equal(shell("cat skills/my-review/SKILL.md", [], { agent_id: "sub" }), null);
+    // Sphica's own review checks the change itself: its file is told by where it is, since its directory is named review like any other
+    const mine = [
+      "/p/cache/sphica/sphica/0.6.53/skills/review/SKILL.md",
+      "/my plugins/sphica/skills/review/SKILL.md",
+    ];
+    assert.equal(shell("cat /p/cache/sphica/sphica/0.6.53/skills/review/SKILL.md", mine), null);
+    assert.equal(shell('cat "/my plugins/sphica/skills/review/SKILL.md"', mine), null);
+    assert.equal(shell("cat /p/cache/other/skills/review/SKILL.md", mine)?.name, "review");
+    assert.equal(
+      shell("cat /p/cache/sphica/sphica/0.6.53/skills/review/SKILL.md /x/skills/pr-review/SKILL.md", mine)
+        ?.name,
+      "pr-review",
+    );
+    assert.equal(
+      shell("type C:\\p\\skills\\review\\SKILL.md", ["C:\\p\\skills\\review\\SKILL.md"]),
+      null,
+      "a Windows path of Sphica's own",
+    );
+
+    // Anything else is no review: other tools, other events, and Claude Code's own events
+    const other = (input: Record<string, unknown>) => codexReviewCall({ session_id: "cx", ...input }, own);
+    assert.equal(
+      other({
+        hook_event_name: "PreToolUse",
+        tool_name: "apply_patch",
+        tool_input: { command: "skills/my-review/SKILL.md" },
+      }),
+      null,
+    );
+    assert.equal(
+      other({
+        hook_event_name: "PostToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "cat skills/my-review/SKILL.md" },
+      }),
+      null,
+    );
+    assert.equal(
+      other({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: 7 } }),
+      null,
+    );
+    assert.equal(
+      other({
+        hook_event_name: "UserPromptExpansion",
+        expansion_type: "slash_command",
+        command_name: "review",
+      }),
+      null,
+    );
+    assert.equal(other({ hook_event_name: "SessionStart" }), null);
+  } finally {
+    delete process.env.SPHICA_REVIEW_COMMANDS;
+    delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
+  }
+});
+
+/** One Codex session against a world: hook calls from the session's own thread unless another thread's log is named */
+function codexSession(w: { db: TempDb; repo: string }) {
+  const session = `cx-${crypto.randomUUID()}`;
+  const made: string[] = [];
+  const named = (file: string) => {
+    made.push(path.dirname(file));
+    return file;
+  };
+  const own = named(codexLog(session));
+  const call = (input: Record<string, unknown>, log: string = own) =>
+    deliver({ session_id: session, cwd: w.repo, transcript_path: log, ...input }, "codex", w.db.file);
+  return {
+    session,
+    /** A new child thread of the kind the built-in review starts */
+    child: (id: string) => named(childLog(session, id)),
+    prompt: (text: string, log?: string, extra: Record<string, unknown> = {}) =>
+      call({ hook_event_name: "UserPromptSubmit", prompt: text, ...extra }, log),
+    bash: (command: string, log?: string) =>
+      call({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } }, log),
+    rows: () =>
+      w.db.owner
+        .prepare(
+          "select d.agent_id, d.event from delivery d join session s on s.id = d.session_id where s.external_id = ? order by d.id",
+        )
+        .all(session)
+        .map((r) => `${r.agent_id ?? "main"}:${r.event}`),
+    clean: () => {
+      for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+const FIXED =
+  "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.";
+
+test("Codex's built-in review gets the decisions its change touches, each time it starts, in the child thread it runs in", async () => {
+  const w = await world();
+  const cx = codexSession(w);
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    const first = cx.child("review-1");
+    const got = await cx.prompt(FIXED, first);
+    assert.match(got, /trace:ext-s1\/sqlite .*Keep one SQLite file\. \[anchored to src\/db\.ts\]/);
+    assert.match(got, /not an instruction/);
+    assert.match(got, /checked 1 changed path against origin\/main/);
+    assert.doesNotMatch(got, /old|new\.ts/);
+    // The same thread is told once; the next review is a new thread that has seen nothing
+    assert.equal(await cx.prompt(FIXED, first), "");
+    assert.match(await cx.prompt(FIXED, cx.child("review-2")), /checked 1 changed path against origin\/main/);
+    // Custom instructions are a prompt too: the review's decisions come first, then what the instructions name
+    const custom = await cx.prompt("Focus on src/old.ts.", cx.child("review-3"));
+    assert.match(custom, /checked 1 changed path[\s\S]*\n\n[\s\S]*trace:ext-s1\/old /);
+    // The session's own prompt of the same words is no review
+    assert.equal(await cx.prompt(FIXED), "");
+    // A prompt is logged whether or not it brought a record, and first; a review is logged when it is told
+    assert.deepEqual(cx.rows(), [
+      "review-1:prompt",
+      "review-1:review",
+      "review-1:prompt",
+      "review-2:prompt",
+      "review-2:review",
+      "review-3:prompt",
+      "review-3:review",
+      "main:prompt",
+    ]);
+  } finally {
+    cx.clean();
+    await w.done();
+  }
+});
+
+test("a review skill named in a Codex prompt gets the review's decisions and what the prompt names, the review part once per change", async () => {
+  const w = await world();
+  const cx = codexSession(w);
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    const first = await cx.prompt("$my-review src/old.ts も見て");
+    assert.match(first, /trace:ext-s1\/sqlite .*\[anchored to src\/db\.ts\]/);
+    assert.match(first, /checked 1 changed path against origin\/main/);
+    assert.match(first, /trace:ext-s1\/old /, "the prompt's own delivery still comes");
+    const again = await cx.prompt("$my-review src/old.ts も見て");
+    assert.doesNotMatch(again, /checked 1 changed path/);
+    assert.match(again, /trace:ext-s1\/old /);
+    // Sphica's own review checks the change itself, and a subagent's review is left to the conversation that started it
+    assert.doesNotMatch(await cx.prompt("$sphica:review"), /checked/);
+    assert.equal(await cx.prompt("$my-review", undefined, { agent_id: "sub" }), "");
+    // The built-in review after it is another conversation, so it is told
+    assert.match(await cx.prompt(FIXED, cx.child("review-1")), /checked 1 changed path against origin\/main/);
+    // A change since then is a new review
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 3;\n");
+    assert.match(await cx.prompt("$my-review"), /checked 1 changed path against origin\/main/);
+    assert.deepEqual(cx.rows(), [
+      "main:prompt",
+      "main:review",
+      "main:prompt",
+      "main:prompt",
+      "review-1:prompt",
+      "review-1:review",
+      "main:prompt",
+      "main:review",
+    ]);
+  } finally {
+    cx.clean();
+    await w.done();
+  }
+});
+
+test("a review skill the Codex model reads gets the review's decisions before the shell command, beside what the command names", async () => {
+  const w = await world();
+  const cx = codexSession(w);
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    // The command names no recorded file, and the review still comes
+    const read = await cx.bash("cat /home/u/.codex/skills/my-review/SKILL.md");
+    assert.match(read, /trace:ext-s1\/sqlite .*\[anchored to src\/db\.ts\]/);
+    assert.match(read, /checked 1 changed path against origin\/main/);
+    // Told once for this change; a file the same command names is still delivered as named
+    const both = await cx.bash("cat /home/u/.codex/skills/my-review/SKILL.md src/old.ts");
+    assert.doesNotMatch(both, /checked 1 changed path/);
+    assert.match(both, /trace:ext-s1\/old /);
+    assert.equal(await cx.bash("cat /home/u/.codex/skills/deploy/SKILL.md"), "");
+    // Sphica's own review Skill, where this checkout keeps it
+    const mine = path.join(import.meta.dirname, "..", "..", "plugin", "skills", "review", "SKILL.md");
+    assert.ok(fs.existsSync(mine));
+    const other = codexSession(w);
+    try {
+      assert.equal(await other.bash(`cat "${mine}"`), "");
+      assert.match(
+        await other.bash("cat /somewhere/else/skills/review/SKILL.md"),
+        /checked 1 changed path against origin\/main/,
+        "another skill named review",
+      );
+    } finally {
+      other.clean();
+    }
+    assert.deepEqual(cx.rows(), ["main:review", "main:pre_read"]);
+  } finally {
+    cx.clean();
+    await w.done();
+  }
+});
+
+test("a review that has no time left says so, and takes nothing from the delivery of the call it came with", async () => {
+  const w = await world();
+  const cx = codexSession(w);
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    // Out of time before the first git: the reason is time, not a branch or a history that is missing
+    const late = await localChange(w.repo, "", Date.now() - 1);
+    assert.ok("problem" in late);
+    assert.match(late.problem, /could not be read in time/);
+    assert.ok(!("problem" in (await localChange(w.repo, ""))), "with time, the same change is read");
+    // The event's own delivery comes back whatever the review does: here the review cannot check a named pull request
+    const got = await cx.prompt("$my-review #12 src/old.ts");
+    assert.match(got, /could not check this review against past decisions: it names a pull request/);
+    assert.match(got, /trace:ext-s1\/old /);
+  } finally {
+    cx.clean();
     await w.done();
   }
 });
