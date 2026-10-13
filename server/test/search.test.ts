@@ -1340,6 +1340,11 @@ test("search as of a past time judges records by what Sphica held then, and name
       [none.asOf?.laterMore, none.asOf?.laterStopped, none.asOf?.extraStopped],
       [0, false, false],
     );
+    // A later record is judged as it is now: one that matches only by its aliases of today is still named
+    assert.deepEqual(
+      (await later("パッケージ管理", at("2020-01-01T00:00:00Z"))).map((l) => l.id),
+      [id("pnpm")],
+    );
     // A search without a time carries no such notes
     assert.equal((await find("pnpm")).asOf, undefined);
 
@@ -1605,11 +1610,42 @@ test("search as of a past time says where its caps cut: the index's candidates, 
     assert.deepEqual([words.hits.length, words.read, words.stopped], [20, 2000, true]);
     // A record saved exactly at the time is held then, not saved later
     assert.deepEqual(words.asOf?.later, []);
-    // Before it, each is a later match: ten are named, the rest of the page counted, and the page said to be cut
+    // Before it, each is a later match: ten are named, the rest read counted, and the reading said to be cut at its cap
     const before = await find("settled owner", at("2026-09-26T00:00:00Z"));
     assert.deepEqual(
       [before.hits.length, before.asOf?.later.length, before.asOf?.laterMore, before.asOf?.laterStopped],
-      [0, 10, 190, true],
+      [0, 10, 1990, true],
+    );
+    // The caller's filters hold for later records too: with one record withdrawn, exactly 2000 active decisions are later matches,
+    // all are read, and nothing is said to be cut
+    const first = db.owner.prepare("select id, run_id from unit where key = 'trace:ext-s1/k0'").get() as {
+      id: number;
+      run_id: number;
+    };
+    insert(db, "unit_state", {
+      unit_id: first.id,
+      from_state: "active",
+      to_state: "withdrawn",
+      at: at("2026-09-30T00:00:00Z"),
+      reason: "r",
+      run_id: first.run_id,
+    });
+    const exact = await searchUnits(db.reader, p, {
+      question: "settled owner",
+      limit: 20,
+      asOf: at("2026-09-26T00:00:00Z"),
+      kinds: ["decision"],
+      lifecycles: ["active"],
+    });
+    assert.deepEqual(
+      [exact.asOf?.later.length, exact.asOf?.laterMore, exact.asOf?.laterStopped],
+      [10, 1990, false],
+    );
+    // Later records that share one word only are no matches; when the cap cuts the reading before any match, that is said, not hidden
+    const weak = await find("settled violet nebula", at("2026-09-26T00:00:00Z"));
+    assert.deepEqual(
+      [weak.hits.length, weak.asOf?.later, weak.asOf?.laterMore, weak.asOf?.laterStopped],
+      [0, [], 0, true],
     );
     assert.ok(before.asOf?.later.every((l) => l.created_at === saved));
 
@@ -1627,6 +1663,43 @@ test("search as of a past time says where its caps cut: the index's candidates, 
     const earlier = await find("settled owner", at("2026-09-26T00:00:00Z"));
     assert.equal(earlier.asOf?.later[0]?.id, oldest);
     assert.deepEqual([earlier.asOf?.later.length, earlier.asOf?.laterStopped], [10, true]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search as of a past time names a later match that many weaker later records come before", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const runId = run(db, p);
+    const unit = (i: number, text: string) =>
+      insert(db, "unit", {
+        project_id: p,
+        key: `trace:ext-s1/o${i}`,
+        kind: "finding",
+        text,
+        extraction: "supported",
+        run_id: runId,
+        created_at: at(
+          `2026-09-27T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`,
+        ),
+        content_hash: hash(i % 256),
+      });
+    // 200 older records hold one of the three words; the newest holds all three
+    for (let i = 0; i < 200; i++) unit(i, "orchard");
+    const match = unit(200, "orchard violet nebula");
+    const find = (asOf?: string) =>
+      searchUnits(db.reader, p, { question: "orchard violet nebula", limit: 10, asOf });
+    assert.deepEqual(
+      (await find()).hits.map((h) => h.id),
+      [match],
+    );
+    const then = await find(at("2026-09-26T00:00:00Z"));
+    assert.deepEqual(
+      [then.hits.length, then.asOf?.later.map((l) => l.id), then.asOf?.laterMore, then.asOf?.laterStopped],
+      [0, [match], 0, false],
+    );
   } finally {
     await db.done();
   }
@@ -1678,7 +1751,22 @@ test("a search as of a past time keeps its lead and what it left out within the 
     }),
     /u909 \(saved 2026-09-27T00:00:00\.000Z\), and possibly more\.\nRead a record/,
   );
+  // Nothing named and the reading cut: said in its own words, so an empty list is not read as "none saved later"
+  assert.match(
+    hitsReply([hit(2)], "", {
+      at: at("2026-09-28T00:00:00Z"),
+      notes: { later: [], laterMore: 0, laterStopped: true, extraStopped: false },
+    }),
+    /<\/past-records id="[0-9a-f]+">\nRecords saved after this time were read up to 2000 from the oldest and none matched; newer ones were not read\.\nRead a record/,
+  );
   const quiet = hitsReply([hit(2)], "", { at: at("2026-09-28T00:00:00Z"), notes: undefined });
-  assert.doesNotMatch(quiet, /Saved after|looked at up to/);
+  assert.doesNotMatch(quiet, /Saved after|looked at up to|were read up to/);
+  assert.doesNotMatch(
+    hitsReply([hit(2)], "", {
+      at: at("2026-09-28T00:00:00Z"),
+      notes: { later: [], laterMore: 0, laterStopped: false, extraStopped: false },
+    }),
+    /Saved after|looked at up to|were read up to/,
+  );
   assert.match(quiet, /^As of /);
 });

@@ -344,30 +344,43 @@ async function searchAsOf(
     asOf,
   );
 
-  // Saved after that time and matching now, by the caller's filters as the records are now: named apart, never counted as hits
+  // Saved after that time and matching now, by the caller's filters as the records are now: named apart, never counted as hits.
+  // Read oldest first, not best first, up to the same cap as the candidates: the ones named are those saved soonest after the time
   const after = await filtered(db, projectId, q, path, match)
     .where("u.created_at", ">", asOf)
-    .select([
-      "u.id",
-      "u.key",
-      "u.kind",
-      "u.stance",
-      "u.lifecycle",
-      "u.text",
-      "u.why",
-      "u.scope_note",
-      "u.revisit_when",
-      "u.content_hash",
-      "u.created_at",
-      "f.rank",
-    ])
-    // Oldest first, not best first: the ones named are those saved soonest after the time, whatever their rank
+    .select(["u.id", "u.created_at"])
     .orderBy("u.created_at")
     .orderBy("u.id")
-    .limit(UNIT_PAGE + 1)
+    .limit(UNIT_SCAN_MAX + 1)
     .execute();
   const laterHits: (UnitHit & { rank: number })[] = [];
-  await judgeUnits(db, after.slice(0, UNIT_PAGE), wanted, laterHits);
+  for (let at = 0; at < Math.min(after.length, UNIT_SCAN_MAX); at += UNIT_PAGE) {
+    const part = after.slice(at, Math.min(at + UNIT_PAGE, UNIT_SCAN_MAX));
+    const order = new Map(part.map((r, i) => [r.id, i]));
+    const rows = (
+      await filtered(db, projectId, q, path, match)
+        .select([
+          "u.id",
+          "u.key",
+          "u.kind",
+          "u.stance",
+          "u.lifecycle",
+          "u.text",
+          "u.why",
+          "u.scope_note",
+          "u.revisit_when",
+          "u.content_hash",
+          "f.rank",
+        ])
+        .where(
+          "u.id",
+          "in",
+          part.map((r) => r.id),
+        )
+        .execute()
+    ).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    await judgeUnits(db, rows, wanted, laterHits);
+  }
   const savedAt = new Map(after.map((r) => [r.id, r.created_at]));
   const later = laterHits.map((h) => ({ id: h.id, created_at: savedAt.get(h.id) ?? "" }));
   return {
@@ -379,7 +392,7 @@ async function searchAsOf(
     asOf: {
       later: later.slice(0, LATER_SHOWN),
       laterMore: Math.max(later.length - LATER_SHOWN, 0),
-      laterStopped: after.length > UNIT_PAGE,
+      laterStopped: after.length > UNIT_SCAN_MAX,
       extraStopped: lost.length > EXTRA_MAX,
     },
   };
@@ -755,7 +768,10 @@ export function asOfLines(at: string, n: AsOfNotes | undefined): { lead: string;
     notes: [
       n?.later.length
         ? `Saved after this time and not counted: ${n.later.map((l) => `u${l.id} (saved ${l.created_at})`).join(", ")}${more}.`
-        : "",
+        : // An empty list with the reading cut is not "none saved later"
+          n?.laterStopped
+          ? `Records saved after this time were read up to ${UNIT_SCAN_MAX} from the oldest and none matched; newer ones were not read.`
+          : "",
       n?.extraStopped
         ? `Records found only by an anchor or alias they have lost since were looked at up to ${EXTRA_MAX}; more may match.`
         : "",

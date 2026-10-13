@@ -57,7 +57,7 @@ base: main
   - 結果: `sed -i '' 's/const EXTRA_MAX = 200;/const EXTRA_MAX = 20;/' src/search.ts` → 上限を 20 に書き換えると上限のテストが落ち、200 に戻すと通る
   - 結果: `bun run test` → 終了コード 0（1267 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 247 / 247
 
-- [ ] T10: 後から保存された記録を候補の上限まで読み、読み切れなかったときと 0 件のときにそう書く
+- [x] T10: 後から保存された記録を候補の上限まで読み、読み切れなかったときと 0 件のときにそう書く
   - 種別: 修正
   - 計画: S1
   - 依存: T09（直す対象の、保存の古い順に読む処理が要る）
@@ -65,6 +65,9 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="as of a past time|search takes as_of" test/search.test.ts test/plugin.test.ts` → 古くて弱い一致が 200 件を占めるとき後ろの一致が `later` に出ない、読み切れなかったことが返信に出ない、0 件の返信が As of の行で始まらない、の 4 件が落ちる
   - 完了条件: `bun run test` → 終了コード 0。後から保存された記録は保存の古い順に 2000 件まで読まれ、一致が無いまま打ち切ったときは返信がそう言い、0 件の返信も As of の行で始まる
   - コミット: `fix(search): read later records up to the cap and say when a past view found nothing`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="as of a past time|search takes as_of" test/search.test.ts test/plugin.test.ts` → 直す前は 4 件落ちた（後ろの一致が出ない、読み切れなかったことが出ない、上限の件数、0 件の返信が As of で始まらない）。直した後は 9 件 pass
+  - 結果: `python3 <scratchpad>/mutate-t10.py` → `review-shipping` が「テストが見分けていない」と挙げた書き換え 5 個（打ち切りの行を常に出す、後から保存された記録をその時点で判定する、as_of 無しの 0 件に As of の行を付ける、上限ちょうどの境目、絞り込みを無視する）を、テストを足した後にそれぞれ当てて流すと 5 個とも落ちた
+  - 結果: `bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
 ## P2: read の timeline
 
@@ -170,3 +173,4 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T11 / `review-shipping`: 止める指摘なし。場所が 200 を超えると残りを黙って捨てる件は採用し、返信の注記に書くようにした（anchor の古い順に 200）。場所が 2 つ以上あると同じ場所の問い合わせが path の索引を使わない件（記録 3 万件で 1 回 250 ms と報告）は採用し、path の条件を先に置いて索引で引くようにした（テストで実行計画を確かめる）。テストが見分けていない書き換えは、テストを 1 本足して塞いだ
 - 2026-10-13 / T05 / `review-shipping`: README の「後から保存された記録は別に名前を出す」は、実際は今の検索に当たるものだけを 10 件まで出す / 両方の README をそう直した
 - 2026-10-13 / T05 / 変更欄と完了条件を変えた。前: `README.md`, `plugin/README.md`。新: `README.md`, `README.ja.md` / `plugin/README.md` は bundle が作る追跡外の写し（`.gitignore`）で、手で直すファイルではない。日本語の README が別にある。plugin の Skill と reviewers の文面は `rg` で確かめ、`search` と `read` の引数を並べている箇所が無かったので変えていない
+- 2026-10-13 / T10 / `review-shipping`: 止める指摘なし。as_of 無しの検索は v0.6.54 の bundle と 168 回比べて差が無く、過去の時点の検索は後から保存された候補が 2000 件あるとき 1 回あたり 110〜160 ms 増える（記録 3 万件で最大 334 ms、ふつうの検索の約 1.5 倍）と報告した（こちらでは測り直していない）。読み取りの MCP に時間の上限は無いので受け入れる。テストが見分けていない書き換え 5 個は採用し、T10 の中でテストを足した

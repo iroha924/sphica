@@ -232,18 +232,22 @@ server.registerTool(
       });
       if (r.refused) return text(`Nothing was searched: ${r.refused}`, true);
       const past = asOf === undefined ? undefined : { at: asOf, notes: r.asOf };
-      if (!r.hits.length)
+      if (!r.hits.length) {
+        // A past view says what it is even when it finds nothing: its time is when Sphica saved, not when the words were said
+        const lines = past ? asOfLines(past.at, past.notes) : undefined;
         return text(
           [
+            ...(lines ? [lines.lead] : []),
             `No record ${past ? `as of ${past.at} ` : ""}${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
               (r.stopped ? "Search with more specific words. " : "") +
               // sources cannot be searched as of a time, so a past view points to today's records instead
               (past
                 ? "Search again with other words or the other language, or without as_of for the records as they are now; status says whether sessions are still untraced."
                 : "Search again with other words or the other language, or search sources; status says whether sessions are still untraced."),
-            ...(past ? asOfLines(past.at, past.notes).notes : []),
+            ...(lines?.notes ?? []),
           ].join("\n"),
         );
+      }
       return text(hitsReply(r.hits, stoppedAfter(r), past));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);

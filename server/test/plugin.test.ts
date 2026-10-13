@@ -1882,7 +1882,7 @@ test("search takes as_of only as a time with its offset, for record search alone
       /^## trace:ext-s1\/k0 \(u\d+\): decision do, active, now withdrawn, the owner's decision$/m,
     );
     assert.match(then.text, /^## trace:ext-s1\/k1 \(u\d+\): decision do, active, the owner's decision$/m);
-    assert.doesNotMatch(then.text, /Saved after this time/);
+    assert.doesNotMatch(then.text, /Saved after this time|were read up to|looked at up to/);
     // Without as_of the reply opens with the frame and shows today's state only
     const now = await search({});
     assert.match(now.text, /^<past-records id="[0-9a-f]+">\n/);
@@ -1892,7 +1892,12 @@ test("search takes as_of only as a time with its offset, for record search alone
     // Before the records were saved: none is a hit, and those of today are named after the answer, ten of them and a count
     const before = await search({ as_of: "2026-09-26T00:00:00Z" });
     assert.equal(before.isError, false);
-    const [answer, later, ...rest] = before.text.split("\n");
+    // With no hit the reply still opens by saying what a past view is
+    const [lead, answer, later, ...rest] = before.text.split("\n");
+    assert.match(
+      lead ?? "",
+      /^As of 2026-09-26T00:00:00\.000Z: which records existed, .* with its dated history\.$/,
+    );
     assert.match(
       answer ?? "",
       /^No record as of 2026-09-26T00:00:00\.000Z holds most of: settled, owner\. 0 weaker matches left out\. /,
@@ -1900,7 +1905,11 @@ test("search takes as_of only as a time with its offset, for record search alone
     // sources cannot be searched as of a time, so the way on is today's records, not a source search
     assert.match(answer ?? "", / or without as_of for the records as they are now; /);
     assert.doesNotMatch(answer ?? "", /search sources/);
-    assert.match((await search({ query: "nothingmatches" })).text, / or search sources; /);
+    // Without as_of an empty reply is the answer alone, as it always was
+    assert.match(
+      (await search({ query: "nothingmatches" })).text,
+      /^No record holds most of: nothingmatch\S*\. 0 weaker matches left out\. Search again with other words or the other language, or search sources; status says whether sessions are still untraced\.$/,
+    );
     assert.match(
       later ?? "",
       /^Saved after this time and not counted: (u\d+ \(saved 2026-09-27T00:00:00\.000Z\), ){9}u\d+ \(saved 2026-09-27T00:00:00\.000Z\), and 2 more\.$/,
