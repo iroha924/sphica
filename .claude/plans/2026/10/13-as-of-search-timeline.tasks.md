@@ -61,13 +61,16 @@ base: main
 
 記録の ref を渡すと、置き換えの連なりと結び付く記録を、時刻順の概要で読める。
 
-- [ ] T03: timeline を組み立てる関数とそのテストを足す
+- [x] T03: timeline を組み立てる関数とそのテストを足す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`
+  - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`, `server/src/read.ts`
   - 完了条件: `bun run test` → 終了コード 0。足したテスト（3 段の連なり、終わった置き換えと複数の期間、提案だけ、時刻不明、同じ run と同じ場所、question が閉じる行、同じ時刻の並び、連なりの上限と境目、予算での省略と必ず残す行、省いた ref の上限、後からの adoption が保存の行に出ない、source の無いイベント）が通る
   - コミット: `feat(read): build a record's timeline from its replacements and related records`
+  - 結果: `node --import ./test/isolate-home.ts --test test/timeline.test.ts` → 7 件 pass（3 段の連なり、終わった置き換え・提案・時刻不明、後からの追加と撤回、連なりと結び付く記録の上限、予算と必ず残す行、改行を含む保存文字列、記録でない ref）
+  - 結果: `python3 <scratchpad>/mutate-timeline.py` → `review-shipping` が「テストが見分けていない」と挙げた箇所の書き換え 16 個（同じ時刻の並び 3、有効な置き換えを提案とも出す、同じ場所の規則 3、別プロジェクト、未サポートの記録、必ず残す行、tail を数えない、取りこぼしの後も続ける、key の整形、撤回の時刻、source の上限 2）を、テストを直した後にそれぞれ当てて流すと 16 個とも落ちた
+  - 結果: `bun run test` → 終了コード 0（1276 件 pass、`timeline.ts` の行の網羅 98.78%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 - [ ] T04: MCP の `read` に `timeline` を足す（引数、ref ごとのエラー、description、受け入れケース）
   - 種別: 追加
   - 計画: S2, S3
@@ -123,3 +126,6 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T01 / Codex のコミットのレビュー（dc5a4260）: F1（後から保存された記録を順位で 200 件に絞ってから時刻順に並べるので、最古の記録が落ちる。再現つき）と F2（索引の外の候補の上限のテストが 200 と 20 を見分けない）。どちらも採用 / 修正タスク T09 を足した
 - 2026-10-13 / T02 / `review-shipping` の指摘 2 件。0 件のときの文が sources の検索を勧める件は採用して T02 の中で直した。受け入れケースの step の説明が「MCP の search を呼ぶ」なのに driver は `searchUnits` を直接呼ぶ件は、今までの step と同じ作りで、MCP の境界は `plugin.test.ts` が見ているので直さない
 - 2026-10-13 / T09 / `review-shipping` は T02 と T09 の書き換え 16 個（`orderBy("f.rank")` へ戻す、`EXTRA_MAX` を 20 と 201 にする、を含む）が全部テストで落ちたと報告した / こちらでは `EXTRA_MAX` を 20 にする 1 個だけ流し直して確かめた
+- 2026-10-13 / T03 / 変更欄を変えた。前: `server/src/timeline.ts`, `server/test/timeline.test.ts`。新: それに `server/src/read.ts` を足した / `read` が記録を ref から引く処理（`unitView` の中にあった）を `unitByRef` として出し、timeline と共有した
+- 2026-10-13 / T03 / plan は、引退の理由の source が消えているとき `its source is no longer kept` と書くとしていた。理由の行が無い anchor は「記録されなかった」と「forget で消えた」を見分けられない（`read` も `reason not recorded` と出す） / `the words that retired it are not recorded or no longer kept` と書く
+- 2026-10-13 / T03, T04 / `review-shipping`: 止める指摘なし。`read` を `timeline` 無し・`timeline: false` で呼んだ返信は、v0.6.54 の bundle と 19 通り比べて差が無いと報告した（こちらでは流し直していない）。指摘 13 件のうち、テストの穴 10 件は採用して T03 の中でテストを直した。長い path が 1 行で予算を使い切り、古い行を全部落とす件（11）は採用し、path と symbol を切るようにした。残した ref を frame の外に JSON で出す件（12）は `read` と同じ作りで、呼び出し側が送った文字列なので直さない。コミット時の hook が作業ツリー全体を見る件（13）は、T03・T04・T10 を合わせたツリーで全テストと静的検査が通ることを確かめてからコミットする
