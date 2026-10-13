@@ -45,7 +45,7 @@ base: main
   - 結果: `bun run test` → 終了コード 0（1267 件 pass）。`bun run verify` → 終了コード 0（静的検査、bundle、`sql:reach` 247 / 247、`sql:live`、hook と Codex の信頼の検査、受け入れ 139 件 pass）
   - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="search takes as_of" test/plugin.test.ts` → `review-shipping` の指摘（0 件のときの文が、as_of と一緒に使えない sources の検索を勧める）を直した後に pass。`review-shipping` に止める指摘は無く、v0.6.54 の bundle と比べて as_of 無しの返信 40,826 組に差が無いと報告した（こちらでは流し直していない）
 
-- [ ] T09: 後から保存された記録を保存の古い順に取り、索引の外の候補の上限のテストを見分けられる形にする
+- [x] T09: 後から保存された記録を保存の古い順に取り、索引の外の候補の上限のテストを見分けられる形にする
   - 種別: 修正
   - 計画: S1
   - 依存: T01（直す対象の `searchAsOf` が要る）
@@ -53,6 +53,9 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="search as of a past time" test/search.test.ts` → 後から保存された一致が 201 件を超え、最古の 1 件の順位が低いとき、`later` の先頭が最古の記録でないので落ちる
   - 完了条件: `bun run test` → 終了コード 0。`later` が保存の古い順の先頭 10 件になり、索引の外の候補は 200 件ちょうどで止まることをテストが確かめる（上限を 20 に書き換えると落ちる）
   - コミット: `fix(search): name the records saved later from the oldest, not by rank`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="search as of a past time" test/search.test.ts` → 直す前は上限のテストが落ちた（`later` の先頭が id 1 で、最古の id 2002 でない）。直した後は 5 件 pass
+  - 結果: `sed -i '' 's/const EXTRA_MAX = 200;/const EXTRA_MAX = 20;/' src/search.ts` → 上限を 20 に書き換えると上限のテストが落ち、200 に戻すと通る
+  - 結果: `bun run test` → 終了コード 0（1267 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 247 / 247
 
 ## P2: read の timeline
 
@@ -119,3 +122,4 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T02 / 変更欄を変えた。前: `server/src/mcp.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`。新: それに `server/test/search.test.ts`（返信の予算のテスト）と `server/test/acceptance-cases.test.ts`（retrieval の件数 13 → 14）を足した / 受け入れケースの件数はテストが固定していて、返信の組み立ては `search.ts` にある
 - 2026-10-13 / T01 / Codex のコミットのレビュー（dc5a4260）: F1（後から保存された記録を順位で 200 件に絞ってから時刻順に並べるので、最古の記録が落ちる。再現つき）と F2（索引の外の候補の上限のテストが 200 と 20 を見分けない）。どちらも採用 / 修正タスク T09 を足した
 - 2026-10-13 / T02 / `review-shipping` の指摘 2 件。0 件のときの文が sources の検索を勧める件は採用して T02 の中で直した。受け入れケースの step の説明が「MCP の search を呼ぶ」なのに driver は `searchUnits` を直接呼ぶ件は、今までの step と同じ作りで、MCP の境界は `plugin.test.ts` が見ているので直さない
+- 2026-10-13 / T09 / `review-shipping` は T02 と T09 の書き換え 16 個（`orderBy("f.rank")` へ戻す、`EXTRA_MAX` を 20 と 201 にする、を含む）が全部テストで落ちたと報告した / こちらでは `EXTRA_MAX` を 20 にする 1 個だけ流し直して確かめた

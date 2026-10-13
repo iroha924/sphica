@@ -361,16 +361,15 @@ async function searchAsOf(
       "u.created_at",
       "f.rank",
     ])
-    .orderBy("f.rank")
+    // Oldest first, not best first: the ones named are those saved soonest after the time, whatever their rank
+    .orderBy("u.created_at")
     .orderBy("u.id")
     .limit(UNIT_PAGE + 1)
     .execute();
   const laterHits: (UnitHit & { rank: number })[] = [];
   await judgeUnits(db, after.slice(0, UNIT_PAGE), wanted, laterHits);
   const savedAt = new Map(after.map((r) => [r.id, r.created_at]));
-  const later = laterHits
-    .map((h) => ({ id: h.id, created_at: savedAt.get(h.id) ?? "" }))
-    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id - b.id));
+  const later = laterHits.map((h) => ({ id: h.id, created_at: savedAt.get(h.id) ?? "" }));
   return {
     hits: top.map(({ rank: _rank, ...h }) => ({ ...h, authority: whose.get(h.id) })),
     weaker,

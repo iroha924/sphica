@@ -1588,13 +1588,15 @@ test("search as of a past time says where its caps cut: the index's candidates, 
       anchor: { path: "src/retired.ts" },
     }));
     db.owner.exec("update unit_anchor set retired_at = '2026-09-29T00:00:00.000Z'");
-    const find = (question: string, asOf?: string) =>
-      searchUnits(db.reader, p, { question, limit: 20, asOf });
+    const find = (question: string, asOf?: string, limit = 20) =>
+      searchUnits(db.reader, p, { question, limit, asOf });
     assert.equal((await find("src/retired.ts")).hits.length, 0);
-    const then = await find("src/retired.ts", at("2026-09-28T00:00:00Z"));
-    // Outside the index, the first 200 by id are looked at; the rest are said to be left out
-    assert.equal(then.hits.length, 20);
-    assert.ok(then.hits.every((h) => Number(h.key.split("/k")[1]) < 200));
+    const then = await find("src/retired.ts", at("2026-09-28T00:00:00Z"), 500);
+    // Outside the index, the first 200 by id are looked at, no fewer and no more; the rest are said to be left out
+    assert.deepEqual(
+      then.hits.map((h) => Number(h.key.split("/k")[1])).sort((x, y) => x - y),
+      Array.from({ length: 200 }, (_, i) => i),
+    );
     assert.deepEqual([then.read, then.stopped, then.asOf?.extraStopped], [0, false, true]);
     assert.equal((await find("src/retired.ts", at("2026-09-30T00:00:00Z"))).hits.length, 0);
 
@@ -1610,6 +1612,21 @@ test("search as of a past time says where its caps cut: the index's candidates, 
       [0, 10, 190, true],
     );
     assert.ok(before.asOf?.later.every((l) => l.created_at === saved));
+
+    // The later matches are named from the oldest, whatever their rank: one saved a day earlier, with many more words, comes first
+    const oldest = insert(db, "unit", {
+      project_id: p,
+      key: "trace:ext-s1/long",
+      kind: "finding",
+      text: `Settled by the owner. ${Array.from({ length: 400 }, (_, i) => `filler${i}`).join(" ")}`,
+      extraction: "supported",
+      run_id: run(db, p),
+      created_at: at("2026-09-26T12:00:00Z"),
+      content_hash: hash(9),
+    });
+    const earlier = await find("settled owner", at("2026-09-26T00:00:00Z"));
+    assert.equal(earlier.asOf?.later[0]?.id, oldest);
+    assert.deepEqual([earlier.asOf?.later.length, earlier.asOf?.laterStopped], [10, true]);
   } finally {
     await db.done();
   }
