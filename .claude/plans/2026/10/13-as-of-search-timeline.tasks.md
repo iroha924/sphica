@@ -22,13 +22,17 @@ base: main
 
 時刻を渡すと、その時点で保存されていた記録を、その時点の状態で検索できる。
 
-- [ ] T01: `searchUnits` に asOf を通し、バージョンを 0.6.55 に上げる
+- [x] T01: `searchUnits` に asOf を通し、バージョンを 0.6.55 に上げる
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/src/search.ts`, `server/test/search.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run test` → 終了コード 0。足したテスト（置き換えの前後、anchor の引退の前後、後から保存された記録、その時点の alias、権威の変化、cutoff と等しい時刻、足した候補の上限、今より後の as_of は as_of 無しと同じ）は、実装の前に流して落ちることを確かめてある
   - コミット: `feat(search): search records as Sphica held them at a past time`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="search as of a past time" test/search.test.ts` → `server/src/search.ts` を HEAD に戻すと、最初に足した 3 件が 3 件とも落ちた（時刻を渡しても今の状態の記録が返る、後から保存された記録が当たる、索引の外の記録が 0 件）。実装を戻すと通った
+  - 結果: `bun run test` → 終了コード 0（1265 件 pass、`search.ts` の行の網羅 100%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 247 / 247
+  - 結果: `bun run release:plan -- --base b38325c6` → `plugin`、4 か所とも 0.6.55。`npm view sphica@0.6.55 version` → 404
+  - 結果: `python3 <scratchpad>/mutate.py` → `review-shipping` が「テストが実装を見分けていない」と挙げた 10 個の書き換え（その時点の置き換え先、後から足された anchor、3 つの上限、「後から保存」の境目）を、テストを 2 件足した後にそれぞれ当てて流すと 10 個とも落ちた。`review-shipping` に止める指摘は無い
 - [ ] T02: MCP の `search` に `as_of` を足す（入力の検証、返信の注記、description、受け入れケース）
   - 種別: 追加
   - 計画: S1, S3
@@ -95,3 +99,7 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - コミット: `test(evals): add a task that asks how a decision changed and why`
 
 ## 記録
+
+- 2026-10-13 / T01 / plan の D は「後から足された field の語で当たらないこと」を挙げていたが、schema が field の後からの追加を禁じている（trigger の文面 `field values are written with the unit`） / field には時刻の条件を付けず、記録の保存の時刻だけで判定する。そのテストは書かない
+- 2026-10-13 / T01 / 返す型 `AsOfNotes` を export すると knip が「使われていない export」で落とした / T02 で `mcp.ts` が使うまで export しない
+- 2026-10-13 / T01 / `review-shipping` の指摘（テストが見分けていない 10 か所） / 採用。T01 の中でテストを足した。その時点の置き換え先を選ぶ `orderBy` は、同じ時点で開いている行が 1 つしか無いので消した

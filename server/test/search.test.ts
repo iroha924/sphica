@@ -18,7 +18,20 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { fitCount, leftOut, readCalls } from "../src/reply-budget.ts";
 import { hitsReply, searchSources, searchUnits, type UnitHit } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, plan, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
+import {
+  aiDecided,
+  at,
+  hash,
+  insert,
+  manyAdopted,
+  message,
+  plan,
+  project,
+  run,
+  statements,
+  type TempDb,
+  tempDb,
+} from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -1247,4 +1260,357 @@ test("a hit is shown plain before it is cut, cut parts are marked, and only Sphi
     outside,
     /^\n\d+ more hits left out to keep this reply within 32 KiB: read with refs \[[^\]]+\](, then read with refs \[[^\]]+\])*\.\nStopped after 2000 candidates by rank; more may match\.\nRead a record by its key before relying on it\.$/,
   );
+});
+
+test("search as of a past time judges records by what Sphica held then, and names those saved later apart", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, {
+      id: "m1",
+      text: "Use pnpm for installs. Two package managers confused contributors.",
+    });
+    const b = message(db, p, { id: "m2", text: "Go back to npm." });
+    const c = message(db, p, { id: "m3", text: "The pnpm lockfile is committed." });
+    await save(db, p, {
+      units: [
+        decision("pnpm", a, "Use pnpm for installs.", {
+          anchors: [{ path: "package.json", role: "applies_to" }],
+          aliases: ["パッケージ管理"],
+        }),
+      ],
+    });
+    const first = await tick();
+    await save(db, p, {
+      units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
+    });
+    const second = await tick();
+    await save(db, p, {
+      units: [
+        {
+          key: "lockfile",
+          kind: "finding",
+          text: "The pnpm lockfile is committed",
+          evidence: [{ source: `s${c}`, quote: "The pnpm lockfile is committed.", role: "states" }],
+        },
+      ],
+    });
+    const find = (question: string, asOf?: string, extra = {}) =>
+      searchUnits(db.reader, p, { question, limit: 10, asOf, ...extra });
+    const shape = async (question: string, asOf?: string, extra = {}) =>
+      (await find(question, asOf, extra)).hits.map((h) => [
+        h.key.replace("trace:ext-s1/", ""),
+        h.lifecycle,
+        h.now ?? null,
+      ]);
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    const later = async (question: string, asOf: string) => (await find(question, asOf)).asOf?.later ?? [];
+
+    // Before the replacement: the old decision is in effect, shown with the state it has now; what was saved later is named, not counted
+    assert.deepEqual(await shape("pnpm", first), [["pnpm", "active", "superseded"]]);
+    assert.deepEqual(
+      (await later("pnpm", first)).map((l) => l.id),
+      [id("lockfile")],
+    );
+    // After it: the successor joins, as now
+    assert.deepEqual(await shape("pnpm", second), [
+      ["npm", "active", null],
+      ["pnpm", "superseded", null],
+    ]);
+    // The state filter reads the state of that time, for a hit and for its successor
+    assert.deepEqual(await shape("pnpm", first, { lifecycles: ["active"] }), [
+      ["pnpm", "active", "superseded"],
+    ]);
+    assert.deepEqual(await shape("pnpm", second, { lifecycles: ["active"] }), []);
+    assert.deepEqual(await shape("pnpm", first, { lifecycles: ["superseded"] }), []);
+    assert.deepEqual(await shape("pnpm", second, { lifecycles: ["superseded"] }), [
+      ["pnpm", "superseded", null],
+    ]);
+    assert.deepEqual(await shape("pnpm", second, { kinds: ["finding"] }), []);
+    // Before anything was saved, nothing is a hit, and every match of today is named in the order it was saved
+    const none = await find("pnpm", at("2020-01-01T00:00:00Z"));
+    assert.deepEqual([none.hits.length, none.weaker, none.read], [0, 0, 0]);
+    assert.deepEqual(
+      none.asOf?.later.map((l) => l.id),
+      [id("pnpm"), id("lockfile")],
+    );
+    assert.ok((none.asOf?.later[0]?.created_at ?? "") < first);
+    assert.deepEqual(
+      [none.asOf?.laterMore, none.asOf?.laterStopped, none.asOf?.extraStopped],
+      [0, false, false],
+    );
+    // A search without a time carries no such notes
+    assert.equal((await find("pnpm")).asOf, undefined);
+
+    // A time equal to a change counts the change: the record exists from its own save time, and is superseded from the row's start
+    const created = String(
+      db.owner.prepare("select created_at from unit where id = ?").get(id("pnpm"))?.created_at,
+    );
+    const started = String(db.owner.prepare("select started_at from unit_replacement").get()?.started_at);
+    const before = (t: string) => new Date(Date.parse(t) - 1).toISOString();
+    assert.deepEqual(
+      (await shape("pnpm", created)).map((h) => h[0]),
+      ["pnpm"],
+    );
+    assert.deepEqual(await shape("pnpm", before(created)), []);
+    assert.deepEqual(await shape("pnpm", started), [
+      ["npm", "active", null],
+      ["pnpm", "superseded", null],
+    ]);
+    assert.deepEqual(await shape("pnpm", before(started)), [["pnpm", "active", "superseded"]]);
+
+    // An anchor retired later: today's index no longer holds its path, but as of before the retirement the record is found by it
+    const third = await tick();
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where path = 'package.json'")
+      .run(new Date().toISOString());
+    const fourth = await tick();
+    assert.deepEqual(await shape("package.json"), []);
+    const byPath = await find("package.json", third);
+    assert.deepEqual(
+      byPath.hits.map((h) => [h.key, h.anchors.map((x) => x.path)]),
+      [
+        ["trace:ext-s1/npm", []],
+        ["trace:ext-s1/pnpm", ["package.json"]],
+      ],
+    );
+    // Found outside the index, so it is not among the candidates the index gave
+    assert.deepEqual([byPath.read, byPath.weaker, byPath.asOf?.extraStopped], [0, 0, false]);
+    assert.deepEqual(await shape("package.json", fourth), []);
+    // The path filter reads the anchors of that time too
+    assert.deepEqual(
+      (await shape("pnpm", third, { path: "package.json" })).map((h) => h[0]),
+      ["npm", "pnpm"],
+    );
+    assert.deepEqual(await shape("pnpm", fourth, { path: "package.json" }), []);
+    assert.deepEqual(await shape("pnpm", undefined, { path: "package.json" }), []);
+
+    // An alias set replaced later: the old words find the record as of before, the new ones do not
+    const unit = db.owner.prepare("select content_hash, run_id from unit where id = ?").get(id("pnpm")) as {
+      content_hash: Uint8Array;
+      run_id: number;
+    };
+    insert(db, "unit_alias", {
+      unit_id: id("pnpm"),
+      terms: JSON.stringify(["installer"]),
+      content_hash: Buffer.from(unit.content_hash),
+      run_id: unit.run_id,
+      added_at: new Date().toISOString(),
+    });
+    const fifth = await tick();
+    assert.deepEqual(await shape("パッケージ管理"), []);
+    const old = await find("パッケージ管理", fourth);
+    assert.deepEqual(
+      old.hits.map((h) => [h.key, h.aliasOnly]),
+      [
+        ["trace:ext-s1/npm", false],
+        ["trace:ext-s1/pnpm", true],
+      ],
+    );
+    assert.deepEqual(
+      (await shape("installer")).map((h) => h[0]),
+      ["npm", "pnpm"],
+    );
+    const notYet = await find("installer", fourth);
+    assert.deepEqual([notYet.hits.length, notYet.weaker], [0, 1]);
+    assert.deepEqual(
+      (await shape("installer", fifth)).map((h) => h[0]),
+      ["npm", "pnpm"],
+    );
+    // An alias set cleared later still finds the record by the words it had
+    insert(db, "unit_alias", {
+      unit_id: id("pnpm"),
+      terms: "[]",
+      content_hash: Buffer.from(unit.content_hash),
+      run_id: unit.run_id,
+      added_at: new Date().toISOString(),
+    });
+    assert.deepEqual(await shape("installer"), []);
+    assert.deepEqual(
+      (await shape("installer", fifth)).map((h) => h[0]),
+      ["npm", "pnpm"],
+    );
+
+    // As of a time after everything, the hits are those of a search without a time
+    const future = at("2999-01-01T00:00:00Z");
+    for (const question of ["pnpm", "package manager", "lockfile committed", "installer", "package.json"])
+      for (const extra of [
+        {},
+        { lifecycles: ["active"] },
+        { kinds: ["decision"] },
+        { path: "package.json" },
+      ]) {
+        const then = await find(question, future, extra);
+        assert.deepEqual(then.hits, (await find(question, undefined, extra)).hits, question);
+        assert.deepEqual(then.asOf, { later: [], laterMore: 0, laterStopped: false, extraStopped: false });
+      }
+  } finally {
+    await db.done();
+  }
+});
+
+test("search as of a past time finds a record by its field value, and tells whose decision a record was then", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Track the tenant. acme is slow, so cache in Redis." });
+    await save(db, p, {
+      field_defs: [
+        {
+          name: "tenant",
+          type: "text",
+          label: "Tenant",
+          description: "The tenant affected",
+          quote: { source: `s${m}`, quote: "Track the tenant." },
+        },
+      ],
+      units: [
+        decision("cache", m, "cache in Redis.", {
+          fields: [{ name: "tenant", value: "acme", quote: { source: `s${m}`, quote: "acme is slow" } }],
+        }),
+      ],
+    });
+    const saved = await tick();
+    const keys = async (question: string, asOf?: string) =>
+      (await searchUnits(db.reader, p, { question, limit: 10, asOf })).hits.map((h) => h.key);
+    // A field value is written with its record, so it counts from the record's own save time
+    assert.deepEqual(await keys("acme", saved), ["trace:ext-s1/cache"]);
+    assert.deepEqual(await keys("acme", at("2020-01-01T00:00:00Z")), []);
+
+    // An AI's decision the owner adopted later: the AI's as of before, the owner's as of after
+    aiDecided(db, p, "retry", "Keep the retry in the client.");
+    const owner = message(db, p, { id: "m2", text: "Yes, keep the retry in the client." });
+    const unit = db.owner.prepare("select id, run_id from unit where key = 'trace:ext-s1/retry'").get() as {
+      id: number;
+      run_id: number;
+    };
+    insert(db, "unit_adoption", {
+      unit_id: unit.id,
+      source_id: owner,
+      span_start: 0,
+      span_end: 3,
+      route: "owner_statement",
+      run_id: unit.run_id,
+      added_at: at("2026-09-29T00:00:00Z"),
+    });
+    const whose = async (asOf?: string) =>
+      (await searchUnits(db.reader, p, { question: "retry client", limit: 10, asOf })).hits.map(
+        (h) => h.authority,
+      );
+    assert.deepEqual(await whose(at("2026-09-28T00:00:00Z")), ["agent"]);
+    assert.deepEqual(await whose(at("2026-09-30T00:00:00Z")), ["owner"]);
+    assert.deepEqual(await whose(), ["owner"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search as of a past time follows the replacements in effect then, and reads an anchor added later as absent", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use SQLite." });
+    const b = message(db, p, { id: "m2", text: "Use DuckDB instead." });
+    const c = message(db, p, { id: "m3", text: "Use Postgres instead." });
+    await save(db, p, { units: [decision("sqlite", a, "Use SQLite.")] });
+    const alone = await tick();
+    await save(db, p, {
+      units: [decision("duckdb", b, "Use DuckDB instead.", { supersedes: "trace:ext-s1/sqlite" })],
+    });
+    const second = await tick();
+    await save(db, p, {
+      units: [decision("postgres", c, "Use Postgres instead.", { supersedes: "trace:ext-s1/duckdb" })],
+    });
+    const third = await tick();
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    // The last successor is withdrawn: its replacement ends, and the one before it holds the place again
+    await settle(db, p, [id("postgres")], [id("postgres")]);
+    const shape = async (asOf?: string, extra = {}) =>
+      (await searchUnits(db.reader, p, { question: "SQLite", limit: 10, asOf, ...extra })).hits.map((h) => [
+        h.key.replace("trace:ext-s1/", ""),
+        h.lifecycle,
+        h.now ?? null,
+      ]);
+    assert.deepEqual(await shape(alone), [["sqlite", "active", "superseded"]]);
+    // The chain ends where it ended then: a replacement that started later is not followed, and one that ended later still is
+    assert.deepEqual(await shape(second), [
+      ["duckdb", "active", null],
+      ["sqlite", "superseded", null],
+    ]);
+    assert.deepEqual(await shape(third), [
+      ["postgres", "active", "withdrawn"],
+      ["sqlite", "superseded", null],
+    ]);
+    assert.deepEqual(await shape(), [
+      ["duckdb", "active", null],
+      ["sqlite", "superseded", null],
+    ]);
+    // The successor is filtered by the state it had then
+    assert.deepEqual(await shape(third, { lifecycles: ["superseded", "withdrawn"] }), [
+      ["sqlite", "superseded", null],
+    ]);
+
+    // An anchor added after the time is not one the record had: neither its path as a word nor the path filter finds it
+    const added = await tick();
+    insert(db, "unit_anchor", {
+      unit_id: id("sqlite"),
+      path: "src/late.ts",
+      role: "applies_to",
+      run_id: run(db, p),
+      added_at: new Date().toISOString(),
+    });
+    const keys = async (question: string, asOf?: string, extra = {}) =>
+      (await searchUnits(db.reader, p, { question, limit: 10, asOf, ...extra })).hits.map((h) => h.key);
+    assert.deepEqual(await keys("src/late.ts"), ["trace:ext-s1/duckdb", "trace:ext-s1/sqlite"]);
+    assert.deepEqual(await keys("src/late.ts", added), []);
+    assert.deepEqual(await keys("SQLite", undefined, { path: "src/late.ts" }), [
+      "trace:ext-s1/duckdb",
+      "trace:ext-s1/sqlite",
+    ]);
+    assert.deepEqual(await keys("SQLite", added, { path: "src/late.ts" }), []);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search as of a past time says where its caps cut: the index's candidates, those outside it, and those saved later", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    // Every record is saved at one time, holds the same words, and loses its anchor at a later time
+    const saved = at("2026-09-27T00:00:00Z");
+    manyAdopted(db, p, 2001, (i) => ({
+      key: `trace:ext-s1/k${i}`,
+      kind: "decision",
+      stance: "do",
+      anchor: { path: "src/retired.ts" },
+    }));
+    db.owner.exec("update unit_anchor set retired_at = '2026-09-29T00:00:00.000Z'");
+    const find = (question: string, asOf?: string) =>
+      searchUnits(db.reader, p, { question, limit: 20, asOf });
+    assert.equal((await find("src/retired.ts")).hits.length, 0);
+    const then = await find("src/retired.ts", at("2026-09-28T00:00:00Z"));
+    // Outside the index, the first 200 by id are looked at; the rest are said to be left out
+    assert.equal(then.hits.length, 20);
+    assert.ok(then.hits.every((h) => Number(h.key.split("/k")[1]) < 200));
+    assert.deepEqual([then.read, then.stopped, then.asOf?.extraStopped], [0, false, true]);
+    assert.equal((await find("src/retired.ts", at("2026-09-30T00:00:00Z"))).hits.length, 0);
+
+    // The index's candidates stop at the same cap as a search without a time
+    const words = await find("settled owner", saved);
+    assert.deepEqual([words.hits.length, words.read, words.stopped], [20, 2000, true]);
+    // A record saved exactly at the time is held then, not saved later
+    assert.deepEqual(words.asOf?.later, []);
+    // Before it, each is a later match: ten are named, the rest of the page counted, and the page said to be cut
+    const before = await find("settled owner", at("2026-09-26T00:00:00Z"));
+    assert.deepEqual(
+      [before.hits.length, before.asOf?.later.length, before.asOf?.laterMore, before.asOf?.laterStopped],
+      [0, 10, 190, true],
+    );
+    assert.ok(before.asOf?.later.every((l) => l.created_at === saved));
+  } finally {
+    await db.done();
+  }
 });
