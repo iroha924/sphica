@@ -193,8 +193,25 @@ export async function localChange(
     if (!files.some((f) => f.path === name)) files.push({ path: name, added: [], lines: [] });
   if (files.length + untracked.length > MAX_FILES)
     return { problem: `the change has more than ${MAX_FILES} files` };
-  const read = [from, diff];
-  for (const rel of untracked) {
+  const more = untrackedFiles(root, untracked, until);
+  if (!more) return { problem: unreadText({ unread: "timeout" }) };
+  files.push(...more.files);
+  return { base, files, digest: sha256([from, diff, ...more.read].join("\0")).toString("hex") };
+}
+
+/**
+ * Untracked files as added lines, with what was read of each for the digest, or null when `until` comes first: after git, reading
+ * up to 500 files is the slow part of a change, and it stops at the same time.
+ */
+export function untrackedFiles(
+  root: string,
+  rels: string[],
+  until: number,
+): { files: FileDiff[]; read: string[] } | null {
+  const files: FileDiff[] = [];
+  const read: string[] = [];
+  for (const rel of rels) {
+    if (Date.now() >= until) return null;
     let text = "";
     try {
       // Only a regular file is read: a symlink is added as a link (not its target), and a FIFO would block the hook
@@ -208,5 +225,5 @@ export async function localChange(
     files.push({ path: rel, added, lines: added.map((_, i) => i + 1) });
     read.push(rel, text);
   }
-  return { base, files, digest: sha256(read.join("\0")).toString("hex") };
+  return { files, read };
 }

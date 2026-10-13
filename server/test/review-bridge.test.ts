@@ -14,7 +14,7 @@ import type { CodexThread } from "../src/codex-log.ts";
 import { inTransaction } from "../src/db.ts";
 import { deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { codexReviewCall, localChange } from "../src/review-bridge.ts";
+import { codexReviewCall, localChange, untrackedFiles } from "../src/review-bridge.ts";
 import { openRun } from "../src/trace.ts";
 import { childLog, codexLog } from "./codex-log-file.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -920,6 +920,45 @@ test("a review that has no time left says so, and takes nothing from the deliver
     assert.ok("problem" in late);
     assert.match(late.problem, /could not be read in time/);
     assert.ok(!("problem" in (await localChange(w.repo, ""))), "with time, the same change is read");
+    // Git is not the only slow part: untracked files are read one by one, and that stops at the same time
+    fs.writeFileSync(path.join(w.repo, "src", "one.ts"), "export const one = 1;\nexport const two = 2;\n");
+    fs.writeFileSync(path.join(w.repo, "src", "big.bin"), Buffer.alloc(300 * 1024, 1));
+    const names = ["src/one.ts", "src/big.bin", "src/missing.ts"];
+    assert.equal(untrackedFiles(w.repo, names, Date.now() - 1), null);
+    assert.deepEqual(
+      untrackedFiles(w.repo, [], Date.now() - 1),
+      { files: [], read: [] },
+      "nothing to read takes no time",
+    );
+    assert.deepEqual(untrackedFiles(w.repo, names, Date.now() + 60_000), {
+      files: [
+        {
+          path: "src/one.ts",
+          added: ["export const one = 1;", "export const two = 2;", ""],
+          lines: [1, 2, 3],
+        },
+        // Too large to read, or not there: the path still counts as changed
+        { path: "src/big.bin", added: [], lines: [] },
+        { path: "src/missing.ts", added: [], lines: [] },
+      ],
+      read: [
+        "src/one.ts",
+        "export const one = 1;\nexport const two = 2;\n",
+        "src/big.bin",
+        "",
+        "src/missing.ts",
+        "",
+      ],
+    });
+    const withThem = await localChange(w.repo, "");
+    assert.ok(!("problem" in withThem));
+    assert.deepEqual(
+      withThem.files.map((f) => f.path).sort(),
+      ["src/big.bin", "src/db.ts", "src/one.ts"],
+      "the change holds what git tracks and what it does not",
+    );
+    fs.rmSync(path.join(w.repo, "src", "one.ts"));
+    fs.rmSync(path.join(w.repo, "src", "big.bin"));
     // The event's own delivery comes back whatever the review does: here the review cannot check a named pull request
     const got = await cx.prompt("$my-review #12 src/old.ts");
     assert.match(got, /could not check this review against past decisions: it names a pull request/);
