@@ -262,6 +262,62 @@
           "edits": ["src/library.ts"]
         }
       ]
+    },
+    {
+      "id": "s-en-sync-1",
+      "host": "claude-code",
+      "at": "2026-02-01T08:00:00Z",
+      "turns": [
+        {
+          "owner": "Sync the shelf to the server every 5 minutes.",
+          "assistant": "The shelf now syncs every 5 minutes.",
+          "edits": []
+        }
+      ]
+    },
+    {
+      "id": "s-en-sync-2",
+      "host": "claude-code",
+      "at": "2026-04-01T08:00:00Z",
+      "turns": [
+        {
+          "owner": "Syncing every 5 minutes drained phone batteries: the radio never slept between syncs.",
+          "assistant": "Noted.",
+          "edits": []
+        },
+        {
+          "owner": "We tried a push channel instead and dropped it: the provider closes idle sockets after 60 seconds.",
+          "assistant": "Noted, no push channel.",
+          "edits": []
+        },
+        {
+          "owner": "By the way, the export button label is cut off in German.",
+          "assistant": "Noted for later.",
+          "edits": []
+        },
+        {
+          "owner": "Sync the shelf every 30 minutes instead. This replaces the 5 minute rule.",
+          "assistant": "The shelf now syncs every 30 minutes.",
+          "edits": []
+        }
+      ]
+    },
+    {
+      "id": "s-en-sync-3",
+      "host": "claude-code",
+      "at": "2026-06-01T08:00:00Z",
+      "turns": [
+        {
+          "owner": "Readers saw edits from their other devices half an hour late and overwrote them.",
+          "assistant": "Noted.",
+          "edits": []
+        },
+        {
+          "owner": "Sync the shelf when the app comes to the foreground, and every 30 minutes only while it stays open. This replaces the plain 30 minute rule.",
+          "assistant": "The shelf now syncs on foreground and every 30 minutes while open.",
+          "edits": []
+        }
+      ]
     }
   ],
   "issues": [

@@ -133,13 +133,15 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - コミット: `test(evals): tell a record named in a timeline from one read in full`
   - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="named in a timeline" test/eval-claude.test.ts` → pass。timeline で名前が出た記録は `gold_timeline` で yes、`read` は no のまま。長い key の前方一致、全文の read、記録の本文が引用した timeline の行、search の結果は timeline と数えない。証明できないログは unknown
   - 結果: `bun run test` → 終了コード 0（1279 件 pass）
-- [ ] T08: 評価用の 3 段の置き換えの記録とタスクを足す
+- [x] T08: 評価用の 3 段の置き換えの記録とタスクを足す
   - 種別: 追加
   - 計画: S5
   - 依存: なし
   - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/world.json`, `server/evals/cloud/tasks.json`
   - 完了条件: `bun run test && bun run acceptance` → どちらも終了コード 0。`node evals/cloud/build.ts --project tsundoku`（`server/` で）→ fixture が作られ、足した 3 つの決定と、理由を持つ finding・dead end、関係の無い finding が入っている
   - コミット: `test(evals): add a task that asks how a decision changed and why`
+  - 結果: `node evals/cloud/build.ts --project tsundoku` → `built 4 repositories`。fixture に `trace:s-en-sync-1/every5`（superseded）、`trace:s-en-sync-2/every30`（superseded）、`trace:s-en-sync-3/foreground`（active）と、finding 3 件（うち 1 件は関係の無い `german-label`）、dead end 1 件が入った。タスクの prompt で検索すると 3 つの決定が返り、`foreground` の timeline は 3 つの決定・置き換え・同じ run の 4 件を時刻順に 1 回の返信で出した。試しに作ったビルドは消した
+  - 結果: `bun run test` → 終了コード 0（1279 件 pass）。`bun run verify` → 終了コード 0（受け入れ 140 件 pass）
 
 ## 記録
 
@@ -159,3 +161,5 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T06 / 予定外の発見: collect の「0 件の検索」は `No record holds most of` という文面に一致させていて、`as_of` の 0 件（`No record as of <時刻> holds most of`）を数え落とす / 一致させる文面を直した
 - 2026-10-13 / T07 / 変更欄と完了条件を変えた。変更欄の前: `server/evals/cloud/judge.ts`, `server/test/judge.test.ts`。新: `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`。完了条件の前: 「`in_timeline: yes`」。新: 「timeline の signal で yes」 / `server/test/judge.test.ts` は状態の判定（`src/judge.ts`）のテストで、評価のログの読み取りのテストは `eval-claude.test.ts` にある。signal は既存の `gold_signals` に足さず、行の別の欄 `gold_timeline` にした（`gold_signals` を全体で比べている既存のテスト 16 か所を変えずに済む）
 - 2026-10-13 / T03, T04 / Codex のコミットのレビュー（3bb4abac、9a3eb84c。Codex 側の都合で途中で終わり、全観点は見ていない）: F1（同じ場所の記録を path だけで 201 件に絞ってから symbol を照合するので、該当する記録が黙って落ちる）と F2（連なりの run が自分で保存した連なりの外の記録に加えた変化が出ない）。どちらも採用 / 修正タスク T11 を足した
+- 2026-10-13 / T08 / 3 つの決定には `why` を持たせず、理由は同じ trace の finding と dead end だけに置いた。anchor は付けていない（既存のタスクが編集するファイルに結び付けると、その配信の数が変わる） / 同じ場所で結び付く記録は、このタスクでは測らない。テスト（`timeline.test.ts`）で確かめてある
+- 2026-10-13 / T08 / タスクは `history-sync`（search 条件、3 回）。prompt は日本語、記録は英語
