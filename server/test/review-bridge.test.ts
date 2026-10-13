@@ -177,6 +177,57 @@ test("committed, untracked, and deleted files all count as the change", async ()
   }
 });
 
+// Git prints the deleted src/db.ts before src/old.ts, so what is read of src/old.ts depends on how the deleted file's hunk is counted
+test("a file that follows a deleted one in git's diff keeps its added lines, and a record one of them names is delivered", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "No mongoClient." });
+    await save(db, p, {
+      units: [
+        decided("no-mongo", m, "No mongoClient.", {
+          stance: "dont",
+          options: [{ text: "mongoClient", outcome: "rejected" }],
+        }),
+      ],
+    });
+    fs.rmSync(path.join(repo, "src", "db.ts"));
+    fs.appendFileSync(path.join(repo, "src", "old.ts"), "export const client = mongoClient;\n");
+    assert.deepEqual(git(repo, "diff", "--name-only", "origin/main").split("\n").filter(Boolean), [
+      "src/db.ts",
+      "src/old.ts",
+    ]);
+    const change = await localChange(repo, "");
+    const text = await deliver(
+      {
+        session_id: crypto.randomUUID(),
+        cwd: repo,
+        hook_event_name: "UserPromptExpansion",
+        expansion_type: "slash_command",
+        command_name: "review",
+        command_args: "",
+        prompt: "/review",
+      },
+      "claude-code",
+      db.file,
+    );
+    assert.deepEqual(
+      { files: "files" in change ? change.files : change, delivered: /trace:ext-s1\/no-mongo /.test(text) },
+      {
+        files: [
+          { path: "src/db.ts", added: [], lines: [], gone: true },
+          { path: "src/old.ts", added: ["export const client = mongoClient;"], lines: [2] },
+        ],
+        delivered: true,
+      },
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // An untracked symlink is a path only (Git adds the link, not its target); only regular files are read
 test("an untracked symlink counts as a path without reading what it points to", async () => {
   const w = await world();

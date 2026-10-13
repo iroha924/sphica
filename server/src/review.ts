@@ -58,7 +58,8 @@ export function parseDiff(text: string): FileDiff[] {
   };
   let cur: FileDiff | null = null;
   let line = 0;
-  // Lines left in the current hunk, old and new side: inside it, "--- x" and "+++ x" are a removed or added line, not a file header
+  // Lines left in the current hunk, old and new side: inside it, "--- x" and "+++ x" are a removed or added line, not a file header.
+  // A deleted file's hunk is counted too: left uncounted, its lines would take the next file's "@@" line as one of their own
   let oldLeft = 0;
   let newLeft = 0;
   // A mode-only or binary change prints only its "diff --git" line: its path counts when nothing else in the block named a file
@@ -69,10 +70,11 @@ export function parseDiff(text: string): FileDiff[] {
   };
   const rows = text.split(/\r?\n/);
   for (const [i, raw] of rows.entries()) {
-    if (cur && (oldLeft > 0 || newLeft > 0)) {
+    if (oldLeft > 0 || newLeft > 0) {
       if (raw.startsWith("+")) {
-        cur.added.push(raw.slice(1));
-        cur.lines.push(line++);
+        cur?.added.push(raw.slice(1));
+        cur?.lines.push(line);
+        line++;
         newLeft--;
       } else if (raw.startsWith("-")) oldLeft--;
       else if (!raw.startsWith("\\")) {
