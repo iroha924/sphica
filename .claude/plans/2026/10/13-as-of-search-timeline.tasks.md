@@ -116,6 +116,17 @@ base: main
   - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="through the path index" test/timeline.test.ts` → 直す前は落ちた（計画が `SEARCH f USING INDEX unit_content (project_id=?) | SEARCH a USING INDEX unit_anchor_live_once`）。cross join で結合の順を固定した後は pass
   - 結果: `bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
+- [x] T13: timeline の、記録でない ref の行も予算で測る
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の `timelineRefs` が要る）
+  - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="stays within the budget" test/timeline.test.ts` → 予算いっぱいの timeline の後ろに記録でない ref が 9 件続くと、返信が 32,768 バイトを超えるので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。記録でない ref の行も予算で測られ、入らない ref は「もう一度呼ぶ ref」として名指される（どの ref も、行で答えるか名指すかのどちらかになる）
+  - コミット: `fix(read): measure a timeline's lines for refs that are not records against the budget`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="stays within the budget" test/timeline.test.ts` → 直す前は落ちた（2 つ目の ref の長さが 127 のとき返信が 32,770 バイト）。測る処理を戻した後は pass
+  - 結果: `bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0
+
 ## P3: 利用者向けの文面
 
 README と plugin の文面が、新しい 2 つの引数を説明する。
@@ -161,6 +172,15 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - 結果: `node evals/cloud/build.ts --project tsundoku` → `built 4 repositories`。fixture に `trace:s-en-sync-1/every5`（superseded）、`trace:s-en-sync-2/every30`（superseded）、`trace:s-en-sync-3/foreground`（active）と、finding 3 件（うち 1 件は関係の無い `german-label`）、dead end 1 件が入った。タスクの prompt で検索すると 3 つの決定が返り、`foreground` の timeline は 3 つの決定・置き換え・同じ run の 4 件を時刻順に 1 回の返信で出した。試しに作ったビルドは消した
   - 結果: `bun run test` → 終了コード 0（1279 件 pass）。`bun run verify` → 終了コード 0（受け入れ 140 件 pass）
 
+- [ ] T14: 評価の集計で、分からないものを no や 0 と数えない（終わっていない呼び出し、引用された記録名、引数の無い呼び出し）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T07（直す対象の、timeline の signal と呼び出しの数え方が要る）
+  - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="Sphica's calls are counted|named in a timeline" test/eval-claude.test.ts` → 引数の無い呼び出しで `timeline_reads` が 0 になる、記録の本文が引用した記録名が timeline で名前が出たと数えられる、終わっていない Codex の read で no になる、の 2 件のテストが落ちる
+  - 完了条件: `bun run test` → 終了コード 0。引数がログに無い呼び出しがあるツールの使用回数は unknown、timeline の signal は行の主語・置き換えや衝突の相手・見出しだけで数え、終わっていない Sphica の呼び出しがあるログは no を言わない
+  - コミット: `test(evals): never count what a log cannot tell as zero or as no`
+
 ## 記録
 
 - 2026-10-13 / T01 / plan の D は「後から足された field の語で当たらないこと」を挙げていたが、schema が field の後からの追加を禁じている（trigger の文面 `field values are written with the unit`） / field には時刻の条件を付けず、記録の保存の時刻だけで判定する。そのテストは書かない
@@ -187,3 +207,7 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T10 / `review-shipping`: 止める指摘なし。as_of 無しの検索は v0.6.54 の bundle と 168 回比べて差が無く、過去の時点の検索は後から保存された候補が 2000 件あるとき 1 回あたり 110〜160 ms 増える（記録 3 万件で最大 334 ms、ふつうの検索の約 1.5 倍）と報告した（こちらでは測り直していない）。読み取りの MCP に時間の上限は無いので受け入れる。テストが見分けていない書き換え 5 個は採用し、T10 の中でテストを足した
 - 2026-10-13 / T11 / Codex のコミットのレビュー（fcfee2a5）: 前回の 2 件は塞がれたと確認。F1（path の条件を先に書いても、場所が 200 あると索引を使わず project の記録をたどる。記録 1 万件で同じ場所の問い合わせだけで約 150 ms。再現つき）を採用 / 修正タスク T12 を足した。返信の中身は正しく、時間だけの問題。T11 で足した実行計画のテストは場所 3 つの段階しか見ていなかった
 - 2026-10-13 / T12 / このコミットの前に `review-shipping` は流していない（問い合わせの結合の順を変える 4 行）/ PR の前に、ブランチ全体を `review-shipping` と Codex の全差分のレビューに見せる
+- 2026-10-13 / T10, T12 / Codex のコミットのレビュー（1d419fd7、53d3c1b8）: 指摘 0 件。T10 は件数の境目（1999・2000・2001 件）と注記の条件、T12 は場所 1・3・200・記録 1 万件での実行計画を、Codex が実行して確かめた（`bun run test` 全体は Codex 側では未実行）
+- 2026-10-13 / 全体 / `review-shipping` のブランチ全体の確認（92ef98b4..53d3c1b8）: 配布物に止める指摘なし。pack した 0.6.55 のファイル一覧は公開済みの 0.6.54 と同じ 53 件で、違うのは `package.json`、2 つの `plugin.json`、`README.md`、`dist/mcp.js` だけ。T12 の cross join は場所 0・1・3・200・201 で inner join と行も順序も同じ、と報告した（こちらでは流し直していない）
+- 2026-10-13 / 全体 / 予定外の発見: リポジトリの `server/node_modules/node_modules` に、自分自身を指す symlink が 18:28:42 にできていた（追跡外）。レビュー用のサブエージェントが作業用の写しを作るときに作ったと見ている（推測）。これがあると手元の bundle の `THIRD_PARTY_NOTICES.md` に同じパッケージが重複する（103 → 231。`verify` のログで確認）。`dist/*.js` は変わらない / symlink を消した。A1 の `bun run verify` は評価の実行が終わってから流し直す
+- 2026-10-13 / 全体 / Codex の全差分のレビュー（92ef98b4..53d3c1b8、effort high）: 指摘 4 件、どれも Codex が再現済み。(1) timeline で記録でない ref の行を測らずに足すので 32 KiB を超える（T03 の中で、`review-shipping` の「この分岐は通らない」を受けて測る処理を消したのが原因。ref が 1 つなら成り立つが複数だと成り立たない）→ 採用、T13。(2) 終わっていない Codex の read で timeline の signal が no になる、(3) 記録の本文が引用した記録名を timeline で名前が出たと数える、(4) 引数の無い呼び出しで使用回数が 0 になる → 採用、T14

@@ -703,6 +703,31 @@ test("a timeline reply stays within the budget: it keeps the record asked for an
       assert.equal(shown.at(-1), `${second.slice(0, 200)}: not found in this project`, String(n));
     }
 
+    // Refs that are not records, after a timeline that took the room: each line is measured too, so the reply stays within the
+    // budget, and every ref is either answered with its line or named to ask for again, in order
+    const strays = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9"];
+    let cut = 0;
+    for (let n = 1; n <= 300; n += 7) {
+      const filler = "n".repeat(n);
+      const crowded = await timelineRefs(db.reader, p, [`u${ids[0]}`, filler, ...strays.slice(0, 8)]);
+      assert.ok(Buffer.byteLength(crowded) <= READ_BUDGET, `${n}: ${Buffer.byteLength(crowded)}`);
+      const c = parts(crowded);
+      const answered = c.lines.filter((l) =>
+        / a timeline takes a record's key or u<id>$|: not found in this project$/.test(l),
+      );
+      const left = /Call read with timeline: true and refs (\[.*\]) for the rest\.\)$/.exec(
+        c.notes.at(-1) ?? "",
+      )?.[1];
+      const named: string[] = left ? JSON.parse(left) : [];
+      if (named.length) cut++;
+      assert.deepEqual(
+        [...answered.map((l) => l.split(": ")[0]), ...named],
+        [filler.slice(0, 200), ...strays.slice(0, 8)],
+        String(n),
+      );
+    }
+    assert.ok(cut > 0, "some remainder of room leaves no space for every line");
+
     // Several refs: each is fitted in turn, and the ones with no room are named to ask for again
     const many = await timelineRefs(db.reader, p, [`u${ids[0]}`, "s1", `u${ids[5]}`, "nope"]);
     assert.ok(Buffer.byteLength(many) <= READ_BUDGET, String(Buffer.byteLength(many)));

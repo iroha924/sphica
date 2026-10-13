@@ -542,7 +542,11 @@ export async function timelineRefs(db: Reads, projectId: number, refs: string[])
           ? null
           : `${shown}: not found in this project`;
     if (fixed !== null) {
-      // Always fits: the refs still to come were kept room for as a tail naming them whole, which is longer than this line
+      // Measured like a timeline: several of these lines are longer than the tail that kept room for naming their refs
+      if (bytes(reply([fixed], [], rest)) > READ_BUDGET) {
+        next = refs.slice(i);
+        break;
+      }
       sections.push(fixed);
       continue;
     }
