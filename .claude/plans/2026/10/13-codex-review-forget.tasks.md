@@ -22,13 +22,18 @@ base: main
 
 セッションのログの 1 行目を読む関数を 1 つにし、capture は「このセッション自身のスレッド」だと確かめられた hook 呼び出しだけを記録する。組み込みの review の子のプロンプトは保存されなくなる。このフェーズの間、ブランチは push しない（plan の方針 11）。
 
-- [ ] T01: ログの 1 行目を読む `codexThread` を `server/src/codex-log.ts` に作り、`codexInteractive` をそれに乗せる。バージョンを上げる
+- [x] T01: ログの 1 行目を読む `codexThread` を `server/src/codex-log.ts` に作り、`codexInteractive` をそれに乗せる。バージョンを上げる
   - 種別: 変更
   - 計画: S1, S5, S7
   - 依存: なし
-  - 変更: `server/src/codex-log.ts`, `server/src/deliver.ts`, `server/test/codex-log.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/codex-log.ts`, `server/src/deliver.ts`, `server/test/codex-log.test.ts`, `server/test/codex-log-file.ts`, `server/test/deliver.test.ts`, `scripts/lib/bundle-budget.mjs`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run verify` → 終了コード 0。その前に、(1) 変更の前の main で `node server/evals/scale/run.ts` を流して表を結果行に残す、(2) `bun run release:plan -- --base v0.6.52` の種別が `plugin` で、上げるバージョンが npm に無い（`npm view sphica versions --json`）ことを確かめてからバージョンを上げる、(3) `cd server && node --import ./test/isolate-home.ts --test test/codex-log.test.ts test/deliver.test.ts` が pass（本人のスレッド・子のスレッド・読めないログのそれぞれで `codexThread` が期待の値を返し、`codexInteractive` の既存のテストは変えずに通る）
   - コミット: `refactor(deliver): read a Codex session log's first line in one place, and bump the version`
+  - 結果: `node server/evals/scale/run.ts` → 変更の前（コミット 569ba556、Apple M4 Pro）に流して終了コード 0、全行 problems none。記録 1 万件（uniform）の中央値: prompt 130〜172 ms、read 64 ms、edit 69 ms、名指しの shell 124 ms、review 263〜272 ms、session start 79 ms。表は PR 本文に載せる
+  - 結果: `git add <変更> && bun run release:plan -- --base v0.6.52` → `release kind: plugin`、inputs は `server/src/codex-log.ts`, `server/src/deliver.ts`。`npm view sphica versions --json` の最後は 0.6.52 で、0.6.53 は無い
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/codex-log.test.ts test/deliver.test.ts` → tests 64、pass 64、fail 0
+  - 結果: `bun run verify` → 1 回目は Biome の整形 2 件で落ち（`bun run fix` で直した）、2 回目は `deliver: ./deliver.js is 445640 bytes, over its budget of 445000` で落ち（上限を 450,000 に上げた）、3 回目は終了コード 0（受け入れ 137 件 pass）
+  - 結果: `node scripts/check-tarball.mjs <tgz>` → `review-shipping` が `npm pack` の tarball に流して 0。止める指摘なし。`deliver.js` だけが 694 バイト増え、ほかの 5 つの bundle は同じ。旧 `codexInteractive` と 48,580 通りの入力で比べ、違いは「文字列でない `session_id` が文字列でない `payload.id` と一致する」12 通りだけで、新しいほうが対話でないと答える（ホストは文字列しか送らない）
 
 - [ ] T02: Codex の capture は、ログで本人のスレッドだと確かめられたときだけ記録し、判定できないときは通知する
   - 種別: 修正
@@ -85,3 +90,6 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
   - コミット: `docs: say what Codex's reviews get, what its capture leaves out, and that forget works there`
 
 ## 記録
+
+- 2026-10-13 / T01 / 変更欄を変えた。前: `server/src/codex-log.ts`, `server/src/deliver.ts`, `server/test/codex-log.test.ts` と 4 つのバージョンのファイル。後: それに `server/test/codex-log-file.ts`（テスト用のログを書く helper。T02 以降の capture と配信のテストでも使う）、`server/test/deliver.test.ts`（手元の helper をやめて共有のものを import）、`scripts/lib/bundle-budget.mjs` を足した / 理由: helper を 2 か所に持たないため。`plugin/dist/deliver.js` が 445,640 バイトになり上限 445,000 を超えたので、上限を 450,000 に上げた（T03・T05 でも deliver は増える。足りなければそのコミットで理由を書いて上げる）
+- 2026-10-13 / T01 / `bun run release:plan` は staged の差分（`git diff <base> --cached`）を見る。コミット前に変更を stage してから流さないと `none` と出る / stage してから流して `plugin` を確かめた

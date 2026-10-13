@@ -32,6 +32,7 @@ import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { hitsReply, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
+import { codexLog } from "./codex-log-file.ts";
 import {
   aiDecided,
   at,
@@ -2365,28 +2366,6 @@ test("decided by an AI: the per-record mark takes no room, so an AI's decision f
   for (let size = 200; size <= 236; size += 4)
     assert.equal(await shownFor(false, size), await shownFor(true, size), `text of ${size}`);
 });
-
-/** A Codex session log as Codex 0.162.1 writes its first line, and the directory to remove afterwards */
-function codexLog(sessionId: string, payload: Record<string, unknown> = {}, rest = ""): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-codex-log-")));
-  const file = path.join(dir, `rollout-${sessionId}.jsonl`);
-  const first = {
-    timestamp: "2026-10-12T10:57:58.000Z",
-    type: "session_meta",
-    payload: {
-      id: sessionId,
-      session_id: sessionId,
-      originator: "codex-tui",
-      source: "vscode",
-      thread_source: "user",
-      cli_version: "0.162.1",
-      base_instructions: { text: "You are Codex." },
-      ...payload,
-    },
-  };
-  fs.writeFileSync(file, `${JSON.stringify(first)}\n${rest}`);
-  return file;
-}
 
 test("a Codex session is interactive only when its log's first line says the terminal started this session's own thread", () => {
   const made: string[] = [];

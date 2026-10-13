@@ -16,6 +16,7 @@ import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
+import { codexThread, ownThread } from "./codex-log.ts";
 import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
@@ -823,43 +824,14 @@ const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
 export const AUTO_TRACE = (n: number, skill?: string) =>
   `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, ${skill ? `read \`${skill}\` and run it` : "run the trace Skill"} on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
 
-/** How far into a Codex session log its first line is looked for; the line holds the session's instructions and ran to 23 KB when measured */
-const SESSION_META_BYTES = 256 * 1024;
-
 /**
  * Whether a Codex session's log says a person started it in the terminal, in the session's own thread. Hook input and the hook's
  * environment are the same for `codex exec`, and the log's first line is there by the time the session-start hook runs (Codex 0.162.1).
  * Anything unreadable or unseen (another client, a child thread, another session's log) is not interactive.
  */
 export function codexInteractive(input: Pick<HookInput, "session_id" | "transcript_path">): boolean {
-  const file = input.transcript_path;
-  if (!input.session_id || typeof file !== "string" || !path.isAbsolute(file)) return false;
-  let fd: number | undefined;
-  try {
-    // A regular file only: a FIFO would block the hook
-    if (!fs.lstatSync(file).isFile()) return false;
-    fd = fs.openSync(file, "r");
-    const buffer = Buffer.alloc(SESSION_META_BYTES);
-    const read = fs.readSync(fd, buffer, 0, SESSION_META_BYTES, 0);
-    const end = buffer.subarray(0, read).indexOf(0x0a);
-    if (end < 0) return false;
-    // Anything but an object with an object payload has none of these fields
-    const line = JSON.parse(buffer.subarray(0, end).toString("utf8")) as {
-      type?: unknown;
-      payload?: Record<string, unknown> | null;
-    } | null;
-    const payload = line?.payload;
-    return (
-      line?.type === "session_meta" &&
-      payload?.id === input.session_id &&
-      payload.originator === "codex-tui" &&
-      payload.thread_source === "user"
-    );
-  } catch {
-    return false;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
+  const thread = codexThread(input);
+  return ownThread(input, thread) && thread?.originator === "codex-tui";
 }
 
 /** A path the notice can name as it is, between backticks: nothing that would end them or break the notice's one line, and short enough to be read whole */
