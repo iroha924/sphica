@@ -172,7 +172,7 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - 結果: `node evals/cloud/build.ts --project tsundoku` → `built 4 repositories`。fixture に `trace:s-en-sync-1/every5`（superseded）、`trace:s-en-sync-2/every30`（superseded）、`trace:s-en-sync-3/foreground`（active）と、finding 3 件（うち 1 件は関係の無い `german-label`）、dead end 1 件が入った。タスクの prompt で検索すると 3 つの決定が返り、`foreground` の timeline は 3 つの決定・置き換え・同じ run の 4 件を時刻順に 1 回の返信で出した。試しに作ったビルドは消した
   - 結果: `bun run test` → 終了コード 0（1279 件 pass）。`bun run verify` → 終了コード 0（受け入れ 140 件 pass）
 
-- [ ] T14: 評価の集計で、分からないものを no や 0 と数えない（終わっていない呼び出し、引用された記録名、引数の無い呼び出し）
+- [x] T14: 評価の集計で、分からないものを no や 0 と数えない（終わっていない呼び出し、引用された記録名、引数の無い呼び出し）
   - 種別: 修正
   - 計画: S4
   - 依存: T07（直す対象の、timeline の signal と呼び出しの数え方が要る）
@@ -180,6 +180,9 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="Sphica's calls are counted|named in a timeline" test/eval-claude.test.ts` → 引数の無い呼び出しで `timeline_reads` が 0 になる、記録の本文が引用した記録名が timeline で名前が出たと数えられる、終わっていない Codex の read で no になる、の 2 件のテストが落ちる
   - 完了条件: `bun run test` → 終了コード 0。引数がログに無い呼び出しがあるツールの使用回数は unknown、timeline の signal は行の主語・置き換えや衝突の相手・見出しだけで数え、終わっていない Sphica の呼び出しがあるログは no を言わない
   - コミット: `test(evals): never count what a log cannot tell as zero or as no`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="Sphica's calls are counted|named in a timeline" test/eval-claude.test.ts` → 直す前は 2 件とも落ちた。直した後は pass（Codex の呼び出しと戻りは item の id で突き合わせ、id の無いものは件数で突き合わせる）
+  - 結果: `node --import ./test/isolate-home.ts --test test/eval-claude.test.ts test/eval-grade.test.ts` → 123 件 pass。`bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0
+  - 結果: `node <scratchpad>/peek-calls.ts` → 進行中の評価の実行ログ 10 件に当てると、終わった 9 件はツール別の呼び出しの数と `timeline` の使用回数が取れ、実行中の 1 件は unknown になった
 
 ## 記録
 
