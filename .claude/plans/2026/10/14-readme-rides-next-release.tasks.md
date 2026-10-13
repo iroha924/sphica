@@ -22,13 +22,14 @@ base: main
 
 README.md だけの変更がバージョン検査を通り、doctor がそれを食い違いと言わなくなる。
 
-- [ ] T01: README.md をバージョン検査の入力から外す
+- [x] T01: README.md をバージョン検査の入力から外す
   - 種別: 変更
   - 計画: S1
   - 依存: なし
   - 変更: `scripts/lib/release-scope.mjs`, `lefthook.yml`, `server/test/release-scope.test.ts`, `server/test/check-mcp-version.test.ts`
   - 完了条件: テストを先に足し、`scripts/lib/release-scope.mjs` を直す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/check-mcp-version.test.ts test/release-scope.test.ts` → 足したテストが失敗する（red として結果行に残す）。直した後に同じコマンド → 全部通る
   - コミット: `feat(release): let a change to README.md alone go without a version bump`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/check-mcp-version.test.ts test/release-scope.test.ts` → red: `scripts/lib/release-scope.mjs` と `lefthook.yml` を直す前は 3 件失敗（check-mcp-version の新しいテストが exit 1 で「for example README.md」、`releaseKind(["README.md"])` が `plugin`、glob の検査が「README.md is in the bundle glob」）。直した後は 12 件 pass、0 件 fail。review-shipping の指摘 2 件（glob の否定の検査が同じ綴りしか見ない、テストの題が古い）を同じコミットで直した
 
 - [ ] T02: doctor がリポジトリと比べるときだけ README.md を外し、0.6.56 にする
   - 種別: 変更
