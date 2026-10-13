@@ -406,6 +406,13 @@ await withTempDir(async (dir) => {
     for (const s of shells) {
       const tag = `${r.name}/${s.name}`;
       const session = `codex-${r.name}-${s.name}`.replace(/[^A-Za-z0-9-]/g, "-");
+      // The session's log as the terminal writes its first line, which Codex names in every hook call: capture records only a call
+      // whose log says it is the session's own thread, and a new session is asked to trace and told where the packed Skill is
+      const log = path.join(dir, `rollout-${session}.jsonl`);
+      fs.writeFileSync(
+        log,
+        `${JSON.stringify({ type: "session_meta", payload: { id: session, originator: "codex-tui", thread_source: "user" } })}\n`,
+      );
       const childPath = [...dirs, ...(windows ? [powershellDir] : []), path.dirname(s.file)].join(
         path.delimiter,
       );
@@ -420,6 +427,7 @@ await withTempDir(async (dir) => {
             hook_event_name: event,
             session_id: session,
             turn_id: `t-${session}`,
+            transcript_path: log,
             cwd: repo,
             ...input,
           }),
@@ -445,22 +453,12 @@ await withTempDir(async (dir) => {
       });
       if (!queuedOrSent(marker))
         fail(`Codex UserPromptSubmit through ${tag} queued nothing with this case's prompt`);
-      // A log as the terminal writes its first line: this new session is asked to trace, and is told where the packed Skill is
-      const log = path.join(dir, `rollout-${session}.jsonl`);
-      fs.writeFileSync(
-        log,
-        `${JSON.stringify({ type: "session_meta", payload: { id: session, originator: "codex-tui", thread_source: "user" } })}\n`,
-      );
       let asked = "";
       for (const [event, input] of Object.entries(inputs))
         (codexHooks[event] ?? [])
           .flatMap((g) => g.hooks)
           .forEach((h, i) => {
-            const result = run(
-              event,
-              h,
-              event === "SessionStart" ? { ...input, transcript_path: log } : input,
-            );
+            const result = run(event, h, input);
             check(event, i, result);
             if (event === "SessionStart") asked += result.stdout ?? "";
           });

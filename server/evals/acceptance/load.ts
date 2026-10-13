@@ -35,8 +35,18 @@ type Turn = {
   /** Record tools the agent ran in the turn (a trace report), as the hook and the record server saw them */
   record_tools?: string[];
 };
-/** `entrypoint` is the CLAUDE_CODE_ENTRYPOINT the hooks see */
-type Session = { id: string; host?: string; at: string; entrypoint?: string; turns: Turn[] };
+/**
+ * `entrypoint` is the CLAUDE_CODE_ENTRYPOINT the hooks see. `thread` is the Codex thread the hooks' session log names: the session's
+ * own when absent, `review` for the child thread the built-in review starts.
+ */
+type Session = {
+  id: string;
+  host?: string;
+  at: string;
+  entrypoint?: string;
+  thread?: "review";
+  turns: Turn[];
+};
 type Comment = { id: number; body: string };
 type Pull = {
   number: number;

@@ -8,7 +8,6 @@
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
 // through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
@@ -16,14 +15,16 @@ import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
+import { childThread, codexThread, ownThread } from "./codex-log.ts";
 import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
+import { markOnce } from "./once.ts";
 import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
-import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
+import { codexReviewCall, localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
 import {
   compare,
   loadCache,
@@ -36,7 +37,7 @@ import {
 } from "./shell-state.ts";
 import { RevisionMismatch, sphicaHome } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
-import { head, reason, sha256 } from "./text.ts";
+import { head, reason } from "./text.ts";
 import { pendingSessions } from "./trace.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
@@ -386,7 +387,7 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
 const agentOf = (input: { agent_id?: unknown }): string | null =>
   typeof input.agent_id === "string" && /^[\x21-\x7e]{1,200}$/.test(input.agent_id) ? input.agent_id : null;
 
-/** Deliveries of one conversation: the main one, or one subagent, which starts with its own context. */
+/** Deliveries of one conversation: the main one, or one subagent or child thread, which starts with its own context. */
 const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>
   agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent);
 
@@ -762,6 +763,8 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
 const SHELL_WRITE = "shell_write";
 /** How long a shell call's snapshot may take before the rest of its files are left unknown, inside the host's 5 seconds */
 const SNAPSHOT_MS = 3500;
+/** How long after a Codex hook starts its review may go on reading the change, inside the 5 seconds Codex gives a tool hook */
+const REVIEW_MS = 3500;
 const SHELL_WRITE_ON = new Set(["on", "1", "true", "yes"]);
 /** Bytes of the trial log before it moves aside: about 30,000 calls, more than a week of heavy use */
 const TRIAL_CAP = 10 * 1024 * 1024;
@@ -823,56 +826,43 @@ const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
 export const AUTO_TRACE = (n: number, skill?: string) =>
   `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, ${skill ? `read \`${skill}\` and run it` : "run the trace Skill"} on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
 
-/** How far into a Codex session log its first line is looked for; the line holds the session's instructions and ran to 23 KB when measured */
-const SESSION_META_BYTES = 256 * 1024;
-
 /**
  * Whether a Codex session's log says a person started it in the terminal, in the session's own thread. Hook input and the hook's
  * environment are the same for `codex exec`, and the log's first line is there by the time the session-start hook runs (Codex 0.162.1).
  * Anything unreadable or unseen (another client, a child thread, another session's log) is not interactive.
  */
 export function codexInteractive(input: Pick<HookInput, "session_id" | "transcript_path">): boolean {
-  const file = input.transcript_path;
-  if (!input.session_id || typeof file !== "string" || !path.isAbsolute(file)) return false;
-  let fd: number | undefined;
-  try {
-    // A regular file only: a FIFO would block the hook
-    if (!fs.lstatSync(file).isFile()) return false;
-    fd = fs.openSync(file, "r");
-    const buffer = Buffer.alloc(SESSION_META_BYTES);
-    const read = fs.readSync(fd, buffer, 0, SESSION_META_BYTES, 0);
-    const end = buffer.subarray(0, read).indexOf(0x0a);
-    if (end < 0) return false;
-    // Anything but an object with an object payload has none of these fields
-    const line = JSON.parse(buffer.subarray(0, end).toString("utf8")) as {
-      type?: unknown;
-      payload?: Record<string, unknown> | null;
-    } | null;
-    const payload = line?.payload;
-    return (
-      line?.type === "session_meta" &&
-      payload?.id === input.session_id &&
-      payload.originator === "codex-tui" &&
-      payload.thread_source === "user"
-    );
-  } catch {
-    return false;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
+  const thread = codexThread(input);
+  return ownThread(input, thread) && thread?.originator === "codex-tui";
 }
 
 /** A path the notice can name as it is, between backticks: nothing that would end them or break the notice's one line, and short enough to be read whole */
 export const namable = (file: string): string | null =>
   Buffer.byteLength(file) <= 1000 && !/[\p{Cc}`]/u.test(file) ? file : null;
 
-/** The trace Skill's file beside this script: the bundle runs from <root>/dist, the source from server/src */
-export function traceSkill(here = path.dirname(fileURLToPath(import.meta.url))): string | null {
-  const file = [path.join(here, ".."), path.join(here, "..", "..", "plugin")]
-    .map((root) => path.join(root, "skills", "trace", "SKILL.md"))
+/** A Skill's file beside this script: the bundle runs from <root>/dist, the source from server/src */
+const skillFile = (skill: string, here: string): string | undefined =>
+  [path.join(here, ".."), path.join(here, "..", "..", "plugin")]
+    .map((root) => path.join(root, "skills", skill, "SKILL.md"))
     .find((f) => fs.existsSync(f));
+
+/** The trace Skill's file, when a notice can name it */
+export function traceSkill(here = path.dirname(fileURLToPath(import.meta.url))): string | null {
+  const file = skillFile("trace", here);
   return file ? namable(file) : null;
 }
+
+/**
+ * Sphica's own review Skill as a shell command may name it: beside this script where its links lead (the module's path), and beside
+ * it as the host started it, which a plugin root reached through a link keeps.
+ */
+const ownReview = (): string[] => [
+  ...new Set(
+    [path.dirname(fileURLToPath(import.meta.url)), path.dirname(path.resolve(process.argv[1] ?? ""))].flatMap(
+      (here) => skillFile("review", here) ?? [],
+    ),
+  ),
+];
 
 /**
  * Records grow only when sessions are traced, so session start says when sessions wait, in the owner's own sessions only (a headless run
@@ -998,8 +988,9 @@ async function beforeReview(
   projectId: number,
   root: string,
   call: { name: string; args: string },
+  until?: number,
 ): Promise<Plan> {
-  const change = await localChange(root, call.args);
+  const change = await localChange(root, call.args, until);
   const said = (text: string, why: string | null): Plan => ({
     text,
     note: "",
@@ -1048,31 +1039,9 @@ async function beforeReview(
   };
 }
 
-/** Whether this session was already told about this change (a review skill is often called more than once per change). */
+/** Whether this conversation was already told about this change (a review skill is often called more than once per change). */
 function toldBefore(session: string, key: string): boolean {
   return !markOnce("review", `${session}\0${key}`);
-}
-
-/**
- * Marks a key once, in a per-user directory (a shared /tmp holds other users' markers). True the first time; only an existing mark
- * counts as seen, so a directory that cannot be written never silences a delivery.
- */
-function markOnce(kind: string, key: string): boolean {
-  const user = (() => {
-    try {
-      return os.userInfo().username;
-    } catch {
-      return String(process.getuid?.() ?? "user");
-    }
-  })();
-  const dir = path.join(os.tmpdir(), `sphica-${sha256(user).toString("hex").slice(0, 12)}`, kind);
-  try {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dir, sha256(key).toString("hex").slice(0, 24)), "", { flag: "wx" });
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "EEXIST";
-  }
 }
 
 /** Whether this session was already told Sphica is unavailable (said once per session, never as "nothing applies"). */
@@ -1080,7 +1049,7 @@ function onceUnavailable(session: string): boolean {
   return markOnce("unavailable", session);
 }
 
-/** Where one delivery is logged: its session, the subagent it ran in, and its event. */
+/** Where one delivery is logged: its session, the subagent or child thread it ran in, and its event. */
 type Entry = {
   projectId: number;
   host: Host;
@@ -1181,6 +1150,7 @@ async function snapshotCall(
   place: { root: string; key: string },
   host: Host,
   input: HookInput,
+  who: string | null,
   started: number,
 ): Promise<void> {
   const paths = await deliverablePaths(db, projectId);
@@ -1189,7 +1159,7 @@ async function snapshotCall(
   saveCache(place.root, cache, paths);
   const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
   if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
-  const key = snapshotKey(host, String(input.session_id), agentOf(input), String(input.tool_use_id));
+  const key = snapshotKey(host, String(input.session_id), who, String(input.tool_use_id));
   writeSnapshot({ v: 1, key, at: iso(started), root: place.root, project: place.key, paths: states });
 }
 
@@ -1197,9 +1167,14 @@ async function snapshotCall(
  * After a shell call (PostToolUse, and PostToolUseFailure in Claude Code: a failed command may have written before it failed): the
  * records on the watched files whose content changed since its snapshot. Never says Sphica is unavailable: shell calls are frequent.
  */
-async function afterShell(input: HookInput, host: Host, file: string, started: number): Promise<string> {
+async function afterShell(
+  input: HookInput,
+  host: Host,
+  agent: string | null,
+  file: string,
+  started: number,
+): Promise<string> {
   if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
-  const agent = agentOf(input);
   const base = { host, session: input.session_id, agent, call: input.tool_use_id };
   let line: Record<string, unknown> = { ...base, event: "post_shell" };
   let db: ReadonlyKysely<DB> | null = null;
@@ -1262,23 +1237,61 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
   }
 }
 
-/** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
+/**
+ * The additional context for one hook call, or "" for nothing. file is the database, and started is when the hook began (tests pass
+ * their own of both).
+ */
 export async function deliver(
   input: ReviewInput & { source?: string },
   host: Host = "claude-code",
   file: string = dbFile(),
+  started: number = Date.now(),
 ): Promise<string> {
-  const started = Date.now();
+  // A Codex child thread carries no agent id (its built-in review): only the session log tells it from the session's own thread.
+  // A log that does not say leaves the call with the main conversation
+  const thread = host === "codex" && !agentOf(input) ? codexThread(input) : null;
+  const who = agentOf(input) ?? childThread(input, thread);
+  if (host !== "codex") return deliverOne(input, host, file, started, who, reviewCall(input));
+  // Codex has no event of its own for a review, so a review's decisions are added to what the same call delivers anyway
+  const call = codexReviewCall(input, thread, input.hook_event_name === "PreToolUse" ? ownReview() : []);
+  // The event's own delivery runs first and the review stops early: a review that reads a large change slowly must not take the
+  // event's delivery with it when the host ends the hook
+  if (!call) return deliverOne(input, host, file, started, who, null);
+  // The repository is looked at once for both: finding it starts git, which the review has no time to do again
+  const place = identify(input.cwd ?? process.cwd());
+  const rest = await deliverOne(input, host, file, started, who, null, { place });
+  const review = await deliverOne(input, host, file, started, who, call, {
+    place,
+    reviewUntil: started + REVIEW_MS,
+  });
+  return [review, rest].filter(Boolean).join("\n\n");
+}
+
+/**
+ * One delivery of a hook call, for the conversation `who` (a subagent, a child thread, or null for the main one): the review `call`
+ * starts, or with none, what the event itself brings. `known.place` is the repository when the caller already found it, and
+ * `known.reviewUntil` is when a review must stop reading the change.
+ */
+async function deliverOne(
+  input: ReviewInput & { source?: string },
+  host: Host,
+  file: string,
+  started: number,
+  who: string | null,
+  call: { name: string; args: string } | null,
+  known: { place?: ReturnType<typeof identify>; reviewUntil?: number } = {},
+): Promise<string> {
   const name = input.hook_event_name;
   // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
   if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
-    return afterShell(input, host, file, started);
+    return afterShell(input, host, who, file, started);
+  // A review is not about the call's own command: its snapshot and the files it names belong to the event's own delivery
   const snap =
+    !call &&
     name === "PreToolUse" &&
     SHELL_TOOLS.has(input.tool_name ?? "") &&
     Boolean(input.tool_use_id) &&
     shellWriteDelivery();
-  const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
     : name === "SessionStart" || name === "SubagentStart"
@@ -1308,7 +1321,9 @@ export async function deliver(
         ? shellPatch(input)
         : null;
   const shell =
-    SHELL_TOOLS.has(input.tool_name ?? "") && !patch && typeof ti.command === "string" ? ti.command : null;
+    !call && SHELL_TOOLS.has(input.tool_name ?? "") && !patch && typeof ti.command === "string"
+      ? ti.command
+      : null;
   const targets = patch
     ? patchPaths(patch)
     : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
@@ -1320,7 +1335,7 @@ export async function deliver(
     (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
   )
     return "";
-  const place = identify(input.cwd ?? process.cwd());
+  const place = known.place !== undefined ? known.place : identify(input.cwd ?? process.cwd());
   if (!place) return "";
   let rels = targets
     .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
@@ -1334,11 +1349,11 @@ export async function deliver(
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
     if (snap)
-      await snapshotCall(db, pid, place, host, input, started).catch((e) =>
+      await snapshotCall(db, pid, place, host, input, who, started).catch((e) =>
         trialLog({
           host,
           session: input.session_id,
-          agent: agentOf(input),
+          agent: who,
           call: input.tool_use_id,
           event: "snapshot_failed",
           error: head(reason(e), 200),
@@ -1385,13 +1400,13 @@ export async function deliver(
               pid,
               rels,
               sessionId(pid, host, session),
-              agentOf(input),
+              who,
               shell ? "named" : "reading",
             )
           : event === "prompt"
             ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
-              ? await beforeReview(reader, pid, place.root, call)
+              ? await beforeReview(reader, pid, place.root, call, known.reviewUntil)
               : {
                   ...(await atStart(reader, pid, branchOf(place.root), {
                     file,
@@ -1425,7 +1440,7 @@ export async function deliver(
       projectId: pid,
       host,
       external: session,
-      agent: agentOf(input),
+      agent: who,
       event,
       branch: branchOf(place.root),
     };
@@ -1435,7 +1450,13 @@ export async function deliver(
     if (event === "pre_read" || event === "session_start")
       return (await lockedPlan(file, entry, make, keep)).text;
     const plan = await make();
-    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    // Told once per conversation: each built-in review of Codex is a new child thread, which has seen nothing of the last one
+    if (
+      call &&
+      plan.text &&
+      toldBefore(`${host}\0${input.session_id}${who === null ? "" : `\0${who}`}`, plan.once ?? plan.text)
+    )
+      return "";
     if (keep(plan)) await log(file, entry, plan).catch(() => {});
     return plan.text;
   } catch (e) {

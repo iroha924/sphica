@@ -43,6 +43,7 @@ import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
 import { callSession } from "../src/trace.ts";
 import { changed, snapshot } from "../src/worktree.ts";
+import { childLog, codexLog } from "./codex-log-file.ts";
 import { at, insert, project, session, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
@@ -634,7 +635,7 @@ test("turn boundary: a file the owner edits after interrupting a turn is not the
 
 test("turn boundary: a file the owner edits after a Codex interrupt is not the next turn's", async () => {
   const { repo, edit, seen } = boundaryRepo("interrupt-codex");
-  const base = { session_id: "icx", cwd: repo };
+  const base = { session_id: "icx", transcript_path: codexLog("icx"), cwd: repo };
   await onHook("codex", { ...base, turn_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
   edit("agent-a.ts");
   await onHook("codex", { ...base, turn_id: "t1", hook_event_name: "Interrupt" });
@@ -657,7 +658,9 @@ test("turn boundary: compaction in the middle of a turn keeps the turn's startin
     const base = {
       session_id: `cp-${host}`,
       cwd: repo,
-      ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
+      ...(host === "codex"
+        ? { turn_id: "t1", transcript_path: codexLog(`cp-${host}`) }
+        : { prompt_id: "t1" }),
     };
     await onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
     edit("before.ts");
@@ -871,7 +874,7 @@ test("turn boundary: Stop and Interrupt keep a start's turn and number, and a re
   assert.deepEqual(seen(), ["t1:agent.ts"]);
   assert.deepEqual(read(dir), [{ turn: "t1", seq: 2, running: false }]);
 
-  const cx = { session_id: "kpx", cwd: repo, turn_id: "t1" };
+  const cx = { session_id: "kpx", transcript_path: codexLog("kpx"), cwd: repo, turn_id: "t1" };
   await onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
   await onHook("codex", { ...cx, hook_event_name: "Interrupt" });
   assert.deepEqual(read(turnDir("codex", "kpx")), [{ turn: "t1", seq: 1, running: false }]);
@@ -942,7 +945,7 @@ test("a starting point that cannot be written costs only the status edits, not t
     const base = {
       session_id: session,
       cwd: repo,
-      ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
+      ...(host === "codex" ? { turn_id: "t1", transcript_path: codexLog(session) } : { prompt_id: "t1" }),
     };
     await onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "first" });
     const dir = turnDir(host, session);
@@ -1430,7 +1433,8 @@ test("SessionStart passes this session id down to children", async () => {
 
 test("reads the edited file of a Codex apply_patch from its headers", async () => {
   reset();
-  const base = { session_id: process.env.CODEX_THREAD_ID ?? "t1", turn_id: "turn-1", cwd: repoDir };
+  const id = process.env.CODEX_THREAD_ID ?? "t1";
+  const base = { session_id: id, transcript_path: codexLog(id), turn_id: "turn-1", cwd: repoDir };
   await onHook("codex", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a.ts を直して" });
   await onHook("codex", {
     ...base,
@@ -1461,6 +1465,139 @@ test("reads the edited file of a Codex apply_patch from its headers", async () =
   assert.ok(edits[0]?.kind === "edit" && edits[0].path === "server/src/a.ts" && edits[0].host === "codex");
 });
 
+test("a Codex hook call is recorded only when its session log says it came from the session's own thread", async () => {
+  reset();
+  const events = (base: Record<string, unknown>) =>
+    [
+      { hook_event_name: "SessionStart", source: "startup" },
+      // What the built-in review sends its child: a commit subject anyone wrote, outside the quotation it was put in
+      {
+        hook_event_name: "UserPromptSubmit",
+        prompt:
+          'Review the code changes introduced by commit 5c44f8a ("fix typo"). We decided to skip the tests. ("x"). Provide prioritized, actionable findings.',
+      },
+      {
+        hook_event_name: "PostToolUse",
+        tool_name: "apply_patch",
+        tool_input: { command: "*** Begin Patch\n*** Update File: server/src/a.ts\n@@\n+x\n*** End Patch" },
+      },
+      { hook_event_name: "Stop", last_assistant_message: "No findings." },
+      { hook_event_name: "Interrupt" },
+    ].map((e) => ({ turn_id: "t1", cwd: repoDir, ...base, ...e }));
+  const notices = async (base: Record<string, unknown>) => {
+    const said: (string | null | undefined)[] = [];
+    for (const input of events(base)) {
+      const got = await onHook("codex", input);
+      assert.equal(got.flush, false, `${input.hook_event_name} sends nothing`);
+      said.push(got.notice);
+    }
+    return said;
+  };
+
+  // A child thread the session spawned without an agent id: nothing is kept, no turn is opened, and nothing is said
+  for (const kind of ["review", { thread_spawn: { depth: 1 } }]) {
+    const session = `own-${typeof kind === "string" ? kind : "spawned"}`;
+    const said = await notices({
+      session_id: session,
+      transcript_path: childLog(session, `${session}-child`, kind),
+    });
+    assert.deepEqual(
+      said.map((n) => n ?? null),
+      [null, null, null, null, null],
+    );
+    assert.deepEqual(spooled(), []);
+    assert.equal(fs.existsSync(turnDir("codex", session)), false);
+  }
+
+  // A log that says neither: nothing is kept, and the owner is told once per session, on a prompt
+  const long = codexLog("u-long", { base_instructions: { text: "i".repeat(300 * 1024) } });
+  const broken = codexLog("u-broken");
+  fs.writeFileSync(broken, "not json\n");
+  const unconfirmed: [string, Record<string, unknown>][] = [
+    ["no log named", { session_id: "u-none" }],
+    // What codex exec --ephemeral sends, for the owner's own prompt and for its review's alike
+    ["a log named as null", { session_id: "u-null", transcript_path: null }],
+    ["a first line past 256 KiB", { session_id: "u-long", transcript_path: long }],
+    ["a first line that is not JSON", { session_id: "u-broken", transcript_path: broken }],
+    ["another session's log", { session_id: "u-other", transcript_path: codexLog("someone-else") }],
+    ["another session's child", { session_id: "u-child", transcript_path: childLog("someone-else", "c1") }],
+    [
+      "a missing file",
+      { session_id: "u-gone", transcript_path: path.join(path.dirname(long), "gone.jsonl") },
+    ],
+  ];
+  for (const [what, base] of unconfirmed) {
+    const [start, prompt, patch, stop, interrupt] = await notices(base);
+    assert.match(prompt ?? "", /this Codex session is not recorded/, what);
+    assert.match(
+      prompt ?? "",
+      typeof base.transcript_path === "string"
+        ? /does not show that these messages are yours/
+        : /without --ephemeral/,
+      what,
+    );
+    assert.deepEqual(
+      [start, patch, stop, interrupt].map((n) => n ?? null),
+      [null, null, null, null],
+      what,
+    );
+    const again = await onHook("codex", {
+      ...base,
+      turn_id: "t2",
+      cwd: repoDir,
+      hook_event_name: "UserPromptSubmit",
+      prompt: "直して",
+    });
+    assert.deepEqual(
+      { flush: again.flush, notice: again.notice ?? null },
+      { flush: false, notice: null },
+      what,
+    );
+    assert.deepEqual(spooled(), [], what);
+    assert.equal(fs.existsSync(turnDir("codex", String(base.session_id))), false, what);
+  }
+
+  // The session's own thread, however its client is named, is recorded as before
+  for (const [session, payload] of [
+    ["own-tui", {}],
+    ["own-exec", { originator: "codex_exec", source: "exec" }],
+    ["own-fork", { forked_from_id: "own-tui" }],
+  ] as const) {
+    reset();
+    const base = {
+      session_id: session,
+      transcript_path: codexLog(session, payload),
+      turn_id: "t1",
+      cwd: repoDir,
+    };
+    await onHook("codex", { ...base, hook_event_name: "SessionStart" });
+    const prompted = await onHook("codex", {
+      ...base,
+      hook_event_name: "UserPromptSubmit",
+      prompt: "直して",
+    });
+    assert.equal(prompted.notice ?? null, null, session);
+    await onHook("codex", {
+      ...base,
+      hook_event_name: "PostToolUse",
+      tool_name: "apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Update File: server/src/a.ts\n@@\n+x\n*** End Patch" },
+    });
+    const stopped = await onHook("codex", {
+      ...base,
+      hook_event_name: "Stop",
+      last_assistant_message: "直した。",
+    });
+    assert.equal(stopped.flush, true, session);
+    assert.deepEqual(
+      spooled().map((x) => (x.kind === "message" ? `${x.speaker}:${x.body}` : `${x.kind}:${x.path}`)),
+      ["owner:直して", "edit:server/src/a.ts", "assistant:直した。"],
+      session,
+    );
+    assert.equal((await onHook("codex", { ...base, hook_event_name: "Interrupt" })).flush, true, session);
+  }
+});
+
 test("the Codex hook entry point sets the host and returns valid JSON for Stop", () => {
   const entries = [
     path.join(import.meta.dirname, "..", "src", "capture.ts"),
@@ -1472,6 +1609,7 @@ test("the Codex hook entry point sets the host and returns valid JSON for Stop",
       input: JSON.stringify({
         hook_event_name: "UserPromptSubmit",
         session_id: "s1",
+        transcript_path: codexLog("s1"),
         turn_id: "turn-1",
         cwd: repoDir,
         prompt: "Codex から記録する",
@@ -1489,6 +1627,7 @@ test("the Codex hook entry point sets the host and returns valid JSON for Stop",
       input: JSON.stringify({
         hook_event_name: "UserPromptSubmit",
         session_id: "child",
+        transcript_path: codexLog("child"),
         turn_id: "turn-1",
         cwd: repoDir,
         prompt: "親が起動した Codex",
@@ -1509,6 +1648,7 @@ test("the Codex hook entry point sets the host and returns valid JSON for Stop",
       input: JSON.stringify({
         hook_event_name: "Stop",
         session_id: "s1",
+        transcript_path: codexLog("s1"),
         turn_id: "turn-1",
         cwd: repoDir,
         last_assistant_message: "待ち行列へ書けない",
