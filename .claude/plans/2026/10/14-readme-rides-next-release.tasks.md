@@ -66,3 +66,6 @@ README.md だけの変更がバージョン検査を通り、doctor がそれを
 
 - 2026-10-14 / T01 / Codex のコミットのレビュー（c48b8dec、新しい会話）は指摘 0 件。read-only のためテストの実走は未検証と返った / 採否なし
 - 2026-10-14 / T03 / T02 の出荷レビューを待つ間に T03 を先にコミットした（依存は T01 だけ） / 並びはそのまま
+- 2026-10-14 / T02 / Codex のコミットのレビュー（2cecf7bf、新しい会話）は指摘 0 件。read-only のためテストの実走は未検証と返った / 採否なし
+- 2026-10-14 / T02 / review-shipping が、リポジトリが見えているときは README.md の無いインストールも、キャッシュどうしの README.md の違いも報告されなくなると挙げた / 計画の方針 4 どおりなので直さず、PR 本文の Declined findings に書く
+- 2026-10-14 / 全体 / Codex の全差分のレビュー（origin/main..2cecf7bf、high）は欠陥なし。`caffeinate -i bun run verify` は 2cecf7bf で exit 0（acceptance 140 pass、sql:reach 261 / 261、sql:live 13 / 13） / 採否なし
