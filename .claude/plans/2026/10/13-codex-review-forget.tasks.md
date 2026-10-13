@@ -142,6 +142,15 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
   - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）。その後に README の 1 文（`--ephemeral` の組み込みの review）を足し、`bun run check` → 終了コード 0
   - 結果: `bun run verify` → 出荷前レビューの指摘の直し（`sed` を外す、行の前後の空白、`forget_apply` の文面）の後の、コミットする作業ツリーでもう 1 回流して終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 450,015 バイト。配布前の確認（A8・A9）はこの直しの前の配布物で流した: 暗黙の skill の確認で Codex が使ったのは `cat <パス>` で、直しの影響を受けない
 
+- [x] T10: README の「記録しないときは 1 回知らせる」を、Codex が実際に表示する場面に合わせる
+  - 種別: 変更
+  - 計画: S6
+  - 依存: T06（直す文が T06 で入った）
+  - 変更: `README.md`, `README.ja.md`, `plugin/skills/forget/SKILL.md`
+  - 完了条件: `bun run check` → 終了コード 0。`rg -n "says so once" README.md` → 0 件。forget の Skill は、人のいない実行でホストが確認を自分で取り消しと答える場合（`claude -p`）を、持ち主が断った場合と分けて言う。README（英日）が、確かめられないセッションの通知は Codex のターミナルに 1 回出て `codex exec` には出ないこと、`--ephemeral` が `codex exec` の指定であることを言う
+  - コミット: `docs: say where Codex shows Sphica's notice for a session it does not record`
+  - 結果: `caffeinate -i bun run verify` → 終了コード 0（受け入れ 138 件 pass）。`bun run check` はその中で通っている。`rg -n "says so once" README.md` → 0 件
+
 ## 記録
 
 - 2026-10-13 / T01 / 変更欄を変えた。前: `server/src/codex-log.ts`, `server/src/deliver.ts`, `server/test/codex-log.test.ts` と 4 つのバージョンのファイル。後: それに `server/test/codex-log-file.ts`（テスト用のログを書く helper。T02 以降の capture と配信のテストでも使う）、`server/test/deliver.test.ts`（手元の helper をやめて共有のものを import）、`scripts/lib/bundle-budget.mjs` を足した / 理由: helper を 2 か所に持たないため。`plugin/dist/deliver.js` が 445,640 バイトになり上限 445,000 を超えたので、上限を 450,000 に上げた（T03・T05 でも deliver は増える。足りなければそのコミットで理由を書いて上げる）
@@ -175,3 +184,6 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 - 2026-10-13 / T06, T07, T08 / Codex のレビュー（新しい会話、コミット fd1fc524 と 3cbdfbe0、既定の effort）: 指摘 3 件、どれも P2。F1: 未追跡ファイル 1 件の読み取りそのものが固まると、時間の上限を越える（ファイルシステムが数秒止まる場合。読み取りを mock して再現）。F2: `less -O <SKILL.md> -` は標準入力をそのファイルへ書くのに、単純な 1 コマンドの読み取りと見られる。F3: forget の Skill が、持ち主がツールの承認を断った場合まで「このセッションは確認を出せない」と言う / F2・F3 は直す（修正タスク T09）。F2 はページャ（`less`・`more`・`bat`）を一覧から外す。F1 は直さない: 同期の読み取りを途中で止めるには読み取りを非同期に作り替える必要があり、ファイルシステムが秒単位で止まる状況では、その呼び出し本来の配信（DB の読み取り）も同じく止まる
 - 2026-10-13 / 全体 / Codex のレビューは、T04・T05 で 3 件、全差分で 1 件、直近 2 コミットで 3 件と、回を重ねても 0 件にならない（重さは P2 まで、信頼の境界に関わる指摘は無い）。T09 の後は手元の Codex のレビューをこれ以上は重ねず、持ち主に状況を伝えて PR に進む（memory `review-rounds-cap`）。PR では GitHub の Codex のレビューが走る
 - 2026-10-13 / 全体 / 配信の計測の 1 回目で 1 件だけ 610 秒止まった原因も Mac のスリープだった（`pmset -g log` に 13:02:57〜13:13:09 の 612 秒。その後の 2 回の流し直しと全体の 2 回目は問題なし）/ 長い検査は `caffeinate -i` を付けて流す
+- 2026-10-13 / PR 本文 / `prose-reviewer` の確認で、確かめていないことを事実として書いている箇所が出た（記録しないときの通知が画面に出るか、`codex review` が同じ形か）/ 一時の `CODEX_HOME` で実測した（Codex 0.162.1、各 1 回）。(1) UserPromptSubmit の hook が返す `systemMessage` は、TUI には `↳ Hook · …` と表示され、`codex exec` の標準出力には出ない。`--ephemeral` は `codex exec` だけの指定（`codex --help` には無い）なので、その通知は見えない。(2) `codex review --uncommitted`（hook は開始画面の「Trust all and continue」で信頼済みにした）は `codex exec review` と同じ形で、子のログは `source: {"subagent":"review"}`、hook の `additionalContext` は review の回答に届いた / README の文を事実に合わせる変更タスク T10 を足した
+- 2026-10-13 / T08, T09 / `review-shipping`（コミット済みの `fd1fc524..4b0b2472`）の指摘 3 件の採否。(1) forget の Skill が `claude -p` を「ホストが呼び出しを断る」実行と言うが、Claude Code 2.1.296 の `-p` は承認済みのツールを断らず、確認のフォームに 7 ms で `cancel` と答える（probe の MCP サーバーで実測）。`forget_apply` は「You cancelled」と返し、Skill は持ち主が断ったと読んでしまう → 直す（T10 に入れた）。(2) `localChange` が時間の上限を `untrackedFiles` へ渡すことを確かめるテストが無い（上限を無限にしても全部通る）→ 足さない。git は通って未追跡の読み取りの手前で時間が切れる状況を、時計を差し替えずに作れない。`untrackedFiles` の打ち切りそのものはテストがある。(3) この変更の外: `server/src/review.ts` の `parseDiff` が、削除されたファイルの直後のファイルの最初の hunk の追加行を落とす（main でも同じ。再現あり）→ この PR では直さない。持ち主に報告し、issue にするかを聞く
+- 2026-10-13 / T08, T09 / 同じレビューで確かめられたこと: fd1fc524 と 4b0b2472 の `localChange` を同じ checkout（変更・削除・staged の新規、未追跡 12 種類）で流し、結果の JSON 263,835 バイトと digest が一致。pack した `dist/deliver.js` に直しが入っていて、tarball の検査は 0
