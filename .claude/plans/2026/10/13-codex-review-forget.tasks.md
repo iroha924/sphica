@@ -53,7 +53,7 @@ base: main
 
 `agent_id` の付かない子のスレッド（組み込みの review）への配信を、子の id で数える。子に見せた記録を親に見せたことにしない。
 
-- [ ] T03: 配信の会話の識別を `deliver` の最初で 1 回決め、ログ・既読と予算・shell の snapshot と後の配信で使う
+- [x] T03: 配信の会話の識別を `deliver` の最初で 1 回決め、ログ・既読と予算・shell の snapshot と後の配信で使う
   - 種別: 修正
   - 計画: S3
   - 依存: T01（子のスレッドを確かめる `codexThread` が要る）
@@ -61,6 +61,9 @@ base: main
   - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver-codex.test.ts` → 直す前は、子のスレッドがファイル B を読んで B の記録を受け取った後、親が B を読んでも何も返らず、「親にも届く」のテストが落ちる
   - 完了条件: `bun run verify` → 終了コード 0。テストで、子が B を読んだ後に親が B を読むと親にも届く / 親の既読が子への配信を止めない / 子の shell の後の配信が親の snapshot と混ざらない / 配信のログの `agent_id` が子の id になる / ログが読めないときは今までどおり親として数える / Claude Code の配信は変わらない
   - コミット: `fix(deliver): count a Codex child thread without an agent id as its own conversation`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/deliver-codex.test.ts` → 直す前（deliver.ts は元のまま、テストだけ足した状態）は tests 7、fail 2。1 つは `the session was never shown it`（actual は空文字: 子に見せた記録が親に見せたことになっている）、もう 1 つは親の Post が子の snapshot を取って文面を返した。直した後は pass 7
+  - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 446,987 バイト
+  - 結果: `node dist/deliver.js codex` → `review-shipping` が pack した配布物で 40 回ずつ測り、ログの読み取りの有無で中央値は 54〜57 ms のまま（250 KB の 1 行目でも +2 ms ほど）。1 か所ずつ元に戻す変異 6 通りは、どれも新しいテストのどちらかが落ちた。`~/.codex/sessions` の実際のログ 1,004 件の 1 行目は最大 23,446 バイト
 
 ## P3: Codex の review の前に、過去の決定を届ける
 
@@ -102,3 +105,6 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 - 2026-10-13 / T02 / 実測を足した（Codex 0.162.1、TUI、1 回中 1 回）: 走っているターンを Esc で止めると Interrupt の hook が出て、入力は `cwd, hook_event_name, model, permission_mode, session_id, transcript_path, turn_id`。ログの 1 行目は `payload.id === session_id`、`thread_source` は `user`。capture が読む 5 つのイベント全部が `transcript_path` を持つ
 - 2026-10-13 / T02 / `review-shipping` の指摘: `codex exec --ephemeral` は `transcript_path` が null で、修正後は記録されなくなる（今は記録される）。Claude も実測し、review の子も同じ欄になることを確かめた / 持ち主に聞き、記録しないと決まった。plan を直し（変更履歴）、通知の文面をログのパスが無いときと有るときで分け、テストに null の入力を足した。README への記載は T06
 - 2026-10-13 / T02 / `review-shipping` の指摘のうち採らなかったもの: 通知の印が一時ディレクトリにあり、TMPDIR が呼び出しごとに違うと通知がもう 1 回出る / 配信の印と同じ性質で、記録は止まらないので変えない
+- 2026-10-13 / T02 / Codex のタスクごとのレビュー（新しい会話、コミット 8f844ca2、high）: 指摘 0 件。読んだだけで、テストは流していないと申告 / 採否の判断は不要
+- 2026-10-13 / T03 / `review-shipping` の指摘 3 件の採否。(1) review の重複抑制のキーが session のまま → T05 で直す（計画どおり）。(2) revision と unavailable の 1 回きりの印は session ごとで、子と親が共有する（この変更の前から同じ）→ 変えない。会話ごとにすると Claude Code の subagent ごとに通知が出るようになり、子が親より先に revision の食い違いに当たる場面は見ていない。(3) `Entry` のコメントが subagent だけを言っていた → 直した。`db/schema.sql` の `delivery.agent_id` のコメントは schema のファイルなので触っていない
+- 2026-10-13 / T03 / 配信の一覧（`server/src/delivery-view.ts`）は `agent_id` のある行を subagent と数えるので、Codex の review の子は `subagent <スレッドの id>` と出る / 数え方としては合っているので変えない

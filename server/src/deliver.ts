@@ -15,7 +15,7 @@ import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
-import { codexThread, ownThread } from "./codex-log.ts";
+import { childThread, codexThread, ownThread } from "./codex-log.ts";
 import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
@@ -387,7 +387,15 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
 const agentOf = (input: { agent_id?: unknown }): string | null =>
   typeof input.agent_id === "string" && /^[\x21-\x7e]{1,200}$/.test(input.agent_id) ? input.agent_id : null;
 
-/** Deliveries of one conversation: the main one, or one subagent, which starts with its own context. */
+/**
+ * The conversation a hook call belongs to: the subagent the host names, else a Codex child thread that carries no agent id (its built-in
+ * review), which only the session log tells from the session's own thread; null is the main conversation. A log that does not say
+ * leaves the call with the main one.
+ */
+const conversation = (input: HookInput, host: Host): string | null =>
+  agentOf(input) ?? (host === "codex" ? childThread(input, codexThread(input)) : null);
+
+/** Deliveries of one conversation: the main one, or one subagent or child thread, which starts with its own context. */
 const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>
   agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent);
 
@@ -1030,7 +1038,7 @@ function onceUnavailable(session: string): boolean {
   return markOnce("unavailable", session);
 }
 
-/** Where one delivery is logged: its session, the subagent it ran in, and its event. */
+/** Where one delivery is logged: its session, the subagent or child thread it ran in, and its event. */
 type Entry = {
   projectId: number;
   host: Host;
@@ -1131,6 +1139,7 @@ async function snapshotCall(
   place: { root: string; key: string },
   host: Host,
   input: HookInput,
+  who: string | null,
   started: number,
 ): Promise<void> {
   const paths = await deliverablePaths(db, projectId);
@@ -1139,7 +1148,7 @@ async function snapshotCall(
   saveCache(place.root, cache, paths);
   const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
   if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
-  const key = snapshotKey(host, String(input.session_id), agentOf(input), String(input.tool_use_id));
+  const key = snapshotKey(host, String(input.session_id), who, String(input.tool_use_id));
   writeSnapshot({ v: 1, key, at: iso(started), root: place.root, project: place.key, paths: states });
 }
 
@@ -1147,9 +1156,14 @@ async function snapshotCall(
  * After a shell call (PostToolUse, and PostToolUseFailure in Claude Code: a failed command may have written before it failed): the
  * records on the watched files whose content changed since its snapshot. Never says Sphica is unavailable: shell calls are frequent.
  */
-async function afterShell(input: HookInput, host: Host, file: string, started: number): Promise<string> {
+async function afterShell(
+  input: HookInput,
+  host: Host,
+  agent: string | null,
+  file: string,
+  started: number,
+): Promise<string> {
   if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
-  const agent = agentOf(input);
   const base = { host, session: input.session_id, agent, call: input.tool_use_id };
   let line: Record<string, unknown> = { ...base, event: "post_shell" };
   let db: ReadonlyKysely<DB> | null = null;
@@ -1220,9 +1234,10 @@ export async function deliver(
 ): Promise<string> {
   const started = Date.now();
   const name = input.hook_event_name;
+  const who = conversation(input, host);
   // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
   if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
-    return afterShell(input, host, file, started);
+    return afterShell(input, host, who, file, started);
   const snap =
     name === "PreToolUse" &&
     SHELL_TOOLS.has(input.tool_name ?? "") &&
@@ -1284,11 +1299,11 @@ export async function deliver(
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
     if (snap)
-      await snapshotCall(db, pid, place, host, input, started).catch((e) =>
+      await snapshotCall(db, pid, place, host, input, who, started).catch((e) =>
         trialLog({
           host,
           session: input.session_id,
-          agent: agentOf(input),
+          agent: who,
           call: input.tool_use_id,
           event: "snapshot_failed",
           error: head(reason(e), 200),
@@ -1335,7 +1350,7 @@ export async function deliver(
               pid,
               rels,
               sessionId(pid, host, session),
-              agentOf(input),
+              who,
               shell ? "named" : "reading",
             )
           : event === "prompt"
@@ -1375,7 +1390,7 @@ export async function deliver(
       projectId: pid,
       host,
       external: session,
-      agent: agentOf(input),
+      agent: who,
       event,
       branch: branchOf(place.root),
     };

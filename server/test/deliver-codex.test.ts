@@ -14,6 +14,7 @@ import { inTransaction } from "../src/db.ts";
 import { CONFIRM, deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
+import { childLog, codexLog } from "./codex-log-file.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
@@ -92,6 +93,7 @@ async function world() {
   return {
     db,
     repo,
+    session,
     run,
     patch,
     bash,
@@ -259,5 +261,126 @@ test("a long lead or a rich record never empties an edit delivery: a line that d
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a Codex child thread without an agent id is a conversation of its own: what it is shown is not counted as shown to the session", async () => {
+  const w = await world();
+  const made: string[] = [];
+  const named = (file: string) => {
+    made.push(path.dirname(file));
+    return { transcript_path: file };
+  };
+  try {
+    const own = named(codexLog(w.session));
+    const child = (id: string, kind: unknown = "review") => named(childLog(w.session, id, kind));
+    const first = child("child-1");
+    // The built-in review's child reads a file, as it does for files outside the change too
+    assert.match(await w.bash("cat src/dates.ts", first), /trace:ext-s1\/utc /);
+    assert.equal(await w.bash("cat src/dates.ts", first), "", "once per conversation");
+    assert.match(
+      await w.bash("cat src/dates.ts", own),
+      /trace:ext-s1\/utc /,
+      "the session was never shown it",
+    );
+    // What the session was shown does not keep a later child from it, whatever kind of child it is
+    assert.match(await w.bash("cat src/db.ts", own), /trace:ext-s1\/sqlite /);
+    assert.match(await w.bash("cat src/db.ts", child("child-2")), /trace:ext-s1\/sqlite /);
+    assert.match(
+      await w.bash("cat src/db.ts", child("child-3", { thread_spawn: { depth: 1 } })),
+      /trace:ext-s1\/sqlite /,
+    );
+    // An agent id the host sends is the conversation, whatever the log says
+    assert.match(await w.bash("cat src/db.ts", { ...first, agent_id: "sub" }), /trace:ext-s1\/sqlite /);
+    // A log that says nothing, or another session's child, leaves the call with the session, which was shown the record already
+    assert.equal(
+      await w.bash("cat src/db.ts", { transcript_path: path.join(os.tmpdir(), "no-such-log.jsonl") }),
+      "",
+    );
+    assert.equal(await w.bash("cat src/db.ts", named(childLog("another-session", "child-9"))), "");
+    assert.deepEqual(
+      w.db.owner
+        .prepare("select agent_id, event from delivery order by id")
+        .all()
+        .map((r) => `${r.agent_id ?? "main"}:${r.event}`),
+      [
+        "child-1:pre_read",
+        "main:pre_read",
+        "main:pre_read",
+        "child-2:pre_read",
+        "child-3:pre_read",
+        "sub:pre_read",
+      ],
+    );
+    // Claude Code names no such log, and a path it happens to send is not read
+    const claude = (extra: Record<string, unknown>) =>
+      deliver(
+        {
+          session_id: "claude-session",
+          cwd: w.repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Read",
+          tool_input: { file_path: path.join(w.repo, "src/open.ts") },
+          ...extra,
+        } as never,
+        "claude-code",
+        w.db.file,
+      );
+    assert.match(await claude(named(childLog("claude-session", "child-1"))), /trace:ext-s1\/opener /);
+    assert.equal(await claude({}), "", "the same conversation");
+  } finally {
+    await w.done();
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a shell call in a Codex child thread keeps its own snapshot, and what it changed is shown to the child alone", async () => {
+  const w = await world();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  const saved = { home: process.env.SPHICA_HOME, on: process.env.SPHICA_SHELL_WRITE_DELIVERY };
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  const made: string[] = [];
+  const named = (file: string) => {
+    made.push(path.dirname(file));
+    return { transcript_path: file };
+  };
+  try {
+    const own = named(codexLog(w.session));
+    const child = named(childLog(w.session, "child-1"));
+    fs.mkdirSync(path.join(w.repo, "src"));
+    const write = (text: string) => fs.writeFileSync(path.join(w.repo, "src/dates.ts"), text);
+    write("export const a = 1;\n");
+    const call = (event: string, id: string, who: Record<string, unknown>) =>
+      w.run({
+        hook_event_name: event,
+        tool_name: "Bash",
+        tool_input: { command: "python3 tools/gen.py" },
+        tool_use_id: id,
+        ...who,
+      });
+    await call("PreToolUse", "call-1", child);
+    write("export const a = 2;\n");
+    // The session's own call under the same id has no snapshot: the child's is not taken for it
+    assert.equal(await call("PostToolUse", "call-1", own), "");
+    assert.match(await call("PostToolUse", "call-1", child), /trace:ext-s1\/utc /);
+    // Shown to the child, the record is still new to the session
+    await call("PreToolUse", "call-2", own);
+    write("export const a = 3;\n");
+    assert.match(await call("PostToolUse", "call-2", own), /trace:ext-s1\/utc /);
+    assert.deepEqual(
+      w.db.owner
+        .prepare("select agent_id from delivery where reason = 'shell_write' order by id")
+        .all()
+        .map((r) => r.agent_id ?? "main"),
+      ["child-1", "main"],
+    );
+  } finally {
+    if (saved.home === undefined) delete process.env.SPHICA_HOME;
+    else process.env.SPHICA_HOME = saved.home;
+    if (saved.on === undefined) delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    else process.env.SPHICA_SHELL_WRITE_DELIVERY = saved.on;
+    await w.done();
+    for (const dir of [home, ...made]) fs.rmSync(dir, { recursive: true, force: true });
   }
 });
