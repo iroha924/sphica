@@ -1943,3 +1943,79 @@ test("search takes as_of only as a time with its offset, for record search alone
     await db.done();
   }
 });
+
+// timeline is a second shape of read's reply: the same refs, an overview in place of the full record
+test("read takes timeline as a boolean: an overview of each record's chain when true, the full record when false or left out", async () => {
+  const db = tempDb();
+  const repo = tempDir("sphica-timeline-");
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/timeline.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/timeline", "o/timeline");
+  manyAdopted(db, p, 2, (i) => ({ key: `trace:ext-s1/k${i}`, kind: "decision", stance: "do" }));
+  const [old, next] = (
+    db.owner.prepare("select id, run_id from unit order by id").all() as { id: number; run_id: number }[]
+  ).map((r) => r);
+  if (!old || !next) throw new Error("two records are needed");
+  insert(db, "unit_link", {
+    from_unit: next.id,
+    to_unit: old.id,
+    kind: "supersedes",
+    run_id: next.run_id,
+    added_at: at("2026-09-28T00:00:00Z"),
+  });
+  insert(db, "unit_replacement", {
+    from_unit: next.id,
+    to_unit: old.id,
+    run_id: next.run_id,
+    started_at: at("2026-09-28T00:00:00Z"),
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const read = async (args: Record<string, unknown>) => {
+    const r = await client.callTool({ name: "read", arguments: { cwd: repo, ...args } });
+    return { text: (r.content as { text: string }[])[0]?.text ?? "", isError: r.isError === true };
+  };
+  try {
+    const timeline = await read({ refs: ["trace:ext-s1/k0"], timeline: true });
+    assert.equal(timeline.isError, false);
+    assert.match(
+      timeline.text,
+      /^Timelines are overviews, oldest first: [^\n]+\n<past-records id="[0-9a-f]+">\n/,
+    );
+    assert.match(timeline.text, new RegExp(`^## Timeline of trace:ext-s1/k0 \\(u${old.id}\\)$`, "m"));
+    assert.match(
+      timeline.text,
+      new RegExp(
+        `^2026-09-28T00:00:00\\.000Z trace:ext-s1/k1 \\(u${next.id}\\) replaced trace:ext-s1/k0 \\(u${old.id}\\)$`,
+        "m",
+      ),
+    );
+    assert.ok(Buffer.byteLength(timeline.text) <= READ_BUDGET);
+    // false and left out are the full record, as before
+    for (const args of [{ timeline: false }, {}]) {
+      const full = await read({ refs: ["trace:ext-s1/k0"], ...args });
+      assert.match(full.text, /^<past-records id="[0-9a-f]+">\n/);
+      assert.match(
+        full.text,
+        new RegExp(`^trace:ext-s1/k0 \\(u${old.id}, revision \\d+\\): decision do, `, "m"),
+      );
+      assert.doesNotMatch(full.text, /Timeline/);
+    }
+    // A source is not a record: its line says so and the record beside it is still shown
+    const mixed = await read({ refs: ["s1", `u${next.id}`], timeline: true });
+    assert.match(mixed.text, /^s1: a timeline takes a record's key or u<id>$/m);
+    assert.match(mixed.text, new RegExp(`^## Timeline of trace:ext-s1/k1 \\(u${next.id}\\)$`, "m"));
+    // Anything but a boolean is refused before the tool runs
+    assert.equal((await read({ refs: ["trace:ext-s1/k0"], timeline: "yes" })).isError, true);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});

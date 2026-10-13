@@ -29,6 +29,7 @@ import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
 import { stopOnOverflow } from "./stdio-limit.ts";
 import { head, reason } from "./text.ts";
+import { timelineRefs } from "./timeline.ts";
 
 requireRuntime();
 const db = openReader();
@@ -257,6 +258,9 @@ server.registerTool(
     description:
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
       "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source. " +
+      "It shows a record as it is now, also after a search with as_of. timeline: true gives an overview instead of the full record: the " +
+      "records it replaced or was replaced by, what happened to each and when, with each reason and its sources, and the findings, dead " +
+      "ends, and questions saved by the same runs or anchored at the same places, oldest first. " +
       `A reply stays within ${READ_BUDGET / 1024} KiB: when it stops, it names the refs to read next, the one it cut first.`,
     inputSchema: z
       .object({
@@ -268,6 +272,13 @@ server.registerTool(
             "Record keys, u<id>, or s<id>; s<id>@<byte> and u<id>@<byte>:<digest>, as a reply names them, go on from where it stopped",
           ),
         cwd: CWD,
+        timeline: z
+          .boolean()
+          .optional()
+          .describe(
+            "true: the timeline of each record in refs (keys or u<id> only) instead of its full text. A summary, not the quoted words; " +
+              "what does not fit is named after it by u<id>",
+          ),
       })
       .strict(),
     annotations: READ_ONLY,
@@ -276,7 +287,9 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
-      return text(await readRefs(db, p.id, a.refs, p.root));
+      return text(
+        a.timeline ? await timelineRefs(db, p.id, a.refs) : await readRefs(db, p.id, a.refs, p.root),
+      );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

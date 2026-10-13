@@ -42,6 +42,7 @@ import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import { ftsQuery } from "../../src/text.ts";
+import { timelineRefs } from "../../src/timeline.ts";
 import { logCall } from "../../src/trace.ts";
 import { childLog, codexLog } from "../../test/codex-log-file.ts";
 import type { Step, World } from "./load.ts";
@@ -716,6 +717,10 @@ export async function createDriver(world: World): Promise<Driver> {
         const r = await exportOf(x.records, x.path);
         if (!("document" in r)) assert.fail(r.error);
         exported = r.document;
+        return;
+      }
+      if (Array.isArray(step.timeline)) {
+        lastRead = await timelineRefs(db(), await projectId(), step.timeline as string[]);
         return;
       }
       if (Array.isArray(step.read)) {

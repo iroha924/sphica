@@ -57,6 +57,15 @@ base: main
   - 結果: `sed -i '' 's/const EXTRA_MAX = 200;/const EXTRA_MAX = 20;/' src/search.ts` → 上限を 20 に書き換えると上限のテストが落ち、200 に戻すと通る
   - 結果: `bun run test` → 終了コード 0（1267 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 247 / 247
 
+- [ ] T10: 後から保存された記録を候補の上限まで読み、読み切れなかったときと 0 件のときにそう書く
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象の、保存の古い順に読む処理が要る）
+  - 変更: `server/src/search.ts`, `server/src/mcp.ts`, `server/test/search.test.ts`, `server/test/plugin.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="as of a past time|search takes as_of" test/search.test.ts test/plugin.test.ts` → 古くて弱い一致が 200 件を占めるとき後ろの一致が `later` に出ない、読み切れなかったことが返信に出ない、0 件の返信が As of の行で始まらない、の 4 件が落ちる
+  - 完了条件: `bun run test` → 終了コード 0。後から保存された記録は保存の古い順に 2000 件まで読まれ、一致が無いまま打ち切ったときは返信がそう言い、0 件の返信も As of の行で始まる
+  - コミット: `fix(search): read later records up to the cap and say when a past view found nothing`
+
 ## P2: read の timeline
 
 記録の ref を渡すと、置き換えの連なりと結び付く記録を、時刻順の概要で読める。
@@ -71,13 +80,15 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/timeline.test.ts` → 7 件 pass（3 段の連なり、終わった置き換え・提案・時刻不明、後からの追加と撤回、連なりと結び付く記録の上限、予算と必ず残す行、改行を含む保存文字列、記録でない ref）
   - 結果: `python3 <scratchpad>/mutate-timeline.py` → `review-shipping` が「テストが見分けていない」と挙げた箇所の書き換え 16 個（同じ時刻の並び 3、有効な置き換えを提案とも出す、同じ場所の規則 3、別プロジェクト、未サポートの記録、必ず残す行、tail を数えない、取りこぼしの後も続ける、key の整形、撤回の時刻、source の上限 2）を、テストを直した後にそれぞれ当てて流すと 16 個とも落ちた
   - 結果: `bun run test` → 終了コード 0（1276 件 pass、`timeline.ts` の行の網羅 98.78%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
-- [ ] T04: MCP の `read` に `timeline` を足す（引数、ref ごとのエラー、description、受け入れケース）
+- [x] T04: MCP の `read` に `timeline` を足す（引数、ref ごとのエラー、description、受け入れケース）
   - 種別: 追加
   - 計画: S2, S3
   - 依存: T03（timeline を組み立てる関数が無いと、引数を渡す先が無い）
-  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/test/acceptance-cases.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
   - 完了条件: `bun run test && bun run acceptance` → どちらも終了コード 0。受け入れケース（timeline）と入力のテスト（`timeline: false`、`s<id>` と続きの ref、見つからない ref との混在）は、実装の前に流して落ちることを確かめてある
   - コミット: `feat(mcp): take timeline in read`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="read takes timeline" test/plugin.test.ts` → `mcp.ts` を HEAD に戻すと落ちた（`timeline` が未知の引数として断られる）。戻すと通った。受け入れケース retrieval-15 は、driver の step が無い間は流せないので、red は MCP のテストで取った
+  - 結果: `bun run test` → 終了コード 0（T03・T04 のツリーで 1274 件 pass）。`bun run verify` → 終了コード 0（`sql:reach` 260 / 260、受け入れ 140 件 pass、`mcp.js` は 1.71 MB で上限内）
 
 ## P3: 利用者向けの文面
 
@@ -129,3 +140,5 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T03 / 変更欄を変えた。前: `server/src/timeline.ts`, `server/test/timeline.test.ts`。新: それに `server/src/read.ts` を足した / `read` が記録を ref から引く処理（`unitView` の中にあった）を `unitByRef` として出し、timeline と共有した
 - 2026-10-13 / T03 / plan は、引退の理由の source が消えているとき `its source is no longer kept` と書くとしていた。理由の行が無い anchor は「記録されなかった」と「forget で消えた」を見分けられない（`read` も `reason not recorded` と出す） / `the words that retired it are not recorded or no longer kept` と書く
 - 2026-10-13 / T03, T04 / `review-shipping`: 止める指摘なし。`read` を `timeline` 無し・`timeline: false` で呼んだ返信は、v0.6.54 の bundle と 19 通り比べて差が無いと報告した（こちらでは流し直していない）。指摘 13 件のうち、テストの穴 10 件は採用して T03 の中でテストを直した。長い path が 1 行で予算を使い切り、古い行を全部落とす件（11）は採用し、path と symbol を切るようにした。残した ref を frame の外に JSON で出す件（12）は `read` と同じ作りで、呼び出し側が送った文字列なので直さない。コミット時の hook が作業ツリー全体を見る件（13）は、T03・T04・T10 を合わせたツリーで全テストと静的検査が通ることを確かめてからコミットする
+- 2026-10-13 / T04 / 変更欄を変えた。前: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`。新: それに `server/test/acceptance-cases.test.ts`（retrieval の件数 14 → 15）を足した / 受け入れケースの件数はテストが固定している
+- 2026-10-13 / T02, T09 / Codex のコミットのレビュー（d2437320、e75bff21）: F1（保存の古い順に 200 件だけ読むので、古くて弱い一致が 200 件を占めると後ろの一致が出ず、打ち切ったことも出ない。再現つき）と F2（0 件のとき、時刻の意味を説明する行が返らない）。どちらも採用 / 修正タスク T10 を足した。T09 の直しが F1 を生んだので、「修正が新しい欠陥を生む」の 1 回目に数える

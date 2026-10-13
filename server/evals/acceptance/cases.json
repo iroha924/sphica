@@ -15,6 +15,7 @@
     "edit_file": "change a world file in the temp repository and commit",
     "search": "call the MCP search tool; with as_of { before: \"trace\" }, as of just before the latest trace step",
     "read": "call the MCP read tool",
+    "timeline": "call the MCP read tool with timeline: true for the given refs",
     "status": "call the MCP status tool",
     "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
@@ -1350,6 +1351,37 @@
         },
         {
           "hits_exclude": "trace:s-en-npm/npm"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-15",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "The timeline of a successor shows the decision it replaced, when the replacement took effect, and the reason, in one reply",
+      "given": [
+        {
+          "case": "status-02"
+        }
+      ],
+      "when": {
+        "timeline": ["trace:s-en-npm/npm"]
+      },
+      "then": [
+        {
+          "read_contains": "## Timeline of trace:s-en-npm/npm"
+        },
+        {
+          "read_contains": "saved: decision do, Use npm again"
+        },
+        {
+          "read_contains": "Why: pnpm broke Windows contributors"
+        },
+        {
+          "read_contains": ") replaced harvest:12/pnpm"
+        },
+        {
+          "read_contains": "became superseded: superseded by trace:s-en-npm/npm"
         }
       ]
     },
