@@ -313,7 +313,9 @@ server.registerTool(
         // The model cannot answer this: the host shows it to the person. Anything but a matching typed count stops here
         const refused = (why: string) => new Error(`${why}, so nothing was forgotten`);
         if (!server.server.getClientCapabilities()?.elicitation)
-          throw refused("This host cannot ask you directly (run /sphica:forget in Claude Code)");
+          throw refused(
+            "This host cannot ask you directly (run forget in an interactive Claude Code or Codex session)",
+          );
         let answer: Awaited<ReturnType<typeof server.server.elicitInput>>;
         try {
           answer = await server.server.elicitInput(

@@ -653,36 +653,60 @@ test("a Codex review is its built-in review's child thread, a skill named in the
     delete process.env.SPHICA_REVIEW_COMMANDS;
     delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
 
-    // A skill the model picks: the shell command names the skill's file, in any reader and either slash
+    // A skill the model picks: one plain command that prints the skill's file, in any reader and either slash
     assert.deepEqual(shell("cat /home/u/.codex/skills/my-review/SKILL.md"), { name: "my-review", args: "" });
+    assert.equal(shell("cat .agents/skills/my-review/SKILL.md")?.name, "my-review");
+    assert.equal(shell("nl -ba plugin/skills/code-review/SKILL.md")?.name, "code-review");
+    assert.equal(shell("  /bin/cat ~/.codex/skills/my-review/SKILL.md docs/notes.md")?.name, "my-review");
+    assert.equal(shell('cat "$HOME/.codex/skills/my-review/SKILL.md"')?.name, "my-review");
+    assert.equal(shell("head -80 .codex/skills/review/SKILL.md\n")?.name, "review");
+    assert.equal(shell(`more "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"`)?.name, "code-review");
     assert.equal(
-      shell(`sed -n '1,80p' "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"`)?.name,
+      shell('Get-Content "C:\\Users\\John Smith\\.codex\\skills\\code-review\\SKILL.md"')?.name,
       "code-review",
     );
-    assert.equal(shell("cd /repo && head -50 .codex/skills/review/SKILL.md | cat")?.name, "review");
+    assert.equal(shell("cat.exe skills\\my-review\\SKILL.md")?.name, "my-review");
     assert.equal(shell("cat ~/.codex/skills/deploy/SKILL.md"), null);
     assert.equal(shell("cat skills/my-review/SKILL.md.bak"), null);
     assert.equal(shell("cat skills/my-review/README.md"), null);
-    assert.equal(
-      shell('Get-Content "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"')?.name,
-      "code-review",
-    );
-    assert.equal(shell("/bin/cat skills/my-review/SKILL.md 2>/dev/null")?.name, "my-review");
-    assert.equal(shell("git status\ncat skills/my-review/SKILL.md")?.name, "my-review");
-    // Naming a skill's file is not reading the skill: finding, staging, counting, and writing it are no review
-    for (const command of [
-      "find . -path '*/skills/code-review/SKILL.md'",
-      "git add skills/my-review/SKILL.md && git commit -m x",
-      "rg -l TODO plugin/skills/review/SKILL.md",
-      "wc -l .claude/skills/codex-review/SKILL.md",
-      "cat > skills/review/SKILL.md <<'EOF'",
-      "cat notes.md > skills/my-review/SKILL.md",
-      "git diff -- skills/my-review/SKILL.md",
-      "echo cat skills/my-review/SKILL.md",
-    ])
-      assert.equal(shell(command), null, command);
     assert.equal(shell("npm test"), null);
     assert.equal(shell("cat skills/my-review/SKILL.md", [], { agent_id: "sub" }), null);
+    // Naming a skill's file is not reading the skill: finding, staging, and counting it are no review
+    for (const command of [
+      "find . -path '*/skills/code-review/SKILL.md'",
+      "git add skills/my-review/SKILL.md",
+      "rg -l TODO plugin/skills/review/SKILL.md",
+      "wc -l .claude/skills/codex-review/SKILL.md",
+      "git diff -- skills/my-review/SKILL.md",
+      "echo cat skills/my-review/SKILL.md",
+      // sed prints a file and also rewrites one in place, so it is not taken for a reader at all
+      "sed -n '1,80p' skills/my-review/SKILL.md",
+      "sed -i 's/old/new/' skills/my-review/SKILL.md",
+      "sed -i '' -e 's/a/b/' .codex/skills/code-review/SKILL.md",
+      "sed -i 's#skills/my-review/SKILL.md#skills/code-review/SKILL.md#' README.md",
+      "tee skills/my-review/SKILL.md",
+      "cp notes.md skills/my-review/SKILL.md",
+    ])
+      assert.equal(shell(command), null, command);
+    // A line that chains, pipes, redirects, substitutes, or runs to a second line is not read: what it prints is not told without a
+    // shell's grammar, so a skill read that way gets no review, and a write is never taken for a read
+    for (const command of [
+      "cd /repo && cat .codex/skills/review/SKILL.md",
+      "cat skills/my-review/SKILL.md | head -50",
+      "git status; cat skills/my-review/SKILL.md",
+      "git status\ncat skills/my-review/SKILL.md",
+      "# Read the skill's instructions\ncat skills/my-review/SKILL.md",
+      "sed -n '1,200p;201q' skills/my-review/SKILL.md",
+      "cat 2>/dev/null skills/my-review/SKILL.md",
+      "cat skills/my-review/SKILL.md > /tmp/copy.md",
+      "cat notes.md > skills/my-review/SKILL.md",
+      'cat notes.md >> "/Users/John Smith/.codex/skills/my-review/SKILL.md"',
+      "cat > skills/review/SKILL.md <<'EOF'",
+      "cat <<EOF\ncat skills/my-review/SKILL.md\nEOF",
+      "cat `ls skills/my-review/SKILL.md`",
+      "cat $(echo skills/my-review/SKILL.md)",
+    ])
+      assert.equal(shell(command), null, command);
     // Sphica's own review checks the change itself: its file is told by where it is, since its directory is named review like any other
     const mine = [
       "/p/cache/sphica/sphica/0.6.53/skills/review/SKILL.md",
@@ -748,14 +772,19 @@ function codexSession(w: { db: TempDb; repo: string }) {
     return file;
   };
   const own = named(codexLog(session));
-  const call = (input: Record<string, unknown>, log: string = own) =>
-    deliver({ session_id: session, cwd: w.repo, transcript_path: log, ...input }, "codex", w.db.file);
+  const call = (input: Record<string, unknown>, log: string = own, started?: number) =>
+    deliver(
+      { session_id: session, cwd: w.repo, transcript_path: log, ...input },
+      "codex",
+      w.db.file,
+      started,
+    );
   return {
     session,
     /** A new child thread of the kind the built-in review starts */
     child: (id: string) => named(childLog(session, id)),
-    prompt: (text: string, log?: string, extra: Record<string, unknown> = {}) =>
-      call({ hook_event_name: "UserPromptSubmit", prompt: text, ...extra }, log),
+    prompt: (text: string, log?: string, extra: Record<string, unknown> = {}, started?: number) =>
+      call({ hook_event_name: "UserPromptSubmit", prompt: text, ...extra }, log, started),
     bash: (command: string, log?: string) =>
       call({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } }, log),
     rows: () =>
@@ -895,6 +924,15 @@ test("a review that has no time left says so, and takes nothing from the deliver
     const got = await cx.prompt("$my-review #12 src/old.ts");
     assert.match(got, /could not check this review against past decisions: it names a pull request/);
     assert.match(got, /trace:ext-s1\/old /);
+    // A hook that started long ago leaves the review no time: it says so instead of reading the change, and the prompt's record comes
+    const slow = await cx.prompt("$my-review src/old.ts", undefined, {}, Date.now() - 10_000);
+    assert.match(
+      slow,
+      /could not check this review against past decisions: the change could not be read in time/,
+    );
+    assert.doesNotMatch(slow, /checked 1 changed path/);
+    assert.match(slow, /trace:ext-s1\/old /);
+    assert.match(await cx.prompt("$my-review src/old.ts"), /checked 1 changed path against origin\/main/);
   } finally {
     cx.clean();
     await w.done();

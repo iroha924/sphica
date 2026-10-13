@@ -91,17 +91,34 @@ base: main
   - 結果: `node server/evals/scale/run.ts` → 直した後の作業ツリーで終了コード 0、99 行とも problems none。記録 1 万件（uniform）の中央値は prompt 143〜191 ms（前 130〜172）、read 69 ms（前 64）、名指しの shell 133 ms（前 124）、review 304〜313 ms（前 263〜272）、session start 78 ms（前 79）で、どれも 1 秒以内
   - 結果: `node dist/deliver.js codex` → `review-shipping` が pack した配布物で、直す前の作業ツリーを測った: 3 つの入口とも文面が返り、review が足す時間は約 200 ms（62 ms → 267 ms）。Claude Code は 39 通りの hook 入力で、HEAD と出力・配信の行・1 回きりの印が同じ。git を遅くすると 5 秒で止められて何も出ない場合があった（下の記録の指摘 1・2。直した後の実機での確認は T06）
 
+- [x] T07: review の時間の上限を review の配信全体に効かせ、SKILL.md を読む shell の見分けを「単純な 1 コマンド」だけにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象の review の配信と見分けの関数が要る）
+  - 変更: `server/src/deliver.ts`, `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`, `scripts/lib/bundle-budget.mjs`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts` → 直す前（fa0e0d00）は、hook の開始から 10 秒たった呼び出しでも review が変更を読んで `checked 1 changed path` を返して落ちる。`cat skills/my-review/SKILL.md | head -50` や `git status; cat …/SKILL.md` のような複合の行を review と見て、「単純な 1 コマンド以外は見ない」のテストが落ちる
+  - 完了条件: `bun run verify` → 終了コード 0。テストで、表示するコマンドで始まる単純な 1 コマンド（`cat <パス>`、`nl -ba <パス>`、複数のファイル、引用符付きのパス、Windows のパス）は review と見る / `;` `|` `&` `<` `>`、バッククォート、`$(`、改行を含む行と、`sed`（その場で書き換えもする）は見ない / 時間が残っていない review は「読めなかった」と言い、その呼び出し本来の配信は返る / 時間があれば同じ変更を読む
+  - コミット: `fix(deliver): keep a Codex review inside its time limit, and read a skill file only from one plain command`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts` → `server/src/deliver.ts` と `server/src/review-bridge.ts` を `git stash` で fa0e0d00 に戻して流すと tests 19、fail 2（`cd /repo && cat .codex/skills/review/SKILL.md` が review と見られる / 開始から 10 秒たった呼び出しの review が `checked 1 changed path` を返す）。戻した後、配信の 3 つのテストファイルで tests 87、pass 87
+  - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass。T06 の文面と同じ作業ツリーで流した）。`plugin/dist/deliver.js` は 450,027 バイトで、上限を 455,000 に上げた（Codex の review の配信の分）
+
 ## P4: 文書と、配布前の確認
 
 README と forget の Skill が両ホストの今の動きを言い、pack したプラグインを実機の Codex で確かめる。ここまで終えてから、全差分のレビュー、push、PR、CI、リリースに進む。
 
-- [ ] T06: 配布前の確認を流し、その結果に合わせて README（英日）と forget の Skill を直す
+- [x] T06: 配布前の確認を流し、その結果に合わせて README（英日）と forget の Skill を直す
   - 種別: 変更
   - 計画: S6, S8
-  - 依存: T02（capture の動きが決まっていないと、記録されないものを README に書けず、配布前の確認もできない）, T05（review の 3 つの入口が動いていないと確かめられない）
-  - 変更: `README.md`, `README.ja.md`, `plugin/skills/forget/SKILL.md`
+  - 依存: T02（capture の動きが決まっていないと、記録されないものを README に書けず、配布前の確認もできない）, T05（review の 3 つの入口が動いていないと確かめられない）, T07（配布前の確認は、直した後の配布物で流す）
+  - 変更: `README.md`, `README.ja.md`, `plugin/skills/forget/SKILL.md`, `server/src/mcp-record.ts`
   - 完了条件: `bun run verify` → 終了コード 0。その前に plan の A7（`npm pack` と `check-tarball.mjs`）、A8（`$sphica:forget` の通し）、A9（review の 3 つの入口と TUI の `/review`、capture）を流し、それぞれ何回中何回かを結果行に書いてある。`rg -n "Claude Code only|no review hook in Codex|may not appear in Codex" README.md plugin/skills` → 0 件。`rg -n "Codex にはレビューのフックがありません|Codex では出ないことがあります" README.ja.md` → 0 件
   - コミット: `docs: say what Codex's reviews get, what its capture leaves out, and that forget works there`
+  - 結果: `node scripts/check-tarball.mjs <tgz>` → A7。最後の作業ツリーを `npm pack` した tarball で終了コード 0（53 ファイル）
+  - 結果: `codex exec review --uncommitted` → A9。Codex 0.162.1、macOS、一時の HOME・DB と、pack した 0.6.53 をローカルの marketplace から実際のプラグインとして入れた一時の `CODEX_HOME`、hook は `--dangerously-bypass-hook-trust`。組み込みの review（exec）2 回中 2 回、`$review-probe …` 1 回中 1 回、暗黙の skill 1 回中 1 回、TUI の `/review` 1 回中 1 回で、delivery に event `review` の行（記録 1 件）が残り、組み込みは `agent_id` が子の id、子のログに Sphica の文面が developer メッセージとして入った。review の回答は記録された決定に触れた。合成のプロンプトは source に無く、`codex exec`・`codex exec resume` の本人の発言と応答は source にある。`--ephemeral` は発言が記録されず（1 回中 1 回）、その組み込みの review には review の配信も出ない（1 回中 1 回。README に書いた）
+  - 結果: `codex --no-daemon -C <一時の repo> '$sphica:forget …'` → A8。同じ環境の TUI で、preview → ツールの承認 → 件数 `1` の入力 → `s6 was forgotten, and its deleted text was cleared from the database file. No record was affected.` と返り、source が DB から消えた（最後の配布物で 1 回中 1 回）
+  - 結果: `rg -n "Claude Code only|no review hook in Codex|may not appear in Codex" README.md plugin/skills` → 0 件。`rg -n "Codex にはレビューのフックがありません|Codex では出ないことがあります" README.ja.md` → 0 件
+  - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）。その後に README の 1 文（`--ephemeral` の組み込みの review）を足し、`bun run check` → 終了コード 0
+  - 結果: `bun run verify` → 出荷前レビューの指摘の直し（`sed` を外す、行の前後の空白、`forget_apply` の文面）の後の、コミットする作業ツリーでもう 1 回流して終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 450,015 バイト。配布前の確認（A8・A9）はこの直しの前の配布物で流した: 暗黙の skill の確認で Codex が使ったのは `cat <パス>` で、直しの影響を受けない
 
 ## 記録
 
@@ -121,3 +138,14 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 - 2026-10-13 / T04, T05 / `review-shipping` の指摘 6 件の採否。(1) review が先に走り、git が遅いと 5 秒の上限でその呼び出し本来の配信ごと止められる → 直した。本来の配信を先に作り、review は hook の開始から 3.5 秒までで打ち切る（文面の順は review が先のまま）。(2) 1 回きりの印を出力の前に付けるので、その後に止められると同じ変更が二度と届かない → (1) の順序で、印の後に残るのは配信のログの書き込みだけになった（Claude Code の今の経路と同じ）。印の順は変えていない。(3) 名前の規則が広すぎる → 絞った。プロンプトでは変数の形（大文字・数字・`_` だけ）を skill と見ない。shell では、ファイルを表示するコマンド（`cat`・`sed`・`head`・`tail`・`nl`・`less`・`more`・`bat`・`type`・`Get-Content`・`gc`）がそのパスを読み、そこへリダイレクトしていないときだけ当てる。残るもの: `$reviewers` のような小文字の名前と、`preview` を含む名前（Claude Code の今の規則と同じ「review を含む」）。(4) Sphica 自身の skill は、リンク越しのプラグインのパスでは見分けられない → hook が起動されたときのパス（`process.argv[1]`）の隣も見るようにした。`cd` してからの相対パスや大文字小文字の違いは見分けられず、Sphica 自身の review の前に文面が 1 回出る。(5) テストの無い行 → `realpathSync` は消した。review のときに snapshot を取らない条件（`!call`）は、取っても見える違いが時間だけなのでテストを足していない。(6) `toldBefore` のコメント → 直した
 - 2026-10-13 / T05 / 時間切れのときに `localChange` が「既定ブランチが無い」「履歴を共有していない」と言う箇所を見つけ、時間切れと言うように直した（git が時間で止められたときだけ。Claude Code の経路にも効く）/ review の打ち切りを 3.5 秒にしたことで当たりやすくなるため
 - 2026-10-13 / T05 / plan の方針 4・5 を直した（変更履歴）。範囲は狭まる向きなので Go は取り直していない
+- 2026-10-13 / T04, T05 / Codex のタスクごとのレビュー（新しい会話、コミット fa0e0d00、既定の effort）: 指摘 3 件。F1（P1）review の 3.5 秒が効くのは変更の読み取りだけで、その前に review の配信がもう一度リポジトリを探す git を流す。F2（P2）`cat 2>/dev/null <SKILL.md>` のように、パスより前に `>` があるだけで読み取りを外してしまう。F3（P2）引用符の中の `;` で分けるので `sed -n '1,200p;201q' <SKILL.md>` を見落とし、here-document の中の行をコマンドと見る / F1・F2 と F3 の引用符は直す（修正タスク T07 を T05 の後に足した）。F3 の here-document は直さない: 当たっても変更の照合が 1 回走って文面が 1 回出るだけで、shell の解釈を広げるほうが数え落としが増える
+- 2026-10-13 / T06 / 依存を変えた。前: T02, T05。後: T02, T05, T07 / 配布前の確認を、T07 で直した後の配布物で流すため。T07 の前に fa0e0d00 の配布物で流した分（組み込みの review、`$名前`、暗黙の skill、resume、ephemeral）は T06 の結果に参考として書く
+- 2026-10-13 / T07 / `review-shipping` の指摘 4 件（直した後の作業ツリー）。(1) 引用符を追う分割が、閉じない `'` の後ろの読み取りを見落とす（コメント行の `skill's`、here-document の本文）。(2) 空白入りのパスへのリダイレクトを書き込みと見ず、読みと見る。(3) リポジトリを 1 回だけ探す直しを外しても通るテストしか無い。(4) `|` で分ける条件にテストが無い / (1)(2) は、T05 の出荷前レビューの後の絞り込み、Codex のレビューの後の直しに続いて、同じ箇所の直しが新しい欠陥を生んだ 2 回目。止めて持ち主に聞き、「単純な 1 コマンドだけを見る」に決まった（分割も引用符の解釈もやめる。外れたときは届かない側にだけ倒れる）。持ち主の 10 月の Codex のログでは、SKILL.md の読み方の上位は `cat <パス>`（約 1,300 回）と `nl -ba <パス>`（約 80 回）で、どれもこの形。(4) は分割ごと消えた
+- 2026-10-13 / T07 / 欄を変えた。題名: 前「…shell の見分けを引用符とリダイレクトの向きで直す」→ 後「…『単純な 1 コマンド』だけにする」。red・完了条件・コミットの件名もそれに合わせた / 上の決定のため
+- 2026-10-13 / T07 / 指摘 (3) にテストは足していない。リポジトリを探す git を 1 回にした効果は時間にしか出ない。`review-shipping` が pack した配布物で git を遅くして測った値: git の起動 1 回あたり 1.2〜2.2 秒の遅れで、直す前（fa0e0d00）は 5 秒で止められて何も出ず、直した後は 3.6〜4.6 秒でその呼び出し本来の配信が返り、review は「時間内に読めなかった」と言った。2.5 秒の遅れでは review の無い呼び出しも止められる（リポジトリを探す git だけで 5 秒を超える。この変更の前から同じ）
+- 2026-10-13 / T06, T07 / `review-shipping` の指摘 5 件（T06 と T07 をまとめた作業ツリー）の採否。(1) `sed -i …/SKILL.md` が単純な 1 コマンドで、書き込みなのに review と見られる → 直した。表示するコマンドの一覧から `sed` を外した（その場で書き換えもするため。`sed -n` で読んだときは届かない）。(2) `;|&<>` を含まない書き込みのテストが無い → 足した（`sed -i`、`tee`、`cp`）。(3) `forget_apply` の返事が「Claude Code で流して」のままで、直した README と Skill に合わない → 直した（「対話の Claude Code か Codex のセッションで」）。plan の方針 7 は「コードは変えない」としていたが、返事の文面 1 か所だけ変えた。(4) Sphica 自身の review の skill は、`~` や相対のパスで読まれると見分けられない → 直さない。Sphica 自身の review の前に文面が 1 回出るだけで、見分けるにはパスの解釈を足すことになる。(5) 行末に改行が付いた 1 コマンドを見落とす → 直した（前後の空白を落としてから見る）。ほかの見落とし（`2>&1`、`LC_ALL=C cat …`、引用符の中の `>`）は届かない側なのでそのまま
+- 2026-10-13 / T06 / 変更欄を変えた。前: `README.md`, `README.ja.md`, `plugin/skills/forget/SKILL.md`。後: それに `server/src/mcp-record.ts` を足した / 上の指摘 (3) のため
+- 2026-10-13 / T06, T07 / 上の直し（一覧から 1 つ外す、空白を落とす、文面 1 か所、テスト）の後は、`review-shipping` をもう一度は流していない。全差分の Codex のレビュー（12 段目）で見る
+- 2026-10-13 / T06, T07 / 1 つのコミットで終える。配布前の確認は T07 の直しを入れた配布物で流す必要があり、出荷前レビューも 1 回にするため
+- 2026-10-13 / T06 / 配布前の確認の途中で分かったこと。(1) 一時の HOME を一時ディレクトリの下に置くと、Sphica の git の作業用ディレクトリが一時ディレクトリと重なり、review は「git worker would not start」と言う。TMPDIR を HOME の下に置いて流した（テストと同じ置き方）。(2) T07 の前（fa0e0d00）の配布物でも、組み込みの review（exec 1 回、TUI 1 回）、`$名前`、暗黙の skill、resume、`--ephemeral` は同じ結果だった。`$sphica:forget` は 2 回中 1 回: 1 回目は、エージェントが会話での確認を挟まずに進んだのに操作のスクリプトが確認を待っていて、終了時の Ctrl-C でツールの承認が取り消しになった（スクリプトの都合）
+- 2026-10-13 / T06 / 未検証のまま残るもの: 記録しないセッションの通知（`systemMessage`）が Codex の画面に出るか（`codex exec` の標準出力には出なかった。TUI は見ていない）/ 常駐プロセス経由の対話 / デスクトップアプリと IDE 拡張 / `codex review`（hook の信頼を外すフラグが無い）/ Windows

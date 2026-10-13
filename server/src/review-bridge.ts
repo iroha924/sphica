@@ -65,22 +65,19 @@ const NAMED_SKILL = /(?<!\S)\$([\w.:/-]{1,100})/g;
 const VARIABLE = /^[A-Z0-9_]+$/;
 /** A skill's file as a shell command names it, in either slash: the directory under skills/ is the skill's name */
 const SKILL_FILE = /skills[\\/]([\w.-]{1,100})[\\/]SKILL\.md(?![\w.-])/g;
-/** Commands that print a file. Finding, staging, or counting a skill's file is not reading the skill */
-const READERS = new Set([
-  "cat",
-  "sed",
-  "head",
-  "tail",
-  "nl",
-  "less",
-  "more",
-  "bat",
-  "type",
-  "get-content",
-  "gc",
-]);
+/**
+ * Commands that only print files. Finding, staging, or counting a skill's file is not reading the skill, and sed is left out because
+ * it also edits in place.
+ */
+const READERS = new Set(["cat", "head", "tail", "nl", "less", "more", "bat", "type", "get-content", "gc"]);
 const slashes = (p: string): string => p.replaceAll("\\", "/");
-/** The command a part of a shell line starts with, by its name alone: `/bin/cat` and `cat.exe` are cat */
+/**
+ * What makes a shell line more than one plain command: chaining, piping, redirecting, substituting, or a second line. Such a line is
+ * not read at all, since telling what it prints would take a shell's grammar; a review skill read that way gets no delivery.
+ */
+const NOT_PLAIN = /[;|&<>\n`]|\$\(/;
+
+/** The command a shell line starts with, by its name alone: `/bin/cat` and `cat.exe` are cat */
 const starts = (part: string): string =>
   (
     slashes(part.trim().split(/\s+/)[0] ?? "")
@@ -119,15 +116,14 @@ export function codexReviewCall(
   if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") return null;
   const command = input.tool_input?.command;
   if (typeof command !== "string") return null;
+  // One plain command that prints files, as agents read a skill (`cat <path>`, `nl -ba <path>`); anything else is no review
+  const line = command.trim();
+  if (NOT_PLAIN.test(line) || !READERS.has(starts(line))) return null;
   const mine = own.map(slashes);
-  // Each part of the line on its own: only one that prints the file reads the skill, and one that redirects into it writes it
-  for (const part of command.split(/&&|\|\||[;|&\n]/)) {
-    if (!READERS.has(starts(part))) continue;
-    for (const m of part.matchAll(SKILL_FILE)) {
-      const upTo = slashes(part.slice(0, m.index + m[0].length));
-      if (part.slice(0, m.index).includes(">") || mine.some((file) => upTo.endsWith(file))) continue;
-      if (isReview(m[1] ?? "", named)) return { name: m[1] ?? "", args: "" };
-    }
+  for (const m of line.matchAll(SKILL_FILE)) {
+    const upTo = slashes(line.slice(0, m.index + m[0].length));
+    if (mine.some((file) => upTo.endsWith(file))) continue;
+    if (isReview(m[1] ?? "", named)) return { name: m[1] ?? "", args: "" };
   }
   return null;
 }

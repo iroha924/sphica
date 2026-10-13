@@ -1237,13 +1237,16 @@ async function afterShell(
   }
 }
 
-/** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
+/**
+ * The additional context for one hook call, or "" for nothing. file is the database, and started is when the hook began (tests pass
+ * their own of both).
+ */
 export async function deliver(
   input: ReviewInput & { source?: string },
   host: Host = "claude-code",
   file: string = dbFile(),
+  started: number = Date.now(),
 ): Promise<string> {
-  const started = Date.now();
   // A Codex child thread carries no agent id (its built-in review): only the session log tells it from the session's own thread.
   // A log that does not say leaves the call with the main conversation
   const thread = host === "codex" && !agentOf(input) ? codexThread(input) : null;
@@ -1253,14 +1256,21 @@ export async function deliver(
   const call = codexReviewCall(input, thread, input.hook_event_name === "PreToolUse" ? ownReview() : []);
   // The event's own delivery runs first and the review stops early: a review that reads a large change slowly must not take the
   // event's delivery with it when the host ends the hook
-  const rest = await deliverOne(input, host, file, started, who, null);
-  const review = call ? await deliverOne(input, host, file, started, who, call, started + REVIEW_MS) : "";
+  if (!call) return deliverOne(input, host, file, started, who, null);
+  // The repository is looked at once for both: finding it starts git, which the review has no time to do again
+  const place = identify(input.cwd ?? process.cwd());
+  const rest = await deliverOne(input, host, file, started, who, null, { place });
+  const review = await deliverOne(input, host, file, started, who, call, {
+    place,
+    reviewUntil: started + REVIEW_MS,
+  });
   return [review, rest].filter(Boolean).join("\n\n");
 }
 
 /**
  * One delivery of a hook call, for the conversation `who` (a subagent, a child thread, or null for the main one): the review `call`
- * starts, or with none, what the event itself brings.
+ * starts, or with none, what the event itself brings. `known.place` is the repository when the caller already found it, and
+ * `known.reviewUntil` is when a review must stop reading the change.
  */
 async function deliverOne(
   input: ReviewInput & { source?: string },
@@ -1269,7 +1279,7 @@ async function deliverOne(
   started: number,
   who: string | null,
   call: { name: string; args: string } | null,
-  reviewUntil?: number,
+  known: { place?: ReturnType<typeof identify>; reviewUntil?: number } = {},
 ): Promise<string> {
   const name = input.hook_event_name;
   // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
@@ -1325,7 +1335,7 @@ async function deliverOne(
     (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
   )
     return "";
-  const place = identify(input.cwd ?? process.cwd());
+  const place = known.place !== undefined ? known.place : identify(input.cwd ?? process.cwd());
   if (!place) return "";
   let rels = targets
     .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
@@ -1396,7 +1406,7 @@ async function deliverOne(
           : event === "prompt"
             ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
-              ? await beforeReview(reader, pid, place.root, call, reviewUntil)
+              ? await beforeReview(reader, pid, place.root, call, known.reviewUntil)
               : {
                   ...(await atStart(reader, pid, branchOf(place.root), {
                     file,
