@@ -33,7 +33,7 @@ Start troubleshooting with `sphica doctor`.
 - Check the CLI separately from MCP. One working does not mean the other works <!-- invariant: exits-separate -->
 - When you change a value, category, or decision, find every reference with `rg` and fix the paired interface too. Add pairs you can list to a check <!-- invariant: rg-pairs -->
 - A new ingestion source writes through the record server's run-bound tools or capture, never a bulk import <!-- invariant: harvest -->
-- A change that goes into the package bumps npm and the 3 plugin manifests to the same version, in the same branch (PR) <!-- invariant: version-sync -->
+- A change that goes into the package bumps npm and the 3 plugin manifests to the same version, in the same branch (PR). A change to `README.md` alone needs no bump and ships with the next release <!-- invariant: version-sync -->
 - Validate external input at the system boundary. Do not write credentials to tracked files, command arguments, or logs <!-- invariant: boundary-validation -->
 - What we ship runs on Windows too. Do not depend on a POSIX shell, `0600`, a fixed `/tmp`, or execFile of `.cmd` <!-- invariant: windows -->
 - Claude Code and Codex get the same functions as far as each host allows. A change that works in only one host names what the other host lacks, and the README says the difference <!-- invariant: host-parity -->
@@ -54,6 +54,7 @@ Read to the end before implementing.
 ## Branches and PRs
 
 Only changes that alter none of runtime behavior, data, auth, secrets, dependencies, build, CI, or the package, and that one commit's revert undoes, go straight to main.
+A change to `README.md` alone goes straight to main too, when it describes only behavior already released (it reaches npm with the next release); one from a fork still follows `fork-pr`.
 Everything else, and any change whose impact you cannot state right away, goes through a PR.
 
 ## Before implementing

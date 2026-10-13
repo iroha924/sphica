@@ -117,6 +117,40 @@ test("without a base, compares staged plugin changes with the HEAD version", () 
   }
 });
 
+test("a change to README.md alone needs no version bump, staged on main or in a range, and one made with a shipped file still does", () => {
+  const r = repo();
+  try {
+    r.git("checkout", "-q", "-B", "main");
+    bump(r.dir, "1.0.0");
+    write(r.dir, "README.md", "a");
+    write(r.dir, "plugin/skills/a.md", "a");
+    r.git("add", "-A");
+    r.git("commit", "-qm", "base");
+    const base = r.git("rev-parse", "HEAD");
+
+    write(r.dir, "README.md", "b");
+    r.git("add", "-A");
+    const staged = check(r.dir);
+    assert.equal(staged.status, 0, staged.stderr);
+    r.git("commit", "-qm", "change only the README");
+    const ranged = check(r.dir, "--base", base);
+    assert.equal(ranged.status, 0, ranged.stderr);
+
+    const readme = r.git("rev-parse", "HEAD");
+    write(r.dir, "README.md", "c");
+    write(r.dir, "plugin/skills/a.md", "b");
+    r.git("add", "-A");
+    const mixed = check(r.dir);
+    assert.equal(mixed.status, 1, mixed.stderr);
+    // The README is not the file the failure names
+    assert.match(mixed.stderr, /for example plugin\/skills\/a\.md/);
+    r.git("commit", "-qm", "change the README and the plugin");
+    assert.equal(check(r.dir, "--base", readme).status, 1);
+  } finally {
+    r.done();
+  }
+});
+
 test("even for server.ts, once shipped only via npm, bumping only the npm package version fails and matching the plugin channel passes", () => {
   const r = repo();
   try {

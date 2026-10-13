@@ -117,12 +117,14 @@ function distributed(root: string, tracked: boolean): Map<string, string> {
 
 /**
  * Files whose contents differ between two roots. **mtime is ignored** — rebundling the same content would be a false alarm.
- * `tracked` is set when a is the repository's working tree.
+ * `tracked` is set when a is the repository's working tree. Its README.md is not compared: a change to the README alone
+ * ships with the next release, so the repository's copy may be ahead of an install at the same version.
  */
 export function differingFiles(a: string, b: string, { tracked = false } = {}): string[] {
   const x = distributed(a, tracked);
   const y = distributed(b, false);
   return [...new Set([...x.keys(), ...y.keys()])]
+    .filter((rel) => !(tracked && rel === "README.md"))
     .filter((rel) => {
       const p = x.get(rel);
       const q = y.get(rel);

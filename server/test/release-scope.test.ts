@@ -16,8 +16,9 @@ import {
 
 test("separates no-release changes from plugin ones (the web UI is gone, so there are no npm-only releases)", () => {
   assert.equal(releaseKind(["README.ja.md", ".agents/skills/plugin-release/SKILL.md"]), "none");
-  // bundle copies README.md into the tarball, and it shows on the npm package page
-  assert.equal(releaseKind(["README.md"]), "plugin");
+  // README.md goes into the tarball, but a change to it alone waits for the next release
+  assert.equal(releaseKind(["README.md"]), "none");
+  assert.equal(releaseKind(["README.md", "server/src/mcp.ts"]), "plugin");
   assert.equal(releaseKind(["plugin/skills/trace/SKILL.md"]), "plugin");
   assert.equal(releaseKind(["server/src/mcp.ts"]), "plugin");
   assert.equal(releaseKind(["server/src/cli/view.ts"]), "plugin");
@@ -35,7 +36,7 @@ test("version-only changes can be left out of the release type input", () => {
   );
 });
 
-test("the pre-commit bundle glob covers every shipped input (stopping locally a commit that changes inputs without a version bump)", () => {
+test("the pre-commit bundle glob covers every release input and not README.md (stopping locally a commit that changes inputs without a version bump)", () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const lefthook = fs.readFileSync(path.join(root, "lefthook.yml"), "utf8");
   const glob = /- name: bundle\n(?:\s+#.*\n)*\s+glob: "\{([^}]*)\}"/.exec(lefthook)?.[1]?.split(",") ?? [];
@@ -46,4 +47,7 @@ test("the pre-commit bundle glob covers every shipped input (stopping locally a 
   // Prefix inputs need a glob that covers every file below them (narrowing to `*.ts` would miss JSON and others)
   for (const prefix of PACKAGE_PREFIXES)
     assert.ok(glob.includes(`${prefix}**`), `${prefix}** is not in the bundle glob`);
+  // A README-only commit must not run the bundle and the version check
+  for (const g of glob)
+    assert.ok(!path.matchesGlob("README.md", g), `${g} in the bundle glob matches README.md`);
 });

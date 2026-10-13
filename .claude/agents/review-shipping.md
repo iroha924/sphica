@@ -72,6 +72,7 @@ Did the shipped contents change while the version stayed the same? Do the 4 plac
 
 Check that `isPackageInput` in `scripts/lib/release-scope.mjs` (read by `scripts/check-mcp-version.mjs` and the release commands) counts the
 change's files as package inputs.
+`README.md` is the one shipped file it leaves out: a change to it alone needs no bump and ships with the next release.
 **`package.json`'s `files` and `bin` also change what ships.**
 
 ### 5. Holes in bulk replacements
