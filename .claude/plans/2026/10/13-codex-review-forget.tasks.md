@@ -113,6 +113,17 @@ base: main
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/review-bridge.test.ts` → テストだけ足した状態（fd1fc524 のコード）では `The requested module '../src/review-bridge.ts' does not provide an export named 'untrackedFiles'` で落ちた。直した後、配信の 3 つのテストファイルで tests 87、pass 87
   - 結果: `bun run verify` → 終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 450,319 バイト（上限 455,000）
 
+- [x] T09: ページャを表示するコマンドから外し、forget の Skill の「確認を出せない」の言い方を直す
+  - 種別: 修正
+  - 計画: S4, S6
+  - 依存: T07（表示するコマンドの一覧が要る）
+  - 変更: `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`, `plugin/skills/forget/SKILL.md`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="Codex review is its built-in" test/review-bridge.test.ts` → 直す前（3cbdfbe0 のコード）は `less -O skills/my-review/SKILL.md -` が review と見られて落ちる
+  - 完了条件: `bun run verify` → 終了コード 0。テストで、`less`・`more`・`bat` で始まる行は review と見ない / `cat`・`head`・`nl`・`type`・`Get-Content` は今までどおり見る。forget の Skill は、承認する人がいない headless の実行と、持ち主が承認や確認を断った場合を分けて言う
+  - コミット: `fix(review): leave pagers out of the commands that read a skill, and say when forget cannot ask`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="Codex review is its built-in" test/review-bridge.test.ts` → `server/src/review-bridge.ts` を `git stash` で 3cbdfbe0 に戻して流すと fail 1（`less -O skills/my-review/SKILL.md -` が review と見られる）。戻した後、配信の 3 つのテストファイルで tests 87、pass 87
+  - 結果: `bun run verify` → 1 回目は終了コード 1。受け入れの retrieval-07 が 786 秒かかって落ち、retrieval-08 も落ちた。`pmset -g log` に 13:43:04〜13:56:12（788 秒）のスリープがあり、その間に止まっていた。`caffeinate -i bun run verify` で流し直して終了コード 0（受け入れ 138 件 pass）。`plugin/dist/deliver.js` は 450,296 バイト
+
 ## P4: 文書と、配布前の確認
 
 README と forget の Skill が両ホストの今の動きを言い、pack したプラグインを実機の Codex で確かめる。ここまで終えてから、全差分のレビュー、push、PR、CI、リリースに進む。
@@ -161,3 +172,6 @@ README と forget の Skill が両ホストの今の動きを言い、pack し�
 - 2026-10-13 / T06 / 配布前の確認の途中で分かったこと。(1) 一時の HOME を一時ディレクトリの下に置くと、Sphica の git の作業用ディレクトリが一時ディレクトリと重なり、review は「git worker would not start」と言う。TMPDIR を HOME の下に置いて流した（テストと同じ置き方）。(2) T07 の前（fa0e0d00）の配布物でも、組み込みの review（exec 1 回、TUI 1 回）、`$名前`、暗黙の skill、resume、`--ephemeral` は同じ結果だった。`$sphica:forget` は 2 回中 1 回: 1 回目は、エージェントが会話での確認を挟まずに進んだのに操作のスクリプトが確認を待っていて、終了時の Ctrl-C でツールの承認が取り消しになった（スクリプトの都合）
 - 2026-10-13 / T06 / 未検証のまま残るもの: 記録しないセッションの通知（`systemMessage`）が Codex の画面に出るか（`codex exec` の標準出力には出なかった。TUI は見ていない）/ 常駐プロセス経由の対話 / デスクトップアプリと IDE 拡張 / `codex review`（hook の信頼を外すフラグが無い）/ Windows
 - 2026-10-13 / 全差分 / Codex の全差分のレビュー（新しい会話、`main..fd1fc524`、high）: 指摘 1 件（P2）。review の 3.5 秒が効くのは git までで、その後の未追跡ファイルの読み取り（最大 500 件）は時間を見ない。Codex は module の mock で、500 件・1 件 10 ms の遅れのとき 5,000 ms かかって全部返ることを再現した（実際のホストでの打ち切りは未再現）/ 直す。修正タスク T08 を足した。直した後は、全差分をもう一度頼むのではなく、T08 のコミットだけを新しい会話でレビューさせる（全差分のレビューの指摘はこの 1 件で、直しは 1 つの関数に収まるため）
+- 2026-10-13 / T06, T07, T08 / Codex のレビュー（新しい会話、コミット fd1fc524 と 3cbdfbe0、既定の effort）: 指摘 3 件、どれも P2。F1: 未追跡ファイル 1 件の読み取りそのものが固まると、時間の上限を越える（ファイルシステムが数秒止まる場合。読み取りを mock して再現）。F2: `less -O <SKILL.md> -` は標準入力をそのファイルへ書くのに、単純な 1 コマンドの読み取りと見られる。F3: forget の Skill が、持ち主がツールの承認を断った場合まで「このセッションは確認を出せない」と言う / F2・F3 は直す（修正タスク T09）。F2 はページャ（`less`・`more`・`bat`）を一覧から外す。F1 は直さない: 同期の読み取りを途中で止めるには読み取りを非同期に作り替える必要があり、ファイルシステムが秒単位で止まる状況では、その呼び出し本来の配信（DB の読み取り）も同じく止まる
+- 2026-10-13 / 全体 / Codex のレビューは、T04・T05 で 3 件、全差分で 1 件、直近 2 コミットで 3 件と、回を重ねても 0 件にならない（重さは P2 まで、信頼の境界に関わる指摘は無い）。T09 の後は手元の Codex のレビューをこれ以上は重ねず、持ち主に状況を伝えて PR に進む（memory `review-rounds-cap`）。PR では GitHub の Codex のレビューが走る
+- 2026-10-13 / 全体 / 配信の計測の 1 回目で 1 件だけ 610 秒止まった原因も Mac のスリープだった（`pmset -g log` に 13:02:57〜13:13:09 の 612 秒。その後の 2 回の流し直しと全体の 2 回目は問題なし）/ 長い検査は `caffeinate -i` を付けて流す

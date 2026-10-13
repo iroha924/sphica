@@ -66,10 +66,10 @@ const VARIABLE = /^[A-Z0-9_]+$/;
 /** A skill's file as a shell command names it, in either slash: the directory under skills/ is the skill's name */
 const SKILL_FILE = /skills[\\/]([\w.-]{1,100})[\\/]SKILL\.md(?![\w.-])/g;
 /**
- * Commands that only print files. Finding, staging, or counting a skill's file is not reading the skill, and sed is left out because
- * it also edits in place.
+ * Commands that only print files, as agents read a skill. Finding, staging, or counting a skill's file is not reading it; sed is left
+ * out because it also edits in place, and pagers because they can write what they are shown.
  */
-const READERS = new Set(["cat", "head", "tail", "nl", "less", "more", "bat", "type", "get-content", "gc"]);
+const READERS = new Set(["cat", "head", "tail", "nl", "type", "get-content", "gc"]);
 const slashes = (p: string): string => p.replaceAll("\\", "/");
 /**
  * What makes a shell line more than one plain command: chaining, piping, redirecting, substituting, or a second line. Such a line is

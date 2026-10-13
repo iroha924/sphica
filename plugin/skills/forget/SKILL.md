@@ -42,9 +42,10 @@ Pass the repository root as `cwd` to every tool.
 5. **Report** what `forget_apply` returned, as it says it: what was forgotten and whether the deleted text was cleared come first, and
    `record_more` reads on when the records did not fit
 
-When `forget_apply` says the host cannot ask directly, or the call is refused or declined before any dialog shows, this session cannot
-show the confirmation (a headless run such as `codex exec` or `claude -p`, or a host without the dialog): tell the owner to run forget in
-an interactive session. When it says clearing did not finish (usually another session reading the database): run `forget_apply` with
+When `forget_apply` says the host cannot ask directly, or the host refuses the call because nobody is there to approve it (a headless run
+such as `codex exec` or `claude -p`), this session cannot show the confirmation: tell the owner to run forget in an interactive session.
+When the owner declined or cancelled, in the host's approval or in the dialog, nothing was forgotten: say so, and do not call it again
+unless the owner asks. When it says clearing did not finish (usually another session reading the database): run `forget_apply` with
 the same refs again later, and it only finishes the cleanup.
 
 ## What stays

@@ -660,7 +660,7 @@ test("a Codex review is its built-in review's child thread, a skill named in the
     assert.equal(shell("  /bin/cat ~/.codex/skills/my-review/SKILL.md docs/notes.md")?.name, "my-review");
     assert.equal(shell('cat "$HOME/.codex/skills/my-review/SKILL.md"')?.name, "my-review");
     assert.equal(shell("head -80 .codex/skills/review/SKILL.md\n")?.name, "review");
-    assert.equal(shell(`more "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"`)?.name, "code-review");
+    assert.equal(shell(`type "C:\\Users\\u\\.codex\\skills\\code-review\\SKILL.md"`)?.name, "code-review");
     assert.equal(
       shell('Get-Content "C:\\Users\\John Smith\\.codex\\skills\\code-review\\SKILL.md"')?.name,
       "code-review",
@@ -685,6 +685,11 @@ test("a Codex review is its built-in review's child thread, a skill named in the
       "sed -i '' -e 's/a/b/' .codex/skills/code-review/SKILL.md",
       "sed -i 's#skills/my-review/SKILL.md#skills/code-review/SKILL.md#' README.md",
       "tee skills/my-review/SKILL.md",
+      // A pager can write what it is shown into the file it names, and no agent pages a file it reads
+      "less -O skills/my-review/SKILL.md -",
+      "less skills/my-review/SKILL.md",
+      "more skills/my-review/SKILL.md",
+      "bat skills/my-review/SKILL.md",
       "cp notes.md skills/my-review/SKILL.md",
     ])
       assert.equal(shell(command), null, command);
