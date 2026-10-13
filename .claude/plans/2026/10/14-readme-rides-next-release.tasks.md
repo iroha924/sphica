@@ -31,13 +31,14 @@ README.md だけの変更がバージョン検査を通り、doctor がそれを
   - コミット: `feat(release): let a change to README.md alone go without a version bump`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/check-mcp-version.test.ts test/release-scope.test.ts` → red: `scripts/lib/release-scope.mjs` と `lefthook.yml` を直す前は 3 件失敗（check-mcp-version の新しいテストが exit 1 で「for example README.md」、`releaseKind(["README.md"])` が `plugin`、glob の検査が「README.md is in the bundle glob」）。直した後は 12 件 pass、0 件 fail。review-shipping の指摘 2 件（glob の否定の検査が同じ綴りしか見ない、テストの題が古い）を同じコミットで直した
 
-- [ ] T02: doctor がリポジトリと比べるときだけ README.md を外し、0.6.56 にする
+- [x] T02: doctor がリポジトリと比べるときだけ README.md を外し、0.6.56 にする
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `server/src/plugin.ts`, `server/test/plugin.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/plugin.test.ts` → 全部通る。`bun run release:plan -- --base origin/main` → `plugin`、4 か所が 0.6.56
   - コミット: `fix(doctor): do not count README.md when comparing the repository with an install`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/plugin.test.ts` → 50 件 pass、0 件 fail。`server/src/plugin.ts` だけを stash して同じコマンド → 足した 2 件が失敗（48 pass、2 fail）。`bun run release:plan -- --base origin/main` → `plugin`、npm・plugin・marketplace・Codex がすべて 0.6.56。review-shipping の指摘（テストの 1 行が Biome の整形と違う）を `bun run fix` で直し、`bun run lint` → エラー 0
 
 ## P2: 規範と README を合わせる
 

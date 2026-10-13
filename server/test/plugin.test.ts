@@ -170,6 +170,21 @@ test("on the repository side, only files tracked by git are compared as shipped 
   assert.deepEqual(differingFiles(repo.root, cache.root, { tracked: true }), []);
 });
 
+test("against the repository, README.md is not compared; between two installs it still is", () => {
+  const repo = plugin("readme-repo/plugin", "0.1.0");
+  const cache = plugin("readme-cache", "0.1.0");
+  fs.writeFileSync(path.join(repo.root, "README.md"), "new");
+  // Missing on one side
+  assert.deepEqual(differingFiles(repo.root, cache.root, { tracked: true }), []);
+  assert.deepEqual(differingFiles(repo.root, cache.root), ["README.md"]);
+  fs.writeFileSync(path.join(cache.root, "README.md"), "old");
+  assert.deepEqual(differingFiles(repo.root, cache.root, { tracked: true }), []);
+  assert.deepEqual(differingFiles(repo.root, cache.root), ["README.md"]);
+  // Any other file still counts against the repository
+  fs.writeFileSync(path.join(cache.root, "dist", "mcp.js"), "y");
+  assert.deepEqual(differingFiles(repo.root, cache.root, { tracked: true }), ["dist/mcp.js"]);
+});
+
 test("picks only node …/dist/mcp.js from ps output", () => {
   const out = [
     "18319 Fri Sep 11 09:07:27 2026     node /Users/me/Projects/sphica/plugin/dist/mcp.js",
@@ -255,6 +270,23 @@ test("with the same version but different content, only the repository CLI shows
   );
   // The cache is copied again only when the version changes, so updating the host changes nothing.
   assert.deepEqual(r.updates, []);
+});
+
+test("with the same version, a README.md that differs from the repository is not reported", () => {
+  const repository = plugin("r3b/plugin", "0.10.18");
+  const codex = plugin("codex/plugins/cache/sphica/sphica/0.10.18d", "0.10.18");
+  fs.writeFileSync(path.join(repository.root, "README.md"), "new");
+  fs.writeFileSync(path.join(codex.root, "README.md"), "old");
+  const same = report(seen({ repository, cli: repository, codex: [codex] }));
+  assert.doesNotMatch(same.lines.join("\n"), /same version, different contents/);
+  // Without a repository in view, two installs are compared whole
+  const cli = plugin("readme-cli", "0.10.18");
+  fs.writeFileSync(path.join(cli.root, "README.md"), "new");
+  const installs = report(seen({ cli, codex: [codex] }));
+  assert.match(
+    installs.lines.join("\n"),
+    /same version, different contents \(README\.md\)\. Reinstall to match/,
+  );
 });
 
 test("when the install is newer, says the checkout is outdated instead of showing update steps", () => {
