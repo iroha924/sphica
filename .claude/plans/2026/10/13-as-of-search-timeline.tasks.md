@@ -90,6 +90,15 @@ base: main
   - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="read takes timeline" test/plugin.test.ts` → `mcp.ts` を HEAD に戻すと落ちた（`timeline` が未知の引数として断られる）。戻すと通った。受け入れケース retrieval-15 は、driver の step が無い間は流せないので、red は MCP のテストで取った
   - 結果: `bun run test` → 終了コード 0（T03・T04 のツリーで 1274 件 pass）。`bun run verify` → 終了コード 0（`sql:reach` 260 / 260、受け入れ 140 件 pass、`mcp.js` は 1.71 MB で上限内）
 
+- [ ] T11: 同じ場所の記録を問い合わせの中で照合し、連なりの run が自分で保存した記録に加えた変化も出す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の `timelineRefs` が要る）
+  - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="behind many at the same path" test/timeline.test.ts` → 同じ path の別の symbol の記録が 201 件あると、同じ場所の古い記録が timeline に出ないので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。同じ場所の照合が読む件数の上限より前に行われ、連なりの run が自分で保存した記録を閉じた変化が 1 行で出る（保存の時点の candidate・active は出ない）
+  - コミット: `fix(read): match a timeline's places in the query and show a run's changes to records it saved`
+
 ## P3: 利用者向けの文面
 
 README と plugin の文面が、新しい 2 つの引数を説明する。
@@ -106,20 +115,24 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 
 変更の前と後を、採点とツール別の呼び出しの数で比べられる。
 
-- [ ] T06: collect と report に、ツール別の呼び出しの数と as_of・timeline の使用回数を足す
+- [x] T06: collect と report に、ツール別の呼び出しの数と as_of・timeline の使用回数を足す
   - 種別: 追加
   - 計画: S4
   - 依存: なし
-  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run test` → 終了コード 0。Claude と Codex のログの例から、search・read・status の数、`as_of` 付きの search の数、`timeline` 付きの read の数が取れ、呼び出しの単位が取れないログは unknown になるテストが通る。`report.ts --compare` の出力に平均と各実行の値が出るテストが通る
   - コミット: `test(evals): count Sphica calls per tool and the use of as_of and timeline`
-- [ ] T07: judge に、timeline で名前が出た記録の signal（`in_timeline`）を足す
+  - 結果: `node --import ./test/isolate-home.ts --test test/eval-claude.test.ts test/eval-grade.test.ts` → 123 件 pass。Claude の stream と Codex のイベントから search・read・status の数、`as_of` 付きの search、`timeline` 付きの read が取れ、途中で切れた・壊れたログは unknown（0 ではない）になる。`report.ts --compare` の各側の行の末尾に、平均・各実行の値・ツール別の平均が出る
+  - 結果: `bun run test` → 終了コード 0（1279 件 pass）。`bun run verify` → 終了コード 0（受け入れ 140 件 pass）
+- [x] T07: judge に、timeline で名前が出た記録の signal（`in_timeline`）を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T04（timeline の行の形が決まっていないと、見分ける正規表現が書けない）
-  - 変更: `server/evals/cloud/judge.ts`, `server/test/judge.test.ts`
-  - 完了条件: `bun run test` → 終了コード 0。timeline の行で名前が出た記録が `in_timeline: yes`、`read: no` になり、全文の read は今までどおり `read: yes` になるテストが通る
+  - 変更: `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`
+  - 完了条件: `bun run test` → 終了コード 0。timeline の行で名前が出た記録が timeline の signal で yes、`read: no` になり、全文の read は今までどおり `read: yes` になるテストが通る
   - コミット: `test(evals): tell a record named in a timeline from one read in full`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="named in a timeline" test/eval-claude.test.ts` → pass。timeline で名前が出た記録は `gold_timeline` で yes、`read` は no のまま。長い key の前方一致、全文の read、記録の本文が引用した timeline の行、search の結果は timeline と数えない。証明できないログは unknown
+  - 結果: `bun run test` → 終了コード 0（1279 件 pass）
 - [ ] T08: 評価用の 3 段の置き換えの記録とタスクを足す
   - 種別: 追加
   - 計画: S5
@@ -142,3 +155,7 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T03, T04 / `review-shipping`: 止める指摘なし。`read` を `timeline` 無し・`timeline: false` で呼んだ返信は、v0.6.54 の bundle と 19 通り比べて差が無いと報告した（こちらでは流し直していない）。指摘 13 件のうち、テストの穴 10 件は採用して T03 の中でテストを直した。長い path が 1 行で予算を使い切り、古い行を全部落とす件（11）は採用し、path と symbol を切るようにした。残した ref を frame の外に JSON で出す件（12）は `read` と同じ作りで、呼び出し側が送った文字列なので直さない。コミット時の hook が作業ツリー全体を見る件（13）は、T03・T04・T10 を合わせたツリーで全テストと静的検査が通ることを確かめてからコミットする
 - 2026-10-13 / T04 / 変更欄を変えた。前: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`。新: それに `server/test/acceptance-cases.test.ts`（retrieval の件数 14 → 15）を足した / 受け入れケースの件数はテストが固定している
 - 2026-10-13 / T02, T09 / Codex のコミットのレビュー（d2437320、e75bff21）: F1（保存の古い順に 200 件だけ読むので、古くて弱い一致が 200 件を占めると後ろの一致が出ず、打ち切ったことも出ない。再現つき）と F2（0 件のとき、時刻の意味を説明する行が返らない）。どちらも採用 / 修正タスク T10 を足した。T09 の直しが F1 を生んだので、「修正が新しい欠陥を生む」の 1 回目に数える
+- 2026-10-13 / T06 / 変更欄を変えた。前: `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`。新: それに `server/evals/cloud/judge.ts` を足した / 呼び出しの数え方は、ログの読み取りがある judge.ts に置き、collect から呼ぶ
+- 2026-10-13 / T06 / 予定外の発見: collect の「0 件の検索」は `No record holds most of` という文面に一致させていて、`as_of` の 0 件（`No record as of <時刻> holds most of`）を数え落とす / 一致させる文面を直した
+- 2026-10-13 / T07 / 変更欄と完了条件を変えた。変更欄の前: `server/evals/cloud/judge.ts`, `server/test/judge.test.ts`。新: `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`。完了条件の前: 「`in_timeline: yes`」。新: 「timeline の signal で yes」 / `server/test/judge.test.ts` は状態の判定（`src/judge.ts`）のテストで、評価のログの読み取りのテストは `eval-claude.test.ts` にある。signal は既存の `gold_signals` に足さず、行の別の欄 `gold_timeline` にした（`gold_signals` を全体で比べている既存のテスト 16 か所を変えずに済む）
+- 2026-10-13 / T03, T04 / Codex のコミットのレビュー（3bb4abac、9a3eb84c。Codex 側の都合で途中で終わり、全観点は見ていない）: F1（同じ場所の記録を path だけで 201 件に絞ってから symbol を照合するので、該当する記録が黙って落ちる）と F2（連なりの run が自分で保存した連なりの外の記録に加えた変化が出ない）。どちらも採用 / 修正タスク T11 を足した

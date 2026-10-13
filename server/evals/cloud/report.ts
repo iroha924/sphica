@@ -26,6 +26,13 @@ type Graded = GradeRow & {
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
+  gold_timeline?: Record<string, "yes" | "no" | "unknown">;
+  /** How the run used Sphica's tools; each null when its log could not tell one call from another */
+  signals?: {
+    calls?: Record<string, number> | null;
+    as_of_searches?: number | null;
+    timeline_reads?: number | null;
+  } | null;
   /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
   fence?: string;
   harness?: string;
@@ -43,6 +50,18 @@ export type Build = {
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
+
+/**
+ * How the runs used Sphica's tools: the mean and each run's total calls, the mean per tool, and how many searches took as_of and reads
+ * took timeline. A run whose log cannot tell its calls apart is counted as unknown, never as zero.
+ */
+function calls(rows: Graded[]): string {
+  const told = rows.filter((r) => r.signals?.calls);
+  const totals = told.map((r) => Object.values(r.signals?.calls ?? {}).reduce((a, b) => a + b, 0));
+  const tools = [...new Set(told.flatMap((r) => Object.keys(r.signals?.calls ?? {})))].sort();
+  const sum = (of: (r: Graded) => number | null | undefined) => told.reduce((a, r) => a + (of(r) ?? 0), 0);
+  return `Sphica calls mean ${fmt(mean(totals))} [${totals.join(" ")}]${tools.length ? ` (${tools.map((t) => `${t} ${fmt(mean(told.map((r) => r.signals?.calls?.[t] ?? 0)))}`).join(", ")})` : ""}, as_of searches ${sum((r) => r.signals?.as_of_searches)}, timeline reads ${sum((r) => r.signals?.timeline_reads)}, over ${told.length} runs told (unknown ${rows.length - told.length})`;
+}
 
 /** A count as a rate over its denominator, with the unknowns shown beside it (never counted either way). */
 const rate = <T>(rows: T[], yes: (r: T) => boolean, unknown: (r: T) => boolean) => {
@@ -221,15 +240,17 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
 
   lines.push(
     "",
-    "## Gold signals per key: delivered / in a search result / read (yes, no, unknown, not applicable)",
+    "## Gold signals per key: delivered / in a search result / read / named in a timeline (yes, no, unknown, not applicable)",
   );
   // An excluded run keeps its gold keys with no signals, so each key's row shows how many of its runs were left out
-  const signals = original.flatMap((r) =>
+  const signals = original.flatMap((r): { group: string; s: GoldSignal | null; timeline: string | null }[] =>
     r.excluded
-      ? (r.gold ?? []).map((key) => ({ group: `${r.model} ${r.condition} ${key}`, s: null }))
+      ? (r.gold ?? []).map((key) => ({ group: `${r.model} ${r.condition} ${key}`, s: null, timeline: null }))
       : Object.entries(r.gold_signals ?? {}).map(([key, s]) => ({
           group: `${r.model} ${r.condition} ${key}`,
-          s: s as GoldSignal | null,
+          s,
+          // A build collected before timelines were told apart has no such signal: unknown, never no
+          timeline: r.gold_timeline?.[key] ?? "unknown",
         })),
   );
   for (const [k, xs] of groupBy(signals, (x) => x.group)) {
@@ -238,7 +259,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
         .map((v) => xs.filter((x) => x.s?.[f] === v).length)
         .join("/");
     lines.push(
-      `${k}: delivered ${tally("in_delivery")}, search ${tally("in_search")}, read ${tally("read")}, excluded ${xs.filter((x) => !x.s).length}`,
+      `${k}: delivered ${tally("in_delivery")}, search ${tally("in_search")}, read ${tally("read")}, timeline ${["yes", "no", "unknown"].map((v) => xs.filter((x) => x.timeline === v).length).join("/")}, excluded ${xs.filter((x) => !x.s).length}`,
     );
   }
   return lines;
@@ -370,6 +391,7 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
       )}`,
       // Over every graded run: a run whose order cannot be told is counted apart, never dropped from the denominator
       `searched before editing ${graded.filter((r) => r.search_before_edit === "yes").length}/${graded.filter((r) => r.search_before_edit === "yes" || r.search_before_edit === "no").length} told (unknown ${graded.filter((r) => r.search_before_edit === "unknown").length}, no edit ${graded.filter((r) => r.search_before_edit === "no_edit").length}, of ${graded.length})`,
+      calls(graded),
     ].join(", ");
   };
   for (const k of keys)

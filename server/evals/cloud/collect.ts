@@ -18,6 +18,7 @@ import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./f
 import { liveScratch, NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
   answerFormat,
+  CALLS_UNTOLD,
   capPatch,
   claudeStreamCalls,
   deliveredSignal,
@@ -31,9 +32,14 @@ import {
   goldSignalsFromCodex,
   lookedOutside,
   presentedText,
+  type SphicaCalls,
   searchedBeforeEdit,
   searchLoading,
+  sphicaCallsFromClaudeStream,
+  sphicaCallsFromCodex,
   type Tri,
+  timelineSignalsFromClaudeStream,
+  timelineSignalsFromCodex,
 } from "./judge.ts";
 
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
@@ -118,6 +124,8 @@ type Row = {
   found: Tri;
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
+  /** Per gold key, whether a read with timeline named it: an overview, so kept apart from the read signal */
+  gold_timeline: Record<string, Tri>;
   presented: string | null;
   /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
   fence?: string;
@@ -128,14 +136,16 @@ type Row = {
   search_before_edit: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   /** Local Claude runs only: whether Sphica's search was held back for ToolSearch or there from the start */
   search_loading: "deferred" | "loaded" | "unknown" | "not_applicable";
-  signals: {
-    searches: number;
-    empty_searches: number;
-    reads_not_found: number;
-    tool_errors: number;
-    turns: number | null;
-    seconds: number | null;
-  } | null;
+  signals:
+    | ({
+        searches: number;
+        empty_searches: number;
+        reads_not_found: number;
+        tool_errors: number;
+        turns: number | null;
+        seconds: number | null;
+      } & SphicaCalls)
+    | null;
 };
 
 /** A run that is not a result, kept so the report's denominator holds every run that was started */
@@ -163,6 +173,7 @@ const excludedRow = (
   delivered_units: [],
   found: "unknown",
   gold_signals: {},
+  gold_timeline: {},
   presented: null,
   search_before_edit: "not_applicable",
   search_loading: "not_applicable",
@@ -183,11 +194,13 @@ function signals(log: string): NonNullable<Row["signals"]> {
     searches: count(
       /mcp__sphica__search\b|"type":"item\.started","item":\{[^}]*"server":"sphica","tool":"search"/g,
     ),
-    empty_searches: count(/No record holds most of|No source holds most of/g),
+    empty_searches: count(/No record (as of \S+ )?holds most of|No source holds most of/g),
     reads_not_found: count(/not found in this project/g),
     tool_errors: count(/tool_result ERROR|"status":"failed"/g),
     turns: result ? Number(result[1]) : null,
     seconds: result ? Number(result[2]) : null,
+    // A routine log and a regex over events name tools, not calls: the caller fills these in where each call can be told apart
+    ...CALLS_UNTOLD,
   };
 }
 
@@ -209,7 +222,7 @@ function streamSignals(events: string): NonNullable<Row["signals"]> {
   return {
     searches: searches.length,
     empty_searches: searches.filter((c) =>
-      /No record holds most of|No source holds most of/.test(c.result ?? ""),
+      /No record (as of \S+ )?holds most of|No source holds most of/.test(c.result ?? ""),
     ).length,
     reads_not_found: calls.filter(
       (c) => c.name === "mcp__sphica__read" && /not found in this project/.test(c.result ?? ""),
@@ -217,6 +230,7 @@ function streamSignals(events: string): NonNullable<Row["signals"]> {
     tool_errors: calls.filter((c) => c.error).length,
     turns: turns ?? null,
     seconds: null,
+    ...sphicaCallsFromClaudeStream(events),
   };
 }
 
@@ -400,6 +414,8 @@ function main() {
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
+          // A routine log does not tie a result to the arguments of its call
+          gold_timeline: Object.fromEntries(gold.map((k) => [k, "unknown" as const])),
           presented: presentedOf(task, condition),
           // A routine log has no record of the work tree between calls
           search_before_edit: "unknown",
@@ -576,12 +592,16 @@ function main() {
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
             : goldSignalsFromClaudeStream(result.condition, gold, emitted, goldReceipt, events),
+        gold_timeline:
+          model === "codex"
+            ? timelineSignalsFromCodex(gold, events)
+            : timelineSignalsFromClaudeStream(gold, events),
         // A missing or broken event log cannot say how many searches or errors there were
         signals:
           found === "unknown"
             ? null
             : model === "codex"
-              ? { ...signals(events ?? ""), seconds: result.seconds }
+              ? { ...signals(events ?? ""), ...sphicaCallsFromCodex(events), seconds: result.seconds }
               : { ...streamSignals(events ?? ""), seconds: result.seconds },
       });
     }
@@ -635,6 +655,9 @@ function main() {
             `answer=${r.answer_format}`,
             `patch=${r.patch.length}${r.patch_truncated ? " (cut)" : ""}`,
             `search=${r.signals?.searches ?? "?"}/${r.signals?.empty_searches ?? "?"} empty`,
+            `calls=${r.signals?.calls ? Object.values(r.signals.calls).reduce((a, b) => a + b, 0) : "?"}`,
+            `as_of=${r.signals?.as_of_searches ?? "?"}`,
+            `timeline=${r.signals?.timeline_reads ?? "?"}`,
             `turns=${r.signals?.turns ?? "?"}`,
             `${r.signals?.seconds ?? "?"}s`,
           ].join("  "),
