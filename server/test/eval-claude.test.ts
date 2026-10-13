@@ -567,6 +567,11 @@ test("a record named in a timeline is told apart from one read in full", () => {
     item: { type: "mcp_tool_call", server: "sphica", tool: "read" },
   });
   assert.equal(timelineSignalsFromCodex(["trace:s/other"], unnamed)["trace:s/other"], "unknown");
+  // A return whose start is missing from the log does not pay for a later call that never came back
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/other"], `${completed("search", hit)}\n${unnamed}`)["trace:s/other"],
+    "unknown",
+  );
 });
 
 const S = "/home/x/.cache/fence/sentinel.txt";

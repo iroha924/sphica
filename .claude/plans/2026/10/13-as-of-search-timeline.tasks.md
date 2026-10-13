@@ -184,6 +184,17 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
   - 結果: `node --import ./test/isolate-home.ts --test test/eval-claude.test.ts test/eval-grade.test.ts` → 123 件 pass。`bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0
   - 結果: `node <scratchpad>/peek-calls.ts` → 進行中の評価の実行ログ 10 件に当てると、終わった 9 件はツール別の呼び出しの数と `timeline` の使用回数が取れ、実行中の 1 件は unknown になった
 
+- [x] T15: 始まりの無い戻りが、後の終わっていない呼び出しを打ち消さないようにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T14（直す対象の、呼び出しと戻りの突き合わせが要る）
+  - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="named in a timeline" test/eval-claude.test.ts` → id の無い戻り（始まりがログに無い）の後に、id の無い終わっていない read があると、timeline の signal が unknown でなく no になるので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。その並びで unknown になる
+  - コミット: `test(evals): keep an unfinished call unknown after a return whose start is missing`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="named in a timeline" test/eval-claude.test.ts` → 直す前は落ちた（`no`）。突き合わせの件数を 0 より下げないようにした後は pass
+  - 結果: `node --import ./test/isolate-home.ts --test test/eval-claude.test.ts test/eval-grade.test.ts` → 123 件 pass。`bun run check` → 終了コード 0
+
 ## 記録
 
 - 2026-10-13 / T01 / plan の D は「後から足された field の語で当たらないこと」を挙げていたが、schema が field の後からの追加を禁じている（trigger の文面 `field values are written with the unit`） / field には時刻の条件を付けず、記録の保存の時刻だけで判定する。そのテストは書かない
@@ -214,3 +225,4 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / 全体 / `review-shipping` のブランチ全体の確認（92ef98b4..53d3c1b8）: 配布物に止める指摘なし。pack した 0.6.55 のファイル一覧は公開済みの 0.6.54 と同じ 53 件で、違うのは `package.json`、2 つの `plugin.json`、`README.md`、`dist/mcp.js` だけ。T12 の cross join は場所 0・1・3・200・201 で inner join と行も順序も同じ、と報告した（こちらでは流し直していない）
 - 2026-10-13 / 全体 / 予定外の発見: リポジトリの `server/node_modules/node_modules` に、自分自身を指す symlink が 18:28:42 にできていた（追跡外）。レビュー用のサブエージェントが作業用の写しを作るときに作ったと見ている（推測）。これがあると手元の bundle の `THIRD_PARTY_NOTICES.md` に同じパッケージが重複する（103 → 231。`verify` のログで確認）。`dist/*.js` は変わらない / symlink を消した。A1 の `bun run verify` は評価の実行が終わってから流し直す
 - 2026-10-13 / 全体 / Codex の全差分のレビュー（92ef98b4..53d3c1b8、effort high）: 指摘 4 件、どれも Codex が再現済み。(1) timeline で記録でない ref の行を測らずに足すので 32 KiB を超える（T03 の中で、`review-shipping` の「この分岐は通らない」を受けて測る処理を消したのが原因。ref が 1 つなら成り立つが複数だと成り立たない）→ 採用、T13。(2) 終わっていない Codex の read で timeline の signal が no になる、(3) 記録の本文が引用した記録名を timeline で名前が出たと数える、(4) 引数の無い呼び出しで使用回数が 0 になる → 採用、T14
+- 2026-10-13 / T13, T14 / Codex の直しの再レビュー（53d3c1b8..5ff7b278）: 4 件のうち 3 件は塞がれたと確認（timeline の予算は 300 通りで最大がちょうど 32,768 バイト）。残り 1 件（id の無い戻りが先にあると、後の終わっていない呼び出しが打ち消される）を採用 / 修正タスク T15 を足した。実際の Codex のログの item には id がある（評価の実行ログで確認）ので、id の無いログだけの話

@@ -161,7 +161,8 @@ function codexSphica(events: string | null): {
     }
     if (type !== "item.completed") continue;
     if (typeof it.id === "string") open.delete(it.id);
-    else unnamed--;
+    // Never below zero: a return whose start the log lacks must not pay for a later call that never came back
+    else unnamed = Math.max(0, unnamed - 1);
     if (!it.result || !Array.isArray(it.result.content)) {
       readable = false;
       continue;
