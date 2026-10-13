@@ -105,6 +105,17 @@ base: main
   - 結果: `python3 <scratchpad>/mutate-timeline3.py` → `review-shipping` が「テストが見分けていない」と挙げた書き換えを含む 14 個のうち 13 個が落ちた。残る 1 個（同じ場所の問い合わせの limit を外す）は返信が変わらず、読む行数だけが増える書き換え
   - 結果: `bun run test` → 終了コード 0（1280 件 pass、`timeline.ts` の行の網羅 98.84%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
+- [x] T12: 同じ場所の問い合わせを、場所が 200 あっても path の索引から引く
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T11（直す対象の、場所を問い合わせの中で照合する処理が要る）
+  - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="through the path index" test/timeline.test.ts` → 場所が 200 のとき、実行計画が `SEARCH f USING INDEX unit_content (project_id=?)`（project の記録を全部たどる）になり、`unit_anchor_path` を使わないので落ちる
+  - 完了条件: `bun run test` → 終了コード 0。場所が 3 のときも 200 のときも、同じ場所の問い合わせの実行計画が `SEARCH a USING INDEX unit_anchor_path` になる
+  - コミット: `fix(read): reach a timeline's places by path even with 200 of them`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="through the path index" test/timeline.test.ts` → 直す前は落ちた（計画が `SEARCH f USING INDEX unit_content (project_id=?) | SEARCH a USING INDEX unit_anchor_live_once`）。cross join で結合の順を固定した後は pass
+  - 結果: `bun run test` → 終了コード 0（1280 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
+
 ## P3: 利用者向けの文面
 
 README と plugin の文面が、新しい 2 つの引数を説明する。
@@ -174,3 +185,5 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T05 / `review-shipping`: README の「後から保存された記録は別に名前を出す」は、実際は今の検索に当たるものだけを 10 件まで出す / 両方の README をそう直した
 - 2026-10-13 / T05 / 変更欄と完了条件を変えた。前: `README.md`, `plugin/README.md`。新: `README.md`, `README.ja.md` / `plugin/README.md` は bundle が作る追跡外の写し（`.gitignore`）で、手で直すファイルではない。日本語の README が別にある。plugin の Skill と reviewers の文面は `rg` で確かめ、`search` と `read` の引数を並べている箇所が無かったので変えていない
 - 2026-10-13 / T10 / `review-shipping`: 止める指摘なし。as_of 無しの検索は v0.6.54 の bundle と 168 回比べて差が無く、過去の時点の検索は後から保存された候補が 2000 件あるとき 1 回あたり 110〜160 ms 増える（記録 3 万件で最大 334 ms、ふつうの検索の約 1.5 倍）と報告した（こちらでは測り直していない）。読み取りの MCP に時間の上限は無いので受け入れる。テストが見分けていない書き換え 5 個は採用し、T10 の中でテストを足した
+- 2026-10-13 / T11 / Codex のコミットのレビュー（fcfee2a5）: 前回の 2 件は塞がれたと確認。F1（path の条件を先に書いても、場所が 200 あると索引を使わず project の記録をたどる。記録 1 万件で同じ場所の問い合わせだけで約 150 ms。再現つき）を採用 / 修正タスク T12 を足した。返信の中身は正しく、時間だけの問題。T11 で足した実行計画のテストは場所 3 つの段階しか見ていなかった
+- 2026-10-13 / T12 / このコミットの前に `review-shipping` は流していない（問い合わせの結合の順を変える 4 行）/ PR の前に、ブランチ全体を `review-shipping` と Codex の全差分のレビューに見せる

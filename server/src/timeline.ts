@@ -251,7 +251,9 @@ async function linesOf(
   const samePlace = places.length
     ? await db
         .selectFrom("unit_anchor as a")
-        .innerJoin("unit as f", "f.id", "a.unit_id")
+        // cross join fixes the order: the anchors at the paths drive, whatever the planner guesses for a long list of places
+        .crossJoin("unit as f")
+        .whereRef("f.id", "=", "a.unit_id")
         .select(["f.id", "f.key", "f.kind", "f.text", "f.created_at"])
         .distinct()
         .where("f.project_id", "=", projectId)
@@ -259,7 +261,7 @@ async function linesOf(
         .where("f.kind", "in", ["finding", "dead_end", "question"])
         .where("f.id", "not in", ids)
         .where("a.retired_at", "is", null)
-        // The paths first, so the anchors are found through their index by path rather than by walking every record
+        // The paths on their own, so the anchors are found through their index by path rather than by walking every record
         .where("a.path", "in", [...new Set(places.map((at) => at.path))])
         .where((eb) =>
           eb.or(

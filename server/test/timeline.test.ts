@@ -1086,7 +1086,15 @@ test("a timeline looks for records at each of the chain's places through the pat
     for (let i = 0; i < 201; i++) place(entry, `src/p${i}.ts`);
     place(record("near", "finding", at("2026-09-29T00:00:00Z"), others), "src/p0.ts");
     place(record("far", "finding", at("2026-09-29T00:00:01Z"), others), "src/p200.ts");
-    const wide = parts(await timelineRefs(db.reader, p, [`u${entry}`]));
+    let wideReply = "";
+    const wideRan = await statements(async () => {
+      wideReply = await timelineRefs(db.reader, p, [`u${entry}`]);
+    });
+    const wide = parts(wideReply);
+    // With 200 places the anchors are still reached by path: the join order is fixed, not left to the planner's guess
+    const atCap = wideRan.filter((s) => s.includes('"unit_anchor" as "a"') && s.includes('"a"."path" in'));
+    assert.equal(atCap.length, 1);
+    assert.match(plan(db, atCap[0] ?? ""), /SEARCH a USING INDEX unit_anchor_path/);
     assert.ok(wide.lines.some((l) => l.includes("trace:ext-s1/near ")));
     assert.ok(!wide.lines.some((l) => l.includes("trace:ext-s1/far ")));
     assert.equal(
