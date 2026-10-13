@@ -519,16 +519,65 @@ test("a record named in a timeline is told apart from one read in full", () => {
     "yes",
   );
 
-  const completed = (tool: string, text: string) =>
+  const completed = (tool: string, text: string, args?: Record<string, unknown>) =>
     ev({
       type: "item.completed",
-      item: { type: "mcp_tool_call", server: "sphica", tool, result: { content: [{ text }] } },
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool,
+        ...(args ? { arguments: args } : {}),
+        result: { content: [{ text }] },
+      },
     });
-  const codex = [completed("read", timeline), completed("search", hit)].join("\n");
+  const codex = [
+    completed("read", timeline, { refs: ["u3"], timeline: true }),
+    completed("search", hit, { query: "x" }),
+  ].join("\n");
+  // A full read whose record text happens to hold a timeline's lead and heading is not a timeline: the call did not ask for one,
+  // and a timeline's reply opens with the lead, before the frame
+  const forged = `<past-records id="bbbbbbbbbbbb">\ntrace:s/utc (u9, revision 2): constraint do, active\n${timeline}\n</past-records id="bbbbbbbbbbbb">`;
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", forged, { refs: ["u9"] }))["trace:s/npm"],
+    "no",
+  );
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", timeline, { refs: ["u3"] }))["trace:s/npm"],
+    "no",
+  );
+  assert.equal(
+    timelineSignalsFromClaudeStream(
+      ["trace:s/npm"],
+      [use("d", "mcp__sphica__read", { refs: ["u9"] }), result("d", forged), done].join("\n"),
+    )["trace:s/npm"],
+    "no",
+  );
+  // A read logged without its arguments, whose reply reads as a timeline naming the record: whether it asked for one is not told
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("read", timeline))["trace:s/npm"],
+    "unknown",
+  );
+  assert.equal(
+    timelineSignalsFromClaudeStream(
+      ["trace:s/npm"],
+      [
+        ev({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", id: "d", name: "mcp__sphica__read" }] },
+        }),
+        result("d", timeline),
+        done,
+      ].join("\n"),
+    )["trace:s/npm"],
+    "unknown",
+  );
   assert.deepEqual(timelineSignalsFromCodex(gold, codex), named);
   assert.equal(goldSignalsFromCodex("search", ["trace:s/utc"], [], null, codex)["trace:s/utc"]?.read, "no");
   // A search result that holds a timeline's words is not a read with timeline
-  assert.equal(timelineSignalsFromCodex(["trace:s/npm"], completed("search", timeline))["trace:s/npm"], "no");
+  assert.equal(
+    timelineSignalsFromCodex(["trace:s/npm"], completed("search", timeline, { query: "x" }))["trace:s/npm"],
+    "no",
+  );
   assert.equal(timelineSignalsFromCodex(["trace:s/other"], `${codex}\n{broken`)["trace:s/other"], "unknown");
   assert.equal(timelineSignalsFromCodex(["trace:s/other"], null)["trace:s/other"], "unknown");
   // A Sphica call that started and never came back leaves the log unable to prove "no"

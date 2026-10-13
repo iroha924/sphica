@@ -117,15 +117,17 @@ export const goldNotGiven = (condition: string, gold: string[], goldHookOutput: 
  * not an event object, or a Sphica call without a result, leaves the log unable to prove "no"; a result elsewhere still proves "yes".
  */
 function codexSphica(events: string | null): {
-  results: { tool: string; text: string }[];
+  results: { tool: string; text: string; input: unknown }[];
   started: { tool: string; input: unknown }[];
   /** Whether more of Sphica's calls started than came back */
   pending: boolean;
   readable: boolean;
 } {
   let readable = events !== null && events.trim() !== "";
-  const results: { tool: string; text: string }[] = [];
+  const results: { tool: string; text: string; input: unknown }[] = [];
   const started: { tool: string; input: unknown }[] = [];
+  /** The arguments a call started with, for a return that does not repeat them */
+  const given = new Map<string, unknown>();
   // A call is matched to its return by the item's id; items without one are matched by count
   const open = new Set<string>();
   let unnamed = 0;
@@ -156,8 +158,10 @@ function codexSphica(events: string | null): {
     if (it?.type !== "mcp_tool_call" || it.server !== "sphica" || !it.tool) continue;
     if (type === "item.started") {
       started.push({ tool: it.tool, input: it.arguments });
-      if (typeof it.id === "string") open.add(it.id);
-      else unnamed++;
+      if (typeof it.id === "string") {
+        open.add(it.id);
+        given.set(it.id, it.arguments);
+      } else unnamed++;
     }
     if (type !== "item.completed") continue;
     if (typeof it.id === "string") open.delete(it.id);
@@ -167,7 +171,11 @@ function codexSphica(events: string | null): {
       readable = false;
       continue;
     }
-    results.push({ tool: it.tool, text: it.result.content.map((c) => c.text ?? "").join("\n") });
+    results.push({
+      tool: it.tool,
+      text: it.result.content.map((c) => c.text ?? "").join("\n"),
+      input: it.arguments ?? (typeof it.id === "string" ? given.get(it.id) : undefined),
+    });
   }
   return { results, started, pending: open.size > 0 || unnamed > 0, readable };
 }
@@ -543,7 +551,8 @@ export function capPatch(patch: string): { patch: string; truncated: boolean } {
  * Sphica's own lead. A timeline is an overview, so a record named there was not read in full: this is kept apart from the read signal.
  */
 function inTimeline(text: string, key: string): boolean {
-  if (!/(^|\n)Timelines are overviews, oldest first: /.test(text)) return false;
+  // The lead comes before the frame, so a record's own text can never put it at the start of a reply
+  if (!text.startsWith("Timelines are overviews, oldest first: ")) return false;
   const k = esc(key);
   const when = "(?:\\S+|at some time \\(not recorded\\))";
   const about = new RegExp(`^(?:## Timeline of ${k} \\(u\\d+\\)$|${when} ${k} \\(u\\d+\\) )`);
@@ -553,20 +562,30 @@ function inTimeline(text: string, key: string): boolean {
   return text.split("\n").some((line) => about.test(line) || other.test(line));
 }
 
+/** Whether a read asked for a timeline: yes or no by its arguments, unknown when the log does not hold them. */
+const askedTimeline = (input: unknown): Tri =>
+  typeof input === "object" && input !== null
+    ? (input as Record<string, unknown>).timeline === true
+      ? "yes"
+      : "no"
+    : "unknown";
+
+/** One signal from the reads of a run: yes when a read that asked for a timeline named the key; unknown when the log cannot prove no. */
+function timelineSignal(reads: { input: unknown; text: string }[], key: string, complete: boolean): Tri {
+  const named = reads.filter((r) => inTimeline(r.text, key));
+  if (named.some((r) => askedTimeline(r.input) === "yes")) return "yes";
+  // A reply that reads as a timeline naming the record, from a call whose arguments the log lacks
+  return complete && !named.some((r) => askedTimeline(r.input) === "unknown") ? "no" : "unknown";
+}
+
 /** Per gold key, whether a read with timeline named it in a stream-json run. */
 export function timelineSignalsFromClaudeStream(gold: string[], events: string | null): Record<string, Tri> {
   const { calls, readable } = claudeStreamCalls(events);
   const complete = readable && calls.every((c) => !c.name.startsWith("mcp__sphica__") || c.result !== null);
-  return Object.fromEntries(
-    gold.map((key) => [
-      key,
-      calls.some((c) => c.name === READ && c.result !== null && inTimeline(c.result, key))
-        ? "yes"
-        : complete
-          ? "no"
-          : "unknown",
-    ]),
+  const reads = calls.flatMap((c) =>
+    c.name === READ && c.result !== null ? [{ input: c.input, text: c.result }] : [],
   );
+  return Object.fromEntries(gold.map((key) => [key, timelineSignal(reads, key, complete)]));
 }
 
 /** The same from Codex's JSONL events. */
@@ -574,12 +593,8 @@ export function timelineSignalsFromCodex(gold: string[], events: string | null):
   const { results, pending, readable } = codexSphica(events);
   // A Sphica call that started and never came back may be the one that would have named the record
   const complete = readable && !pending;
-  return Object.fromEntries(
-    gold.map((key) => [
-      key,
-      results.some((r) => r.tool === "read" && inTimeline(r.text, key)) ? "yes" : complete ? "no" : "unknown",
-    ]),
-  );
+  const reads = results.filter((r) => r.tool === "read");
+  return Object.fromEntries(gold.map((key) => [key, timelineSignal(reads, key, complete)]));
 }
 
 /**

@@ -1829,6 +1829,11 @@ test("compare puts old and new side by side only for the same fixture and tasks,
           },
         },
         { ...graded("o2", 1), signals: { calls: null, as_of_searches: null, timeline_reads: null } },
+        // A run whose calls were told but whose reads were logged without arguments: its timeline use is unknown, not zero
+        {
+          ...graded("o3", 2),
+          signals: { calls: { read: 2 } as Record<string, number>, as_of_searches: 0, timeline_reads: null },
+        },
         // Unknown never counts as handled, and excluded runs are left out
         graded("oc1", 1, conflictGrade("yes"), "t2"),
         graded("oc2", 1, conflictGrade("unknown"), "t2"),
@@ -1872,11 +1877,11 @@ test("compare puts old and new side by side only for the same fixture and tasks,
   assert.match(lines, /^# new: c2 \{"deliver\.js":"new"\}$/m);
   assert.match(
     lines,
-    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2, conflict handled -, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\), Sphica calls mean 3\.00 \[3\] \(read 1\.00, search 2\.00\), as_of searches 0, timeline reads 0, over 1 runs told \(unknown 1\) \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1 told \(unknown 1, no edit 0, of 2\), Sphica calls mean 2\.00 \[3 1\] \(read 0\.50, search 1\.00, status 0\.50\), as_of searches 1, timeline reads 1, over 2 runs told \(unknown 0\)$/m,
+    /^t1 codex inject: old n 3\/3, mean 1\.00, re-proposed 0\/3, conflict handled -, searched before editing 0\/0 told \(unknown 0, no edit 0, of 3\), Sphica calls mean 2\.50 \[3 2\] \(read 1\.50, search 1\.00\), as_of searches 0 \(unknown 1\), timeline reads 0 \(unknown 2\), over 2 runs told \(unknown 1\) \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1 told \(unknown 1, no edit 0, of 2\), Sphica calls mean 2\.00 \[3 1\] \(read 0\.50, search 1\.00, status 0\.50\), as_of searches 1 \(unknown 0\), timeline reads 1 \(unknown 0\), over 2 runs told \(unknown 0\)$/m,
   );
   assert.match(
     lines,
-    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\), Sphica calls mean n\/a \[\], as_of searches 0, timeline reads 0, over 0 runs told \(unknown 2\) \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\), Sphica calls mean n\/a \[\], as_of searches 0, timeline reads 0, over 0 runs told \(unknown 2\)$/m,
+    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\), Sphica calls mean n\/a \[\], as_of searches 0 \(unknown 2\), timeline reads 0 \(unknown 2\), over 0 runs told \(unknown 2\) \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\), Sphica calls mean n\/a \[\], as_of searches 0 \(unknown 2\), timeline reads 0 \(unknown 2\), over 0 runs told \(unknown 2\)$/m,
   );
   assert.throws(() => compare(old, { ...next, fixture: "g" }, []), /different fixtures/);
   assert.throws(() => compare({ ...old, fixture: undefined }, next, []), /different fixtures/);

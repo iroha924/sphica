@@ -59,8 +59,15 @@ function calls(rows: Graded[]): string {
   const told = rows.filter((r) => r.signals?.calls);
   const totals = told.map((r) => Object.values(r.signals?.calls ?? {}).reduce((a, b) => a + b, 0));
   const tools = [...new Set(told.flatMap((r) => Object.keys(r.signals?.calls ?? {})))].sort();
-  const sum = (of: (r: Graded) => number | null | undefined) => told.reduce((a, r) => a + (of(r) ?? 0), 0);
-  return `Sphica calls mean ${fmt(mean(totals))} [${totals.join(" ")}]${tools.length ? ` (${tools.map((t) => `${t} ${fmt(mean(told.map((r) => r.signals?.calls?.[t] ?? 0)))}`).join(", ")})` : ""}, as_of searches ${sum((r) => r.signals?.as_of_searches)}, timeline reads ${sum((r) => r.signals?.timeline_reads)}, over ${told.length} runs told (unknown ${rows.length - told.length})`;
+  // Each use is counted over the runs that told it: a run whose calls are counted may still have logged them without their arguments
+  const use = (of: (r: Graded) => number | null | undefined) => {
+    const known = rows.flatMap((r) => {
+      const n = of(r);
+      return typeof n === "number" ? [n] : [];
+    });
+    return `${known.reduce((a, b) => a + b, 0)} (unknown ${rows.length - known.length})`;
+  };
+  return `Sphica calls mean ${fmt(mean(totals))} [${totals.join(" ")}]${tools.length ? ` (${tools.map((t) => `${t} ${fmt(mean(told.map((r) => r.signals?.calls?.[t] ?? 0)))}`).join(", ")})` : ""}, as_of searches ${use((r) => r.signals?.as_of_searches)}, timeline reads ${use((r) => r.signals?.timeline_reads)}, over ${told.length} runs told (unknown ${rows.length - told.length})`;
 }
 
 /** A count as a rate over its denominator, with the unknowns shown beside it (never counted either way). */
