@@ -49,6 +49,11 @@ export type UnitHit = {
   authority?: Authority;
   /** Searched as of a past time: the state the record has now, when it differs from its state then */
   now?: string;
+  /**
+   * Searched as of a past time: a decision or constraint with no adoption in effect then on record. Nobody may have adopted it, or
+   * the words that did were forgotten or retracted since; the rows that are left cannot tell which, so the reply does not say
+   */
+  noAdoptionKept?: true;
 };
 
 export type UnitQuery = {
@@ -384,7 +389,11 @@ async function searchAsOf(
   const savedAt = new Map(after.map((r) => [r.id, r.created_at]));
   const later = laterHits.map((h) => ({ id: h.id, created_at: savedAt.get(h.id) ?? "" }));
   return {
-    hits: top.map(({ rank: _rank, ...h }) => ({ ...h, authority: whose.get(h.id) })),
+    hits: top.map(({ rank: _rank, ...h }) => ({
+      ...h,
+      authority: whose.get(h.id),
+      ...(whose.get(h.id) === "none" ? { noAdoptionKept: true as const } : {}),
+    })),
     weaker,
     terms: wanted,
     stopped,
@@ -738,7 +747,7 @@ function hitText(h: UnitHit): string {
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
   return [
     // A key cut for display is not one read takes: the id beside it is
-    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.now ? `, now ${h.now}` : ""}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.now ? `, now ${h.now}` : ""}${h.noAdoptionKept ? ", no adoption in effect then is on record" : h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
     preview(h.text, SHOWN.text, true),
     ...(h.why ? [`Why: ${preview(h.why, SHOWN.why, true)}`] : []),
     ...(h.revisit_when ? [`Revisit when: ${preview(h.revisit_when, SHOWN.revisit, true)}`] : []),

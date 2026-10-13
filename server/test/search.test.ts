@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { checkAnchor, locate } from "../src/anchors.ts";
 import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
+import { applyForget, previewForget } from "../src/forget.ts";
 import { readRefs, readUnit } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -1769,4 +1770,73 @@ test("a search as of a past time keeps its lead and what it left out within the 
     /Saved after|looked at up to|were read up to/,
   );
   assert.match(quiet, /^As of /);
+});
+
+test("a past view does not say nobody adopted a decision: it says no adoption in effect then is on record", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = message(db, p, { id: "m1", text: "Use pnpm for installs." });
+    const adopted = message(db, p, { id: "m2", text: "Yes, pnpm it is." });
+    const maybe = message(db, p, { id: "m3", text: "Maybe yarn for installs." });
+    await save(db, p, {
+      units: [
+        {
+          key: "pnpm",
+          kind: "decision",
+          stance: "do",
+          text: "Use pnpm for installs",
+          evidence: [{ source: `s${said}`, quote: "Use pnpm for installs.", role: "states" }],
+          adoption: [{ source: `s${adopted}`, quote: "Yes, pnpm it is." }],
+        },
+        {
+          key: "yarn",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe yarn for installs",
+          evidence: [{ source: `s${maybe}`, quote: "Maybe yarn for installs.", role: "proposes" }],
+        },
+        {
+          key: "lockfile",
+          kind: "finding",
+          text: "The installs lockfile is committed with pnpm",
+          evidence: [{ source: `s${said}`, quote: "Use pnpm for installs.", role: "states" }],
+        },
+      ],
+    });
+    const held = await tick();
+    // The owner forgets the message that adopted it: the adoption goes with its source, and the decision leaves active
+    await applyForget(db.file, p, [adopted], await previewForget(db.file, p, [adopted]));
+    const find = (asOf?: string) => searchUnits(db.reader, p, { question: "installs", limit: 10, asOf });
+    const line = (reply: string, key: string) =>
+      reply.split("\n").find((l) => l.startsWith(`## trace:ext-s1/${key} `)) ?? "";
+    // Now: nobody's adoption stands, for the one never adopted and for the one whose adoption was forgotten
+    const now = await find();
+    const today = hitsReply(now.hits, "");
+    assert.match(line(today, "pnpm"), /: decision do, candidate, adopted by no one$/);
+    assert.match(line(today, "yarn"), /: decision do, candidate, adopted by no one$/);
+    assert.ok(now.hits.every((h) => h.noAdoptionKept === undefined));
+    // As of before the forget, the first was active, so someone had adopted it. The rows left cannot tell that from a decision nobody
+    // adopted, so neither is said to be adopted by no one: both say what is on record
+    const then = await find(held);
+    const past = hitsReply(then.hits, "", { at: held, notes: then.asOf });
+    assert.match(
+      line(past, "pnpm"),
+      /: decision do, active, now candidate, no adoption in effect then is on record$/,
+    );
+    assert.match(line(past, "yarn"), /: decision do, candidate, no adoption in effect then is on record$/);
+    assert.doesNotMatch(past, /adopted by no one/);
+    // A record that takes no adoption says nothing about one
+    assert.match(line(past, "lockfile"), /: finding, active$/);
+    assert.deepEqual(
+      then.hits.map((h) => [h.key.replace("trace:ext-s1/", ""), h.noAdoptionKept ?? false]).sort(),
+      [
+        ["lockfile", false],
+        ["pnpm", true],
+        ["yarn", true],
+      ],
+    );
+  } finally {
+    await db.done();
+  }
 });

@@ -139,7 +139,7 @@ base: main
   - 結果: `python3 <scratchpad>/mutate-gh.py` → 保存の行・根拠の追加・adoption の追加・anchor の追加を時刻の比較へ戻す書き換え 4 個が、4 個とも落ちた
   - 結果: `bun run test` → 終了コード 0（1281 件 pass）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
-- [ ] T17: 過去の時点の検索で、決定に「adopted by no one」と言わず、記録に残っていることだけを言う
+- [x] T17: 過去の時点の検索で、決定に「adopted by no one」と言わず、記録に残っていることだけを言う
   - 種別: 修正
   - 計画: S1
   - 依存: T02（直す対象の、過去の時点の検索の返信が要る）
@@ -147,6 +147,9 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="a past view does not say nobody adopted" test/search.test.ts` → adoption の元の発言を forget した後、その前の時点で検索すると、当時 active だった決定に「adopted by no one」と出るので落ちる
   - 完了条件: `bun run test` → 終了コード 0。過去の時点の検索で、その時点に有効な adoption が記録に無い決定・制約は `no adoption in effect then is on record` と出る（採用されなかったのか、後から forget・撤回されたのかは言わない）。今の検索は今までどおり `adopted by no one`
   - コミット: `fix(search): in a past view, say what is on record instead of that nobody adopted a decision`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="forgotten since" test/search.test.ts` → 直す前は落ちた（当時 active だった決定に印が無く、`adopted by no one` と出る。このときのテスト名は書き直す前のもの）。直した後は pass
+  - 結果: `python3 <scratchpad>/mutate-gh.py` → 印を active のときだけ付ける・付けない・全部の決定に付ける、の書き換え 3 個が 3 個とも落ちた
+  - 結果: `bun run test` → 終了コード 0（1281 件 pass）。`bun run check` → 終了コード 0
 
 ## P3: 利用者向けの文面
 
