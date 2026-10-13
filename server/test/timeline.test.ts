@@ -19,8 +19,10 @@ import {
   insert,
   manyAdopted,
   message,
+  plan,
   project,
   run,
+  statements,
   type TempDb,
   tempDb,
 } from "./temp-db.ts";
@@ -215,6 +217,8 @@ test("a timeline tells a chain of replacements oldest first, with each reason, i
       `^\\S+ ${u("readers")} saved \\[same place\\]: finding, Readers older than 2019 cannot open WebP\\.$`,
     );
     assert.doesNotMatch(text, /elsewhere|symbolic|retiredplace|atwebp|quarantined|otherproject/);
+    // Each change is told once: a state the chain's own run gave a chain record is not also told as a change to a record outside it
+    assert.equal(lines.filter((l) => / became superseded: /.test(l)).length, 2);
     // A replacement in effect is told by its period, never also as a proposal
     assert.doesNotMatch(text, /proposed to replace/);
     // The question the last decision answered was saved by another run and closed by the chain's
@@ -828,6 +832,267 @@ test("a timeline takes records only, goes on past a ref that is not one, and nam
     const odd = parts(await timelineRefs(db.reader, p, [`x\n${"y".repeat(400)}`])).lines;
     assert.equal(odd.length, 1);
     assert.match(odd[0] ?? "", /^x y{198}: not found in this project$/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("a timeline finds a record at the same place behind many at the same path, and a change the chain's run made to a record it saved", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const source = message(db, p, { id: "m1", text: "Settled." });
+    const runId = run(db, p);
+    const saved = at("2026-09-27T00:00:00Z");
+    const record = (
+      key: string,
+      kind: string,
+      when: string,
+      by: number,
+      extra: Record<string, string> = {},
+    ) =>
+      insert(db, "unit", {
+        project_id: p,
+        key: `trace:ext-s1/${key}`,
+        kind,
+        text: `Text of ${key}.`,
+        extraction: "supported",
+        run_id: by,
+        created_at: when,
+        content_hash: hash(key.length),
+        ...extra,
+      });
+    const place = (unit: number, symbol: string) =>
+      insert(db, "unit_anchor", {
+        unit_id: unit,
+        path: "src/a.ts",
+        symbol,
+        role: "applies_to",
+        run_id: runId,
+        added_at: saved,
+      });
+    const state = (unit: number, from_state: string | null, to_state: string, reason: string, when = saved) =>
+      insert(db, "unit_state", { unit_id: unit, from_state, to_state, at: when, reason, run_id: runId });
+    const entry = record("entry", "decision", saved, runId, { stance: "do" });
+    place(entry, "target");
+    const span = { source_id: source, span_start: 0, span_end: 8, run_id: runId, added_at: saved };
+    insert(db, "unit_evidence", { unit_id: entry, ...span, role: "states" });
+    insert(db, "unit_adoption", { unit_id: entry, ...span, route: "owner_statement" });
+    state(entry, null, "candidate", "r");
+    state(entry, "candidate", "active", "r");
+    // An older finding at the same place, saved by another run, then 201 newer ones at the same path under another symbol
+    const others = run(db, p);
+    const old = record("old", "finding", at("2026-09-01T00:00:00Z"), others);
+    place(old, "target");
+    for (let i = 0; i < 201; i++)
+      place(
+        record(
+          `near${i}`,
+          "finding",
+          at(
+            `2026-09-28T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`,
+          ),
+          others,
+        ),
+        "other",
+      );
+    // A question the entry's own run saved and then closed
+    const asked = record("asked", "question", saved, runId);
+    insert(db, "unit_evidence", { unit_id: asked, ...span, role: "states" });
+    state(asked, null, "candidate", "r");
+    state(asked, "candidate", "active", "evidence found");
+    state(asked, "active", "withdrawn", "answered by trace:ext-s1/entry", at("2026-09-27T00:00:01Z"));
+
+    const { lines, notes } = parts(await timelineRefs(db.reader, p, [`u${entry}`]));
+    const text = lines.join("\n");
+    assert.match(
+      text,
+      new RegExp(
+        `^2026-09-01T00:00:00\\.000Z trace:ext-s1/old \\(u${old}\\) saved \\[same place\\]: finding, Text of old\\.$`,
+        "m",
+      ),
+    );
+    assert.doesNotMatch(text, /near\d+/);
+    assert.deepEqual(notes, []);
+    // Its save is one line; of its states, only the change after the save is told, since becoming active is the save itself
+    assert.match(
+      text,
+      new RegExp(
+        `^${saved} trace:ext-s1/asked \\(u${asked}\\) saved \\[same run\\]: question, Text of asked\\.$`,
+        "m",
+      ),
+    );
+    assert.match(
+      text,
+      new RegExp(
+        `^2026-09-27T00:00:01\\.000Z trace:ext-s1/asked \\(u${asked}\\) became withdrawn: answered by trace:ext-s1/entry$`,
+        "m",
+      ),
+    );
+    assert.doesNotMatch(text, /asked \(u\d+\) became (active|candidate)/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("a timeline looks for records at each of the chain's places through the path index, shows each once, and says where its caps cut", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const source = message(db, p, { id: "m1", text: "Settled." });
+    const runId = run(db, p);
+    const others = run(db, p);
+    const saved = at("2026-09-27T00:00:00Z");
+    const record = (
+      key: string,
+      kind: string,
+      when: string,
+      by: number,
+      extra: Record<string, string> = {},
+    ) =>
+      insert(db, "unit", {
+        project_id: p,
+        key: `trace:ext-s1/${key}`,
+        kind,
+        text: `Text of ${key}.`,
+        extraction: "supported",
+        run_id: by,
+        created_at: when,
+        content_hash: hash(key.length),
+        ...extra,
+      });
+    const place = (unit: number, path: string, symbol: string | null = null) =>
+      insert(db, "unit_anchor", {
+        unit_id: unit,
+        path,
+        symbol,
+        role: "applies_to",
+        run_id: runId,
+        added_at: saved,
+      });
+    const state = (
+      unit: number,
+      from_state: string | null,
+      to_state: string,
+      reason: string,
+      by: number,
+      when = saved,
+    ) => insert(db, "unit_state", { unit_id: unit, from_state, to_state, at: when, reason, run_id: by });
+    const span = { source_id: source, span_start: 0, span_end: 8, run_id: runId, added_at: saved };
+    // The record asked for is anchored at three places: two symbols of one file, and another file as a whole
+    const entry = record("entry", "decision", saved, runId, { stance: "do" });
+    place(entry, "src/a.ts", "target");
+    place(entry, "src/a.ts", "second");
+    place(entry, "src/b.ts");
+    insert(db, "unit_evidence", { unit_id: entry, ...span, role: "states" });
+    insert(db, "unit_adoption", { unit_id: entry, ...span, route: "owner_statement" });
+    state(entry, null, "candidate", "r", runId);
+    state(entry, "candidate", "active", "r", runId);
+    const early = at("2026-09-01T00:00:00Z");
+    // At two of the places: one line. At the second symbol only: found too. Never supported, or not a finding: not related
+    const both = record("both", "finding", early, others);
+    place(both, "src/a.ts", "target");
+    place(both, "src/b.ts");
+    place(record("first", "finding", early, others), "src/a.ts", "target");
+    const second = record("second", "dead_end", early, others);
+    place(second, "src/a.ts", "second");
+    place(
+      record("unsupported", "finding", early, others, { extraction: "quarantined", extraction_reason: "x" }),
+      "src/a.ts",
+      "target",
+    );
+    place(record("decided", "decision", early, others, { stance: "do" }), "src/a.ts", "target");
+    // The chain's run made a record of another run active, and superseded one it saved itself
+    const woken = record("woken", "finding", early, others);
+    insert(db, "unit_evidence", { unit_id: woken, ...span, role: "states" });
+    state(woken, null, "candidate", "r", others, early);
+    state(woken, "candidate", "active", "support complete", runId);
+    const replaced = record("replaced", "finding", saved, runId);
+    insert(db, "unit_evidence", { unit_id: replaced, ...span, role: "states" });
+    state(replaced, null, "candidate", "r", runId);
+    state(replaced, "candidate", "active", "evidence found", runId);
+    insert(db, "unit_link", {
+      from_unit: woken,
+      to_unit: replaced,
+      kind: "supersedes",
+      run_id: runId,
+      added_at: saved,
+    });
+    insert(db, "unit_replacement", {
+      from_unit: woken,
+      to_unit: replaced,
+      run_id: runId,
+      started_at: at("2026-09-27T00:00:01Z"),
+    });
+    state(
+      replaced,
+      "active",
+      "superseded",
+      "superseded by trace:ext-s1/woken",
+      runId,
+      at("2026-09-27T00:00:01Z"),
+    );
+
+    let reply = "";
+    const ran = await statements(async () => {
+      reply = await timelineRefs(db.reader, p, [`u${entry}`]);
+    });
+    const first = parts(reply);
+    const shown = (lines: string[]) =>
+      lines.flatMap(
+        (l) =>
+          /^\S+ trace:ext-s1\/(\S+) \(u\d+\) (saved \[[^\]]+\]|became \w+)/.exec(l)?.slice(1, 3).join(" ") ??
+          [],
+      );
+    assert.deepEqual(shown(first.lines), [
+      "both saved [same place]",
+      "first saved [same place]",
+      "second saved [same place]",
+      "replaced saved [same run]",
+      "entry became active",
+      "woken became active",
+      "replaced became superseded",
+    ]);
+    assert.deepEqual(first.notes, []);
+    // The anchors are reached by path, not by walking every record of the project
+    const byPlace = ran.filter((s) => s.includes('"unit_anchor" as "a"') && s.includes('"a"."path" in'));
+    assert.equal(byPlace.length, 1);
+    assert.match(plan(db, byPlace[0] ?? ""), /SEARCH a USING INDEX unit_anchor_path/);
+
+    // 250 newer findings, each at two of the places: the 30 newest are shown once each, and the count says the reading was cut
+    for (let i = 0; i < 250; i++) {
+      const f = record(
+        `many${i}`,
+        "finding",
+        at(
+          `2026-09-28T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z`,
+        ),
+        others,
+      );
+      place(f, "src/a.ts", "target");
+      place(f, "src/b.ts");
+    }
+    const crowded = parts(await timelineRefs(db.reader, p, [`u${entry}`]));
+    const many = crowded.lines
+      .flatMap((l) => /\/many(\d+) \(u\d+\) saved \[same place\]/.exec(l)?.[1] ?? [])
+      .map(Number);
+    assert.deepEqual(
+      many,
+      Array.from({ length: 30 }, (_, i) => 220 + i),
+    );
+    assert.deepEqual(crowded.notes, [`u${entry}: 171 or more related records left out.`]);
+
+    // More places than are looked at: the oldest 200 are, and the reply says the rest were not
+    for (let i = 0; i < 201; i++) place(entry, `src/p${i}.ts`);
+    place(record("near", "finding", at("2026-09-29T00:00:00Z"), others), "src/p0.ts");
+    place(record("far", "finding", at("2026-09-29T00:00:01Z"), others), "src/p200.ts");
+    const wide = parts(await timelineRefs(db.reader, p, [`u${entry}`]));
+    assert.ok(wide.lines.some((l) => l.includes("trace:ext-s1/near ")));
+    assert.ok(!wide.lines.some((l) => l.includes("trace:ext-s1/far ")));
+    assert.equal(
+      wide.notes.at(-1),
+      `u${entry}: its chain is anchored at more than 200 places; records at the same place were looked for at the 200 oldest only.`,
+    );
   } finally {
     await db.done();
   }

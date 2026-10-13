@@ -16,6 +16,8 @@ const EDGE_NAMED = 10;
 /** Related records shown, and how many each way of being related is read for */
 const RELATED_MAX = 30;
 const RELATED_READ = 200;
+/** Places of the chain looked at for records at the same place: one condition each in a single query */
+const PLACES_MAX = 200;
 /** Records named for the lines a reply left out: a list of every one could alone pass the budget */
 const LEFT_NAMED = 20;
 const SHOWN = { text: 200, who: 100, path: 200, symbol: 100, sources: 5 } as const;
@@ -102,7 +104,7 @@ async function linesOf(
   db: Reads,
   projectId: number,
   entry: number,
-): Promise<{ lines: Line[]; edge: number[]; relatedMore: number; relatedCut: boolean }> {
+): Promise<{ lines: Line[]; edge: number[]; relatedMore: number; relatedCut: boolean; placesCut: boolean }> {
   const { ids, edge } = await chainOf(db, entry);
   const units = await db
     .selectFrom("unit")
@@ -218,7 +220,8 @@ async function linesOf(
         .orderBy("id", "desc")
         .limit(RELATED_READ + 1)
         .execute(),
-      // A change a chain record's run made to a record another run saved, such as a question it answered
+      // A change a chain record's run made to a record outside the chain, such as a question it answered. For a record that run saved
+      // itself, becoming a candidate and active is the save, which its own line tells; only its leaving is a change
       db
         .selectFrom("unit_state as t")
         .innerJoin("unit as o", "o.id", "t.unit_id")
@@ -226,28 +229,52 @@ async function linesOf(
         .where("o.project_id", "=", projectId)
         .where("t.run_id", "in", runs)
         .where("o.id", "not in", ids)
-        .whereRef("o.run_id", "<>", "t.run_id")
+        .where((eb) =>
+          eb.or([
+            eb("o.run_id", "<>", eb.ref("t.run_id")),
+            eb("t.to_state", "in", ["superseded", "withdrawn"]),
+          ]),
+        )
         .execute(),
     ]);
-  const places = anchors.filter((a) => a.retired_at === null);
-  const paths = [...new Set(places.map((a) => a.path))];
-  const samePlace = paths.length
-    ? (
-        await db
-          .selectFrom("unit_anchor as a")
-          .innerJoin("unit as f", "f.id", "a.unit_id")
-          .select(["f.id", "f.key", "f.kind", "f.text", "f.created_at", "a.path", "a.symbol"])
-          .where("f.project_id", "=", projectId)
-          .where("f.extraction", "=", "supported")
-          .where("f.kind", "in", ["finding", "dead_end", "question"])
-          .where("f.id", "not in", ids)
-          .where("a.retired_at", "is", null)
-          .where("a.path", "in", paths)
-          .orderBy("f.created_at", "desc")
-          .orderBy("f.id", "desc")
-          .limit(RELATED_READ + 1)
-          .execute()
-      ).filter((f) => places.some((a) => a.path === f.path && a.symbol === f.symbol))
+  // The places the chain is anchored at now, each once, oldest anchor first. They are matched in the query itself, so the cap on what
+  // is read counts records at those places and never ones that only share a path
+  const everyPlace = [
+    ...new Map(
+      anchors
+        .filter((a) => a.retired_at === null)
+        .sort((a, b) => a.id - b.id)
+        .map((a) => [JSON.stringify([a.path, a.symbol]), a]),
+    ).values(),
+  ];
+  const places = everyPlace.slice(0, PLACES_MAX);
+  const samePlace = places.length
+    ? await db
+        .selectFrom("unit_anchor as a")
+        .innerJoin("unit as f", "f.id", "a.unit_id")
+        .select(["f.id", "f.key", "f.kind", "f.text", "f.created_at"])
+        .distinct()
+        .where("f.project_id", "=", projectId)
+        .where("f.extraction", "=", "supported")
+        .where("f.kind", "in", ["finding", "dead_end", "question"])
+        .where("f.id", "not in", ids)
+        .where("a.retired_at", "is", null)
+        // The paths first, so the anchors are found through their index by path rather than by walking every record
+        .where("a.path", "in", [...new Set(places.map((at) => at.path))])
+        .where((eb) =>
+          eb.or(
+            places.map((at) =>
+              eb.and([
+                eb("a.path", "=", at.path),
+                at.symbol === null ? eb("a.symbol", "is", null) : eb("a.symbol", "=", at.symbol),
+              ]),
+            ),
+          ),
+        )
+        .orderBy("f.created_at", "desc")
+        .orderBy("f.id", "desc")
+        .limit(RELATED_READ + 1)
+        .execute()
     : [];
 
   const name = (id: number, key = unit.get(id)?.key ?? `u${id}`) => `${keyShown(key, id)} (u${id})`;
@@ -472,6 +499,7 @@ async function linesOf(
     edge,
     relatedMore: Math.max(ordered.length - RELATED_MAX, 0),
     relatedCut: sameRun.length > RELATED_READ || samePlace.length > RELATED_READ,
+    placesCut: everyPlace.length > PLACES_MAX,
   };
 }
 
@@ -517,7 +545,7 @@ export async function timelineRefs(db: Reads, projectId: number, refs: string[])
       continue;
     }
     if (!u || u === "other") continue;
-    const { lines, edge, relatedMore, relatedCut } = await linesOf(db, projectId, u.id);
+    const { lines, edge, relatedMore, relatedCut, placesCut } = await linesOf(db, projectId, u.id);
     const newestFirst = (a: Line, b: Line) => byTime(b, a);
     const wanted = [
       ...lines.filter((l) => l.must),
@@ -540,6 +568,9 @@ export async function timelineRefs(db: Reads, projectId: number, refs: string[])
             : "",
           more
             ? `u${u.id}: ${more}${relatedCut ? " or more" : ""} related records left out${others.length ? `: ${named(others, LEFT_NAMED)}` : ""}.`
+            : "",
+          placesCut
+            ? `u${u.id}: its chain is anchored at more than ${PLACES_MAX} places; records at the same place were looked for at the ${PLACES_MAX} oldest only.`
             : "",
           edge.length
             ? `u${u.id}: its chain was followed for ${CHAIN_MAX} records and stops at ${named(edge, EDGE_NAMED)}; beyond them it was not followed, and how many more there are is not known.`

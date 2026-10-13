@@ -90,7 +90,7 @@ base: main
   - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="read takes timeline" test/plugin.test.ts` → `mcp.ts` を HEAD に戻すと落ちた（`timeline` が未知の引数として断られる）。戻すと通った。受け入れケース retrieval-15 は、driver の step が無い間は流せないので、red は MCP のテストで取った
   - 結果: `bun run test` → 終了コード 0（T03・T04 のツリーで 1274 件 pass）。`bun run verify` → 終了コード 0（`sql:reach` 260 / 260、受け入れ 140 件 pass、`mcp.js` は 1.71 MB で上限内）
 
-- [ ] T11: 同じ場所の記録を問い合わせの中で照合し、連なりの run が自分で保存した記録に加えた変化も出す
+- [x] T11: 同じ場所の記録を問い合わせの中で照合し、連なりの run が自分で保存した記録に加えた変化も出す
   - 種別: 修正
   - 計画: S2
   - 依存: T03（直す対象の `timelineRefs` が要る）
@@ -98,6 +98,9 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="behind many at the same path" test/timeline.test.ts` → 同じ path の別の symbol の記録が 201 件あると、同じ場所の古い記録が timeline に出ないので落ちる
   - 完了条件: `bun run test` → 終了コード 0。同じ場所の照合が読む件数の上限より前に行われ、連なりの run が自分で保存した記録を閉じた変化が 1 行で出る（保存の時点の candidate・active は出ない）
   - コミット: `fix(read): match a timeline's places in the query and show a run's changes to records it saved`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="behind many at the same path" test/timeline.test.ts` → 直す前は落ちた（同じ場所の古い記録の行が無い）。直した後は pass
+  - 結果: `python3 <scratchpad>/mutate-timeline3.py` → `review-shipping` が「テストが見分けていない」と挙げた書き換えを含む 14 個のうち 13 個が落ちた。残る 1 個（同じ場所の問い合わせの limit を外す）は返信が変わらず、読む行数だけが増える書き換え
+  - 結果: `bun run test` → 終了コード 0（1280 件 pass、`timeline.ts` の行の網羅 98.84%）。`bun run check` → 終了コード 0。`bun run sql:reach` → 261 / 261
 
 ## P3: 利用者向けの文面
 
@@ -163,3 +166,5 @@ README と plugin の文面が、新しい 2 つの引数を説明する。
 - 2026-10-13 / T03, T04 / Codex のコミットのレビュー（3bb4abac、9a3eb84c。Codex 側の都合で途中で終わり、全観点は見ていない）: F1（同じ場所の記録を path だけで 201 件に絞ってから symbol を照合するので、該当する記録が黙って落ちる）と F2（連なりの run が自分で保存した連なりの外の記録に加えた変化が出ない）。どちらも採用 / 修正タスク T11 を足した
 - 2026-10-13 / T08 / 3 つの決定には `why` を持たせず、理由は同じ trace の finding と dead end だけに置いた。anchor は付けていない（既存のタスクが編集するファイルに結び付けると、その配信の数が変わる） / 同じ場所で結び付く記録は、このタスクでは測らない。テスト（`timeline.test.ts`）で確かめてある
 - 2026-10-13 / T08 / タスクは `history-sync`（search 条件、3 回）。prompt は日本語、記録は英語
+- 2026-10-13 / T11 / `review-shipping`: 止める指摘なし。場所が 200 を超えると残りを黙って捨てる件は採用し、返信の注記に書くようにした（anchor の古い順に 200）。場所が 2 つ以上あると同じ場所の問い合わせが path の索引を使わない件（記録 3 万件で 1 回 250 ms と報告）は採用し、path の条件を先に置いて索引で引くようにした（テストで実行計画を確かめる）。テストが見分けていない書き換えは、テストを 1 本足して塞いだ
+- 2026-10-13 / T05 / `review-shipping`: README の「後から保存された記録は別に名前を出す」は、実際は今の検索に当たるものだけを 10 件まで出す / 両方の README をそう直した
