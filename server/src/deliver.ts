@@ -599,9 +599,7 @@ async function commandsRun(db: Reads, projectId: number, command: string): Promi
     .execute();
   // The first word is a substring of any command that runs the anchor, and the test is far cheaper than splitting the command
   const ids = rows
-    .filter(
-      (r) => command.includes(r.command.slice(0, r.command.indexOf(" "))) && runsCommand(command, r.command),
-    )
+    .filter((r) => command.includes(words(r.command)[0] ?? "") && runsCommand(command, r.command))
     .map((r) => r.id);
   return [...new Set(ids)].sort((a, b) => b - a);
 }
@@ -739,16 +737,20 @@ async function namedInCommand(
     );
 }
 
+/** A command's words: they end at spaces and at the operator characters ; | & (PowerShell 5.1 chains with ; and no space) */
+const words = (text: string) => text.split(/[\s;|&]+/).filter(Boolean);
+
 /**
- * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, on one line. No shell syntax is read, so
- * a word keeps any quote around it (a quoted mention never matches) while an unquoted mention (`echo pnpm test --watch`) does.
+ * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, on one line. No other shell syntax is
+ * read, so a word keeps any quote around it (a quoted mention never matches) while an unquoted mention (`echo pnpm test --watch`) does.
  */
 export function runsCommand(command: string, anchor: string): boolean {
-  const want = anchor.split(" ");
+  const want = words(anchor);
+  if (!want.length) return false;
   return command.split(/\r\n|\n|\r/).some((line) => {
-    const words = line.split(/\s+/).filter(Boolean);
-    for (let i = 0; i + want.length <= words.length; i++)
-      if (want.every((w, j) => words[i + j] === w)) return true;
+    const got = words(line);
+    for (let i = 0; i + want.length <= got.length; i++)
+      if (want.every((w, j) => got[i + j] === w)) return true;
     return false;
   });
 }

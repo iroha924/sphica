@@ -90,6 +90,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `feat(deliver): stop the first call that repeats a recorded dead end's command (T06)`
   - 結果: red を実測（commandsRun を空にすると injection-29〜34 の 6 件が「call N stopped」で落ちる）。直した後 `bun run acceptance` の injection 34 件 pass。単体テスト 6 件 pass（並行のテストは 5 回続けて pass）。`bun run verify` → exit 0（受け入れ 148 件 pass）。deliver.js 457,240 バイト
 
+- [x] T11: 照合で ; | & も語の区切りにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T05（直す照合の関数が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="command anchor matches only" test/deliver.test.ts` → `pnpm test --watch; Get-ChildItem` が一致せず落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → `;` `|` `&` でつないだコマンドが一致し、`--watch=false;` は一致しない
+  - コミット: `fix(deliver): end a command's words at ; | & too, as PowerShell chains with ; (T11)`
+  - 結果: red を実測（fail 1、`pnpm test --watch; Get-ChildItem`）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 66 / fail 0。injection の受け入れ 34 件 pass
+
 ## P3: 速さと効果を測る
 
 全件の照合の速さと、anchor の有無での効果を測る。

@@ -3526,6 +3526,10 @@ test("a command anchor matches only its whole words in a row on one line, readin
     // Known false matches: an unquoted mention, and the middle of a quoted one
     "echo pnpm test --watch",
     "echo 'note pnpm test --watch now'",
+    // Operators end a word without a space, as PowerShell 5.1 chains with ;
+    "pnpm test --watch; Get-ChildItem",
+    "npm ci;pnpm test --watch",
+    "npm ci&&pnpm test --watch|tee log",
   ])
     assert.equal(runsCommand(command, anchor), true, command);
   for (const command of [
@@ -3536,8 +3540,7 @@ test("a command anchor matches only its whole words in a row on one line, readin
     "pnpm\ntest --watch",
     "echo 'pnpm test --watch'",
     '"pnpm" test --watch',
-    // A known miss: an operator with no space before the program
-    "npm ci;pnpm test --watch",
+    "pnpm test --watch=false;",
     "",
   ])
     assert.equal(runsCommand(command, anchor), false, command);

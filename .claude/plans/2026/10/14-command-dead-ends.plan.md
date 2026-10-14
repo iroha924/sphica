@@ -73,8 +73,8 @@ approved_at: 2026-10-14
 
 ### 照合
 
-- コマンドを改行で行に分け、各行を空白で語に分ける。anchor の語の並びが、ある 1 行の連続した語の並びと語ごとに完全一致したら一致（`--watch=false` は `--watch` と一致しない。引用符は語に残るので `echo 'pnpm test --watch'` は一致しない）
-- 分かっている見逃し: 空白の無い演算子（`a;pnpm test --watch`）、引用した program 名。分かっている誤一致: 引用しない言及（`echo pnpm test --watch`）、引用の途中（`echo 'note pnpm test --watch now'`）。どちらもテストで今の振る舞いとして固定し、誤停止の評価で数える
+- コマンドを改行で行に分け、各行を空白と演算子の文字 `;` `|` `&` で語に分ける（PowerShell 5.1 は `;` で空白なしにつなぐ）。anchor の語の並びが、ある 1 行の連続した語の並びと語ごとに完全一致したら一致（`--watch=false` は `--watch` と一致しない。引用符は語に残るので `echo 'pnpm test --watch'` は一致しない）
+- 分かっている見逃し: 引用した program 名、`npm.cmd` のような別の綴り。分かっている誤一致: 引用しない言及（`echo pnpm test --watch`）、引用の途中（`echo 'note pnpm test --watch now'`）。どちらもテストで今の振る舞いとして固定し、誤停止の評価で数える
 
 ### 配信
 
@@ -160,3 +160,4 @@ approved_at: 2026-10-14
 なし
 
 ## 変更履歴
+2026-10-15 / 照合の区切りに `;` `|` `&` を足した（T11） / review-shipping が、PowerShell 5.1 の `cmd --worker; next` が `--worker;` の 1 語になって一致しないことを再現した。shell の構文は読まないまま、見逃しだけを減らす / Go 不要（範囲・公開インターフェース・データは変わらない）
