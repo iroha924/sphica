@@ -12,8 +12,8 @@ import { difference, type Judged, judge, type Lifecycle, type Plan, type Snapsho
 /** What made this change: a record server run, or the owner forgetting sources */
 export type Cause = { runId: number } | { forgetId: number };
 
-/** A writer's words for a unit's change: the reason to show, and the source it rests on */
-export type Hint = { reason: string; source: number | null };
+/** A writer's words for a unit's change: the reason to show, the source it rests on, and for a question an answer closes, the record that answered */
+export type Hint = { reason: string; source: number | null; answer?: number };
 
 export type Asked = {
   /** Withdrawals this batch asks for. One a record of this batch replaces is redundant and not written */
@@ -119,6 +119,8 @@ type Write =
       to: Lifecycle;
       reason: string;
       source: number | null;
+      /** The record whose answer caused a withdrawal, kept beside its state row */
+      answer: number | null;
     };
 
 type Planned = {
@@ -181,7 +183,8 @@ function planOf(rows: Rows, asked: Asked): Planned {
         : t.to === "superseded"
           ? (asked.hints?.get(holder as number)?.source ?? null)
           : (hint?.source ?? null);
-    writes.push({ op: "state", unit: t.unit, from: t.from, to: t.to, reason, source });
+    const answer = t.to === "withdrawn" ? (withdraw.get(t.unit)?.answer ?? null) : null;
+    writes.push({ op: "state", unit: t.unit, from: t.from, to: t.to, reason, source, answer });
   }
   return { judged, loaded, writes, redundant, intentOf };
 }
@@ -362,8 +365,8 @@ export async function reconcile(
         .insertInto("unit_replacement")
         .values({ from_unit: w.from, to_unit: w.to, ...by, started_at: at })
         .execute();
-    else
-      await trx
+    else {
+      const state = await trx
         .insertInto("unit_state")
         .values({
           unit_id: w.unit,
@@ -375,7 +378,11 @@ export async function reconcile(
           source_id: w.source,
           ...by,
         })
-        .execute();
+        .returning("id")
+        .executeTakeFirstOrThrow();
+      if (w.answer !== null)
+        await trx.insertInto("unit_answer").values({ state_id: state.id, answer_unit: w.answer }).execute();
+    }
   }
   proveSettled(await rowsOf(trx, ids));
   return settled(planned);

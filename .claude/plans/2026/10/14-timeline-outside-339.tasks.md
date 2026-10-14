@@ -31,13 +31,14 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
   - コミット: `feat(schema): keep the record that answered a question beside its withdrawal (revision 13)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/migrate.test.ts test/schema.test.ts test/db.test.ts` → 135 件 pass、0 件 fail（revision 1〜12 からの移行が fresh と同じ定義、写しは 4 件を写して 5 件を注記）。`db/migrations/0013.sql` の `having count(*) = 1` を外すと、写しのテストが 1 件 fail する（戻した）。`bun run codegen:check` → matches。`caffeinate -i bun run verify` → exit 0（acceptance 140 pass。2 件が一致する場合のテストを足す前の作業ツリーで）。`bun run release:plan -- --base 9fec994c` → コミットの前は `none`（コミットどうしを比べるため）で、バージョンの行は 4 か所とも 0.6.57。コミットの後の結果は記録節に書く。review-shipping は指摘なし
 
-- [ ] T02: 質問を閉じる保存が `unit_answer` を書く
+- [x] T02: 質問を閉じる保存が `unit_answer` を書く
   - 種別: 追加
   - 計画: S2
   - 依存: T01（`unit_answer` の表と ingest の許可が無いと insert できない）
-  - 変更: `server/src/reconcile.ts`, `server/src/record.ts`, `scripts/check-architecture.mjs`, `server/test/record.test.ts`
+  - 変更: `server/src/reconcile.ts`, `server/src/record.ts`, `scripts/check-architecture.mjs`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/test/forget.test.ts`, `server/test/architecture.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts` → 全部通る（閉じた質問と、連鎖で閉じた古い質問に `unit_answer` の行があり、閉じなかった `answers` と glean の取り下げには無く、出典を forget しても残る）。`bun run architecture` → 通り、`unit_answer` を書くのは `reconcile.ts` だけと言う
   - コミット: `feat(record): write the answering record when a save closes a question`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/architecture.test.ts` → 85 件 pass、0 件 fail。`server/src/reconcile.ts` と `server/src/record.ts` を stash すると、足した検査のうち 2 件が fail する。連鎖で渡す答えを保存の先頭の記録に替えると、連鎖のテストが 1 件 fail する（戻した）。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`caffeinate -i bun run verify` → exit 0（acceptance 140 pass。下の 2 つのテストを足す前の作業ツリーで）。足した後に `bun run check` → exit 0、`bun run --cwd server test` → 1291 件 pass、0 件 fail
 
 ## P2: timeline の返信を直す
 
@@ -65,3 +66,9 @@ schema の Skill が新しい表を言い、リリースの Skill が revision �
   - コミット: `docs(skills): name unit_answer and the order of arrival for a release that raises the revision`
 
 ## 記録
+
+- 2026-10-14 / T01 / コミットの後に `bun run release:plan -- --base 9fec994c` → `release kind: plugin`、4 か所が 0.6.57、入力は `db/migrations/0013.sql`・`db/schema.sql`・`server/src/db-types.ts`・`server/src/db-write.ts`・`server/src/sqlite.ts` / 完了条件どおり
+- 2026-10-14 / T01 / Codex のコミットのレビュー（d80d5d4b、新しい会話、high）は指摘 0 件。指定のテスト一式は流さず、メモリ上の SQLite で個別に確かめたと返った / 採否なし
+- 2026-10-14 / T02 / 変更欄に `server/test/extract.test.ts`（glean の取り下げに行が無いこと）、`server/test/forget.test.ts`（出典を forget しても行が残ること）、`server/test/architecture.test.ts` を足した。前の値は `server/src/reconcile.ts`, `server/src/record.ts`, `scripts/check-architecture.mjs`, `server/test/record.test.ts` / 計画の方針 6 のテストの置き場所が 1 ファイルに収まらなかった
+- 2026-10-14 / T02 / review-shipping は出荷を止める指摘なし。テストの穴を 2 つ挙げた（連鎖のテストは記録が 1 件で取り違えても通る、`reconcile.ts` だけが書く検査に違反で落ちるテストが無い） / 両方直した。連鎖のテストに答えない記録を足し、`architecture.test.ts` に違反で落ちるテストを足した
+- 2026-10-14 / 全体 / 過去の記録 `trace:15ab6a31-…/record-upkeep-plan`（2026-10-11、0.6.51 の answers）は「schema と revision は変えない」と決め、「リンクの種類 answers と状態 answered を足す」を棄却している。今回の計画はその決定を覆す / 持ち主に知らせた。push と PR の作成の前に確認を取る

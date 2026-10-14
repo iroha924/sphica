@@ -243,6 +243,38 @@ test("superseded, withdrawn, and candidate units keep their state and lose only 
   );
 });
 
+test("forgetting the words an answer rests on keeps the record that answered beside the question's withdrawal", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const asked = unit("asked", "question");
+  move(asked, null, "candidate");
+  const answer = unit("answer", "decision");
+  evidence(answer, src);
+  adoption(answer, src);
+  activate(answer, src);
+  // The answer's own run closed the question, resting on the answer's source
+  const closed = insert(db, "unit_state", {
+    unit_id: asked,
+    from_state: "candidate",
+    to_state: "withdrawn",
+    at: now,
+    reason: "answered by answer",
+    source_id: src,
+    run_id: runOf(answer),
+  });
+  insert(db, "unit_answer", { state_id: closed, answer_unit: answer });
+  await forget(src);
+  assert.deepEqual([asked, answer].map(lifecycle), ["withdrawn", "candidate"]);
+  assert.deepEqual(
+    {
+      ...one(
+        "select t.source_id, w.answer_unit from unit_state t join unit_answer w on w.state_id = t.id where t.id = ?",
+        closed,
+      ),
+    },
+    { source_id: null, answer_unit: answer },
+  );
+});
+
 test("forgetting a retraction's reason removes the retracted row it explained", async () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite." });
   const reason = message(db, p, { id: "m2", text: "No, that was wrong. See https://notes.example/x" });

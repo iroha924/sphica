@@ -960,6 +960,7 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
   );
   const withdraw = new Map<number, Hint>();
   const by = new Map<number, string>();
+  const written = new Map(saved.written.map((w) => [w.key, w.id]));
   /** Each question asked to close → the named question whose withdrawal reached it (itself, when named) */
   const root = new Map<number, number>();
   const left = new Map<number, string>();
@@ -978,7 +979,7 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
         left.set(id, left.get(id) ?? `${q.key}: left open: ${why}`);
       else {
         // The answer's key and its source only: state history outlives a forgotten source, so the reason copies none of its words
-        withdraw.set(id, { reason: `answered by ${p.key}`, source: p.grounds });
+        withdraw.set(id, { reason: `answered by ${p.key}`, source: p.grounds, answer: written.get(p.key) });
         by.set(id, p.key);
         root.set(id, id);
       }
@@ -1022,6 +1023,7 @@ async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], s
       next.set(l.to_unit, {
         reason: `answered by ${answer} (through ${settled.keys.get(l.from_unit)})`,
         source: from.source,
+        answer: from.answer,
       });
       by.set(l.to_unit, answer);
       through.set(l.to_unit, settled.keys.get(l.from_unit) ?? `u${l.from_unit}`);
