@@ -106,7 +106,7 @@ async function describe(
   asOf: string | undefined,
   renames: Renames,
 ): Promise<string> {
-  const [options, evidence, adoption, anchors, links, states, fields] = await Promise.all([
+  const [options, evidence, adoption, anchors, links, states, fields, commands] = await Promise.all([
     db
       .selectFrom("unit_option")
       .select(["id", "text", "outcome", "why", "reconsider_when"])
@@ -243,6 +243,13 @@ async function describe(
       ])
       .orderBy("f.id")
       .execute(),
+    db
+      .selectFrom("unit_command")
+      .select("command")
+      .where("unit_id", "=", u.id)
+      .where("added_at", "<=", asOf ?? "9999")
+      .orderBy("id")
+      .execute(),
   ]);
   // As of a past time, what happened later has not happened: retractions, retired anchors, and resolved conflicts after it read as open,
   // and the lifecycle is the last state reached by then
@@ -326,6 +333,12 @@ async function describe(
         `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${moved}` : ""}`,
       );
     }
+  }
+  if (commands.length) {
+    out.push(
+      "Commands (a call that runs one, word for word on one line, is stopped once per conversation and shown this dead end):",
+    );
+    for (const c of commands) out.push(`  - ${inline(c.command)}`);
   }
   const retired = anchors.filter((a) => a.retired_at);
   if (retired.length) {
