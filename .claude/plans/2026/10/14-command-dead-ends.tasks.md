@@ -72,13 +72,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 
 コマンドの anchor に一致した呼び出しを、その会話で 1 回だけ deny する。
 
-- [ ] T05: 行ごと・語ごとの照合の関数
+- [x] T05: 行ごと・語ごとの照合の関数
   - 種別: 追加
   - 計画: S3
   - 依存: なし
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → `pnpm test --watch` が一致し、`pnpm test`・`--watch=false`・`bun testing`・行をまたぐ並び・引用符の付いた語は一致せず、`echo pnpm test --watch` と `echo 'note pnpm test --watch now'` は一致として固定される
   - コミット: `feat(deliver): match command anchors by whole tokens per line (T05)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="command anchor matches only" test/deliver.test.ts` → pass 1（一致 7 件・不一致 9 件）。`bun run verify` → exit 0
 
 - [ ] T06: 止める・知らせる配信と予算、COMMIT の後だけの deny
   - 種別: 追加
@@ -127,3 +128,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 
 2026-10-14 / T01 / Codex のタスクごとのレビュー F1（P2、再現済み）: CHECK の制御文字の範囲が char(1) からで、NUL の後ろを length と glob が見ない / 採用。T10 を足して直した。record server の検査は NUL を先に拒むので保存の経路からは入らない
 2026-10-14 / T03 / search は FTS の候補を JS で語を数え直して強い一致を決めるので、ident に入れただけではコマンドの語で見つからない / 変更欄に `server/src/search.ts` を足した
+2026-10-14 / T02, T04 / Codex のタスクごとのレビュー F1（P2）: glean の保存の返答に check の problems（外したコマンド）が出ない / 見送り。extract.ts の glean の保存はもとから problems を返さず（anchor も同じ）、この変更で入ったものではない
+2026-10-14 / T02, T04 / Codex のタスクごとのレビュー F2（P2）: Skill がまだ実装していない「止める」を書いている / 見送り。T06 で実装し同じ PR で出す。T09 で文面と挙動を突き合わせる

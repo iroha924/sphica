@@ -24,6 +24,7 @@ import {
   namable,
   namedRecords,
   recordLines,
+  runsCommand,
   traceSkill,
 } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
@@ -3509,4 +3510,32 @@ test("a shell command names an anchored path in each form it may be written, and
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test("a command anchor matches only its whole words in a row on one line, reading no shell syntax", () => {
+  const anchor = "pnpm test --watch";
+  for (const command of [
+    "pnpm test --watch",
+    "cd server && pnpm test --watch",
+    "pnpm  test\t--watch --reporter dot",
+    "npm ci\npnpm test --watch",
+    "npm ci\r\npnpm test --watch",
+    // Known false matches: an unquoted mention, and the middle of a quoted one
+    "echo pnpm test --watch",
+    "echo 'note pnpm test --watch now'",
+  ])
+    assert.equal(runsCommand(command, anchor), true, command);
+  for (const command of [
+    "pnpm test",
+    "pnpm test --watch=false",
+    "pnpm test --watchAll",
+    "pnpm testing --watch",
+    "pnpm\ntest --watch",
+    "echo 'pnpm test --watch'",
+    '"pnpm" test --watch',
+    // A known miss: an operator with no space before the program
+    "npm ci;pnpm test --watch",
+    "",
+  ])
+    assert.equal(runsCommand(command, anchor), false, command);
 });

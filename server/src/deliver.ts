@@ -624,6 +624,20 @@ async function namedInCommand(
 }
 
 /**
+ * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, on one line. No shell syntax is read, so
+ * a word keeps any quote around it (a quoted mention never matches) while an unquoted mention (`echo pnpm test --watch`) does.
+ */
+export function runsCommand(command: string, anchor: string): boolean {
+  const want = anchor.split(" ");
+  return command.split(/\r\n|\n|\r/).some((line) => {
+    const words = line.split(/\s+/).filter(Boolean);
+    for (let i = 0; i + want.length <= words.length; i++)
+      if (want.every((w, j) => words[i + j] === w)) return true;
+    return false;
+  });
+}
+
+/**
  * Whether a prompt names a path (relative or absolute under the root, either separator) with no ASCII letter, digit, or path character
  * continuing it, so another file containing the path never matches while Japanese may touch it. Matched before NFKC, which merges paths.
  */
