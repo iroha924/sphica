@@ -84,6 +84,16 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `test(db): throw when a writing connection cannot begin in attempt`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/db.test.ts` → tests 38 / pass 38 / fail 0
 
+- [x] T07: CI の windows の手順が数えるテスト名に、足したテストが当たらないようにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（名前を変えるテストは T03 で足した）
+  - 変更: `server/test/db.test.ts`
+  - red: `cd server && node --test --test-reporter=tap --test-name-pattern="rolled-back|record_check waits" test/db.test.ts test/reconcile.test.ts` → `# pass 5`（CI の check.yml は `# pass 4` を求めて落ちた）
+  - 完了条件: `cd server && node --test --test-reporter=tap --test-name-pattern="rolled-back|record_check waits" test/db.test.ts test/reconcile.test.ts` → `# pass 4`
+  - コミット: `test(db): keep the record_check revision test out of the windows rollback count`
+  - 結果: red は PR #343 の CI の windows で `# pass 5`（exit 1）。直した後、同じコマンド → `# pass 4`。`--test-name-pattern=revision test/db.test.ts` → pass 12 / fail 0
+
 ## 記録
 
 - 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
@@ -96,3 +106,4 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 - 2026-10-14 / T05 / 完了条件の欄がコマンドの形でないまま検査が落ちたのに、検査の出力をパイプに通したためコミットが通った / 完了条件・red・結果の欄をコマンドの形に直した（前の値: 「同じコマンド → 0 で終わり、…」ほか）
 - 2026-10-14 / T06 / review-shipping の全差分のレビュー: 出荷して壊れるものは無し、指摘 1 件（`attempt` が begin の失敗を握りつぶし、拒否のテストが空振りしうる）/ 採用して T06 で直した。reader は begin が `not authorized` になるので、reader だけ begin しない
 - 2026-10-14 / 全体 / Codex の全差分のレビュー（b1b83f98）は指摘 0 件、T06 の再レビュー（8b09c13f）も指摘 0 件 / 対応なし
+- 2026-10-14 / T07 / PR #343 の CI で windows が落ちた。テストは全部通っていて、`check.yml` が名前に rolled-back を含むテストをちょうど 4 件と数える手順に、足したテストが当たった（新規の失敗）/ テストの名前を変えた

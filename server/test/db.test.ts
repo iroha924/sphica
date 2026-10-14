@@ -1164,7 +1164,7 @@ test("revision: ingest and forget refuse writes outside a checked transaction, a
   }
 });
 
-test("revision: a rolled-back transaction, as record_check runs, is refused after the revision changed", async () => {
+test("revision: the transaction record_check always rolls back is refused after the revision changed", async () => {
   const t = tempDb();
   try {
     await t.ingest.selectFrom("project").select("id").execute();
