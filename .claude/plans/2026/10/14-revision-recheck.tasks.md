@@ -94,6 +94,16 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `test(db): keep the record_check revision test out of the windows rollback count`
   - 結果: red は PR #343 の CI の windows で `# pass 5`（exit 1）。直した後、同じコマンド → `# pass 4`。`--test-name-pattern=revision test/db.test.ts` → pass 12 / fail 0
 
+- [x] T08: `requireRevision` のコメントを、名前の言い換えから、別に export している理由に書き換える
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（`requireRevision` は T02 で足した）
+  - 変更: `server/src/sqlite.ts`
+  - red: `bun run comments` → 通る（機械では見ない。GitHub の Codex のレビューの指摘で、`.claude/rules/comments.md` の「コードが言えないことだけ」に反する）
+  - 完了条件: `bun run comments` → 0 で終わる
+  - コミット: `docs(db): say why requireRevision is exported`
+  - 結果: `bun run comments` → 0 で終わる
+
 ## 記録
 
 - 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
@@ -107,3 +117,4 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 - 2026-10-14 / T06 / review-shipping の全差分のレビュー: 出荷して壊れるものは無し、指摘 1 件（`attempt` が begin の失敗を握りつぶし、拒否のテストが空振りしうる）/ 採用して T06 で直した。reader は begin が `not authorized` になるので、reader だけ begin しない
 - 2026-10-14 / 全体 / Codex の全差分のレビュー（b1b83f98）は指摘 0 件、T06 の再レビュー（8b09c13f）も指摘 0 件 / 対応なし
 - 2026-10-14 / T07 / PR #343 の CI で windows が落ちた。テストは全部通っていて、`check.yml` が名前に rolled-back を含むテストをちょうど 4 件と数える手順に、足したテストが当たった（新規の失敗）/ テストの名前を変えた
+- 2026-10-14 / T08 / GitHub の Codex のレビュー（e276356e）の指摘 1 件: `requireRevision` のコメントが名前の言い換え / 採用して T08 で直した
