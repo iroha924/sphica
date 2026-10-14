@@ -54,14 +54,15 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
 
 頼んだ記録と関係の無い行が timeline から消え、連なりの記録が答えた質問の取り下げだけが残る。
 
-- [ ] T03: timeline が出す連なりの外の記録の行を、連なりの記録が答えた質問の取り下げだけにする
+- [x] T03: timeline が出す連なりの外の記録の行を、連なりの記録が答えた質問の取り下げだけにする
   - 種別: 修正
   - 計画: S3
   - 依存: T01（問い合わせが `unit_answer` を読む）, T02（保存が `unit_answer` を書かないと、実際の保存の経路のテストで取り下げの行が出ない）
   - 変更: `server/src/timeline.ts`, `server/test/timeline.test.ts`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - red: テストとケースを足した後、`server/src/timeline.ts` を直す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/timeline.test.ts` → 足したテストが、連なりの外の記録の `became superseded` の行や、連なりの記録が答えていない質問の `became withdrawn` の行が出ている、という理由で失敗する。`bun run acceptance` → `battery` の timeline に `every5` の行がある、という理由で 1 件失敗する
   - 完了条件: 同じ 2 つのコマンド → 全部通る（retrieval は 17 件）。`cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/acceptance-cases.test.ts` → 全部通る
-  - コミット: `fix(read): tell only a question a chain record answered among changes to records outside a timeline's chain`
+  - コミット: `fix(read): tell only an answered question among changes outside a timeline's chain`
+  - 結果: red: `server/src/timeline.ts` を直す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/timeline.test.ts` → 6 件 pass、4 件 fail（上限の先の `k4 … became superseded` が出る、取り下げただけの質問 `dropped` の行が出る、`woken became active` と `replaced became superseded` が出る、新しいテストで `tabs became superseded`・答えていない質問の取り下げ・`rule-open became active` が出る）。`bun run acceptance` → 140 件 pass、2 件 fail（retrieval-16 は `read says "trace:s-en-sync-1/every5 (u"`、retrieval-17 は `read says "became active: trace:s-en-cache-where/cache-where-open no longer replaces it"`）。直した後: `test/timeline.test.ts test/acceptance-cases.test.ts` → 14 件 pass、0 件 fail。`caffeinate -i bun run verify` → exit 0（acceptance 142 pass、retrieval は 17 件）。review-shipping は指摘なし
 
 ## P3: 規範と手順を合わせる
 
@@ -83,3 +84,6 @@ schema の Skill が新しい表を言い、リリースの Skill が revision �
 - 2026-10-14 / T02 / review-shipping は出荷を止める指摘なし。テストの穴を 2 つ挙げた（連鎖のテストは記録が 1 件で取り違えても通る、`reconcile.ts` だけが書く検査に違反で落ちるテストが無い） / 両方直した。連鎖のテストに答えない記録を足し、`architecture.test.ts` に違反で落ちるテストを足した
 - 2026-10-14 / 全体 / 過去の記録 `trace:15ab6a31-…/record-upkeep-plan`（2026-10-11、0.6.51 の answers）は「schema と revision は変えない」と決め、「リンクの種類 answers と状態 answered を足す」を棄却している。今回の計画はその決定を覆す / 持ち主に知らせた。push と PR の作成の前に確認を取る
 - 2026-10-14 / T02 / Codex のコミットのレビュー（e838b374、新しい会話、high）は 1 件: `scripts/check-architecture.mjs` の検査が、引用符付きの表名（`insert into "unit_answer"`）を見つけない。メモリ上で再現したと返った。保存と取り下げの経路には指摘なし / 採る。修正タスク T05 を T02 の後ろに足した
+- 2026-10-14 / T03 / `server/test/timeline.test.ts` の既存のテスト 1 件の名前を変えた。前は「…and a change the chain's run made to a record it saved」、今は「…and tells a question the chain's run saved and answered by its withdrawal alone」（issue #339 が前の名前で引いている） / 見ているものが「run が保存した記録への変化」から「連なりの記録が答えた質問の取り下げ」に変わったため
+- 2026-10-14 / T03 / review-shipping の観測: planner の統計が無い DB で連なりが 20 件あると、新しい問い合わせは project の全記録を歩く計画になる（4 万件の記録で 12 ms） / 直さない。`read` には hook の時間の上限が無く、記録の数に比例する程度のため
+- 2026-10-14 / T03 / コミットの件名を短くした。前は `fix(read): tell only a question a chain record answered among changes to records outside a timeline's chain`（113 字で、commit-msg の検査の上限 100 字を超えた）、今は `fix(read): tell only an answered question among changes outside a timeline's chain` / 検査に合わせた

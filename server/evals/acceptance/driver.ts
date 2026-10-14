@@ -1422,6 +1422,11 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
         return;
       }
+      if (Array.isArray(e.read_lacks)) {
+        for (const w of e.read_lacks as string[])
+          assert.ok(!lastRead.includes(w), `read says "${w}"\n${lastRead}`);
+        return;
+      }
       if (typeof e.applicable_include === "string") {
         assert.ok(
           applicable.some((u) => u.key === e.applicable_include),
