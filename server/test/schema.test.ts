@@ -1830,6 +1830,8 @@ test("a command anchor is a dead end's, in its project, two or more plain words,
     "echo `x` y",
     "pnpm\ttest",
     `pnpm ${"x".repeat(200)}`,
+    // SQLite's length() and glob stop at NUL, so only the bytes see what follows it
+    `pnpm test\u0000\n"${"x".repeat(250)}`,
   ])
     refuses(() => command(bad), /constraint failed/);
   refuses(() => command("pnpm test", { added_at: "2026-09-27" }), /constraint failed/);

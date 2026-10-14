@@ -57,6 +57,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `docs(trace): write dead ends as lessons and anchor them to commands (T04)`
   - 結果: `bun run verify:ai` → exit 0。`bun run verify` → exit 0（T02 と同じコミット）
 
+- [x] T10: コマンドの anchor の CHECK で NUL を拒む
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す CHECK が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0014.sql`, `server/test/schema.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="a command anchor is a dead end" test/schema.test.ts` → NUL の後ろに改行・引用符・250 文字を続けた command が通り、Missing expected exception で落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → NUL を含む command が拒まれ、移行した DB と新しい DB の定義が一致する
+  - コミット: `fix(db): refuse NUL in command anchors, which length and glob stop at (T10)`
+  - 結果: red を実測（fail 1、Missing expected exception）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → pass 148 / fail 0
+
 ## P2: 一致したコマンドを 1 回だけ止める
 
 コマンドの anchor に一致した呼び出しを、その会話で 1 回だけ deny する。
@@ -113,3 +123,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-14 / T01 / plan の unit_command に retired_at と「live な一意」を書いたが、退役の経路を作らず update も禁じるので列は常に NULL になる / retired_at を置かず、一意は (unit_id, command) にした。退役を足すときに migration で列を足す
 2026-10-14 / T02 / extract.ts は check と save の共通の経路のままで変える必要が無かった / 変更欄から `server/src/extract.ts` を外した
 2026-10-14 / T02, T04 / `bun run pairs` が、save が受ける欄（commands）を trace の Skill の表が書いていないと落とした / T04 を T02 と同じコミットで終えた
+
+2026-10-14 / T01 / Codex のタスクごとのレビュー F1（P2、再現済み）: CHECK の制御文字の範囲が char(1) からで、NUL の後ろを length と glob が見ない / 採用。T10 を足して直した。record server の検査は NUL を先に拒むので保存の経路からは入らない
