@@ -22,13 +22,14 @@ base: main
 
 dead_end にコマンドの anchor を付けて保存・検索・表示できるようになる。配信はまだ変わらない。
 
-- [ ] T01: schema revision 14 で unit_command を足し、バージョンを上げる
+- [x] T01: schema revision 14 で unit_command を足し、バージョンを上げる
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `db/schema.sql`, `db/migrations/0014.sql`, `server/test/fixtures/schema-rev13.sql`, `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/src/db-types.ts`, `server/test/schema.test.ts`, `server/test/db.test.ts`, `server/test/migrate.test.ts`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → dead_end 以外への insert・CHECK に合わない command・update・unit がある間の delete・別プロジェクトの run が拒まれ、ingest の接続で insert と FTS の検索が通り、revision 13 から移行した DB と新しい DB の定義が一致する
   - コミット: `feat(db): add command anchors for dead ends in schema revision 14 (T01)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → pass 148 / fail 0。`bun run verify` → exit 0（受け入れ 142 件 pass）
 
 - [ ] T02: record server の commands 欄
   - 種別: 追加
@@ -107,3 +108,4 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `docs(readme): describe stopping a call that repeats a recorded dead end (T09)`
 
 ## 記録
+2026-10-14 / T01 / plan の unit_command に retired_at と「live な一意」を書いたが、退役の経路を作らず update も禁じるので列は常に NULL になる / retired_at を置かず、一意は (unit_id, command) にした。退役を足すときに migration で列を足す

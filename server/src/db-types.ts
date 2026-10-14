@@ -375,6 +375,14 @@ export interface UnitAnswer {
   state_id: Generated<number>;
 }
 
+export interface UnitCommand {
+  added_at: string;
+  command: string;
+  id: Generated<number>;
+  run_id: number;
+  unit_id: number;
+}
+
 export interface UnitEvidence {
   added_at: string;
   id: Generated<number>;
@@ -515,6 +523,7 @@ export interface DB {
   unit_anchor: UnitAnchor;
   unit_anchor_retirement: UnitAnchorRetirement;
   unit_answer: UnitAnswer;
+  unit_command: UnitCommand;
   unit_evidence: UnitEvidence;
   unit_field: UnitField;
   unit_link: UnitLink;

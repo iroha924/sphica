@@ -194,6 +194,37 @@ test("the ingest connection writes a retired anchor's reason but never changes o
   assert.match(attempt(ingest, "delete from unit_anchor_retirement") ?? "", /not authorized/);
 });
 
+test("the ingest connection anchors a dead end to a command, indexed for search, but never changes or removes one", () => {
+  const r = run(db, p);
+  const u = insert(db, "unit", {
+    project_id: p,
+    key: "watch-dead-end",
+    kind: "dead_end",
+    text: "watch-dead-end",
+    extraction: "supported",
+    run_id: r,
+    created_at: now,
+    content_hash: sha256("watch-dead-end"),
+  });
+  assert.equal(
+    attempt(
+      ingest,
+      "insert into unit_command (unit_id, command, run_id, added_at) values (?, 'pnpm test --watch', ?, ?)",
+      u,
+      r,
+      now,
+    ),
+    null,
+  );
+  const found = db.owner
+    .prepare("select rowid from unit_fts where unit_fts match ?")
+    .all('ident:"pnpm"')
+    .map((x) => Number(x.rowid));
+  assert.deepEqual(found, [u]);
+  assert.match(attempt(ingest, "update unit_command set command = 'pnpm test'") ?? "", /not authorized/);
+  assert.match(attempt(ingest, "delete from unit_command") ?? "", /not authorized/);
+});
+
 test("only the ingest connection writes the record that answered a question, and never changes or removes it", () => {
   const r = run(db, p);
   const said = Number(
