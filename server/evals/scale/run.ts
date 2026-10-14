@@ -96,8 +96,8 @@ const LONG = (i: number, j: number) => `long option ${i}-${j} `.padEnd(500, "x")
 
 /**
  * The stress shape, per record index: 5 % share one path, 1 % carry 20 anchors and 12 options of 500 characters, 10 % are broad
- * constraints, 10 % location-free don't/defer decisions (what review matches by option), 1 in 500 conflicts with a record of the
- * previous save (never the last record, which the cases name); the rest are uniform.
+ * constraints, 10 % location-free don't/defer decisions (what review matches by option), 5 % dead ends anchored to a command, 1 in 500
+ * conflicts with a record of the previous save (never the last record, which the cases name); the rest are uniform.
  */
 function stress(i: number, prefix: (b: number) => string): Unit {
   const r = i % 100;
@@ -114,6 +114,14 @@ function stress(i: number, prefix: (b: number) => string): Unit {
       options: Array.from({ length: 12 }, (_, j) => ({ text: LONG(i, j), outcome: "rejected" })),
     });
   if (r < 16) return constraint(i, `Rule ${i}: write every log line in English.`);
+  if (r >= 26 && r < 31)
+    return {
+      key: `k${i}`,
+      kind: "dead_end",
+      text: `Rule ${i}: building tool${i} with --flag${i} fails on the runners.`,
+      commands: [`tool${i} build --flag${i}`],
+      aliases: ["scale", "benchmark"],
+    };
   if (r < 26)
     return {
       key: `k${i}`,
@@ -141,7 +149,7 @@ async function seed(db: TempDb, projectId: number, n: number, shape: (i: number)
       units.push({
         ...u,
         evidence: [{ source: `s${m}`, quote, role: "states" }],
-        adoption: [{ source: `s${m}`, quote }],
+        ...(u.kind === "dead_end" ? {} : { adoption: [{ source: `s${m}`, quote }] }),
       });
     }
     const target: Target = {
@@ -199,7 +207,10 @@ async function build(name: string, n: number, kind: "uniform" | "stress"): Promi
     // A location-free don't record review must find through an added line, and a broad constraint session start shows
     const free = [...Array(n).keys()].reverse().find((i) => i % 100 >= 16 && i % 100 < 26) ?? 0;
     const broad = [...Array(n).keys()].reverse().find((i) => i % 100 >= 6 && i % 100 < 16) ?? 0;
+    const dead = [...Array(n).keys()].reverse().find((i) => i % 100 >= 26 && i % 100 < 31) ?? 0;
     keys.free = `trace:ext-b${Math.floor(free / PER_SAVE)}/k${free}`;
+    keys.dead = `trace:ext-b${Math.floor(dead / PER_SAVE)}/k${dead}`;
+    keys.deadIndex = String(dead);
     keys.broad = `trace:ext-b${Math.floor(broad / PER_SAVE)}/k${broad}`;
     // Only the last record's file changes: review shows five records in id order, and the 500 sharing hot.ts would fill them
     added = `const c = vendor${free}client;`;
@@ -232,6 +243,8 @@ type Case = {
   only?: "stress";
   /** Several calls in one session (a read budget being spent), timed per call */
   calls?: number;
+  /** The shell command, when the case runs one of its own */
+  command?: (f: Fixture) => string;
 };
 
 const reviewed = (f: Fixture) => [f.keys.last ?? "", ...(f.keys.free ? [f.keys.free] : [])];
@@ -272,6 +285,21 @@ const CASES: Case[] = [
     event: "PreToolUse",
     input: { tool_name: "Bash" },
     expect: (f) => [f.keys.last ?? ""],
+  },
+  {
+    name: "shell command running a dead end's command (stopped)",
+    event: "PreToolUse",
+    input: { tool_name: "Bash" },
+    command: (f) => `cd app && tool${f.keys.deadIndex} build --flag${f.keys.deadIndex} --verbose`,
+    expect: (f) => [f.keys.dead ?? ""],
+    only: "stress",
+  },
+  {
+    name: "shell command no record is about",
+    event: "PreToolUse",
+    input: { tool_name: "Bash" },
+    command: () => "npm test -- --watch=false 2>&1 | tail -20",
+    expect: () => [],
   },
   {
     name: "read a file 500 records share",
@@ -322,7 +350,7 @@ function inputOf(c: Case, f: Fixture, sessionId: string, call: number): Record<s
   const toolInput =
     (c.input.tool_input as Record<string, unknown> | undefined) ??
     (tool === "Bash"
-      ? { command: `cat ${file} | head -20` }
+      ? { command: c.command ? c.command(f) : `cat ${file} | head -20` }
       : tool === "Read" || tool === "Edit"
         ? { file_path: path.join(f.repo, file), old_string: "a", new_string: "b" }
         : undefined);
@@ -390,7 +418,9 @@ function call(
       if (killed) return resolve({ ms, problem: "timeout", text: "" });
       if (!out) return resolve({ ms, problem: null, text: "" });
       try {
-        const text = String(JSON.parse(out)?.hookSpecificOutput?.additionalContext ?? "");
+        // A stopped call carries its records as the reason, not as context
+        const o = JSON.parse(out)?.hookSpecificOutput;
+        const text = String(o?.additionalContext ?? o?.permissionDecisionReason ?? "");
         resolve({ ms, problem: null, text });
       } catch {
         resolve({ ms, problem: "invalid output", text: "" });

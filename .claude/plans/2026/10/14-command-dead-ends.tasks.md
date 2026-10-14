@@ -124,13 +124,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 
 全件の照合の速さと、anchor の有無での効果を測る。
 
-- [ ] T07: scale の fixture にコマンドの anchor を入れる
+- [x] T07: scale の fixture にコマンドの anchor を入れる
   - 種別: 変更
   - 計画: S8
   - 依存: T06（測る配信の経路が要る）
   - 変更: `server/evals/scale/run.ts`
   - 完了条件: `node server/evals/scale/run.ts` → 記録 1 万件でコマンドの照合を含む 1 回が 1 秒以内
   - コミット: `test(scale): measure command anchor matching at 10,000 records (T07)`
+  - 結果: `node server/evals/scale/run.ts` を main（a9dae113）と de5fb4c9 で流した。stress 10,000 件で止める呼び出しが中央値 91 ms・最大 95 ms、何にも当たらないシェル呼び出しが 87 ms。既存のケースの差は最大 31 ms（review, Skill tool）。1 秒を超えるのは既定オフの shell の書き込みの試用の cold cache のケースだけで、変更の前も超えていた
 
 - [ ] T08: eval の課題と fixture（anchor あり / なし）
   - 種別: 追加
