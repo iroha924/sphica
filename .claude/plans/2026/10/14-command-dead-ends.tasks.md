@@ -170,6 +170,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `test(eval): build the arm without command anchors from a copy of the other arm's fixture (T16)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → pass 4 / fail 0
 
+- [ ] T17: 役目の無くなった eval の課題と、anchor なしの側を作る仕組みを取り除く
+  - 種別: 削除
+  - 計画: S9
+  - 依存: T16（取り除く stripCommands が要る）
+  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`, `server/test/eval-fixture.test.ts`
+  - 完了条件: `bun run verify` → 0 で終わり、`rg -n "dead-end-typecheck|s-en-typecheck|trace_en_typecheck|no-commands|stripCommands" server` → 何も出ない
+  - コミット: `test(eval): remove the dead-end task that cannot measure command stops on a machine with tsc (T17)`
+
 ## P4: 両ホストで確かめて出す準備
 
 実機で deny の理由が届くかを確かめ、届かないホストは知らせるだけに戻して README に書く。
@@ -200,3 +208,4 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-15 / T07 / tasks の検査の違反（結果行の書式）を残したまま T07 をコミットした。検査をパイプに通して終了コードを失った / T08 のコミットで書式を直した
 2026-10-15 / T13, T07, T08 / Codex のレビュー F1〜F4（P2）: 2 本の arm を --compare で比べられない、組み立て直すと差が commands だけにならない、演算子を含む anchor が自分に一致しない、scale の止めるケースが deny を見ない / F2〜F4 は採用（T16、T14、T15）。F1 は一部採用: 2 本は build ごとに集計して並べると計画に書いた
 2026-10-15 / T09 / 対話の Codex を expect で 3 回操作したが、ターンが始まらず hook まで届かなかった（history.jsonl にはプロンプトがあり、ログはスレッドの開始まで）。codex exec では止めて理由が届くことを確かめた / 持ち主に聞く
+2026-10-15 / T08, T16 / eval を手元で流した（Claude 6 回・Codex 3 回）。この Mac に tsc があり、最初のコマンドが `npx tsc` にならず、止める動作は 0 回で測れなかった。持ち主が「リリースの後の実際の利用で測る」と決め、plan の A9 と S9 を直した（Go の取り直し） / T08 の結果欄の「build と実行は A9 で流す」は取り消し。T17 を足して eval の課題を取り除く
