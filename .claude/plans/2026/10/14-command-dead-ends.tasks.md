@@ -131,15 +131,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - 変更: `server/evals/scale/run.ts`
   - 完了条件: `node server/evals/scale/run.ts` → 記録 1 万件でコマンドの照合を含む 1 回が 1 秒以内
   - コミット: `test(scale): measure command anchor matching at 10,000 records (T07)`
-  - 結果: `node server/evals/scale/run.ts` を main（a9dae113）と de5fb4c9 で流した。stress 10,000 件で止める呼び出しが中央値 91 ms・最大 95 ms、何にも当たらないシェル呼び出しが 87 ms。既存のケースの差は最大 31 ms（review, Skill tool）。1 秒を超えるのは既定オフの shell の書き込みの試用の cold cache のケースだけで、変更の前も超えていた
+  - 結果: `node server/evals/scale/run.ts` → main（a9dae113）と de5fb4c9 で流した。stress 10,000 件で止める呼び出しが中央値 91 ms・最大 95 ms、何にも当たらないシェル呼び出しが 87 ms。既存のケースの差は最大 31 ms（review, Skill tool）。1 秒を超えるのは既定オフの shell の書き込みの試用の cold cache のケースだけで、変更の前も超えていた
 
-- [ ] T08: eval の課題と fixture（anchor あり / なし）
+- [x] T08: eval の課題と fixture（anchor あり / なし）
   - 種別: 追加
   - 計画: S9
   - 依存: T04（trace の書き方で作った dead_end を使う）, T06（deny の経路が要る）
-  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/fixture.ts`
+  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`, `server/test/eval-fixture.test.ts`
   - 完了条件: `bun run verify` → 0 で終わり、eval-loop の build で anchor あり・なしの 2 本の slot ができる
   - コミット: `test(eval): add a task whose first command is a recorded dead end (T08)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → pass 4 / fail 0（新しい setup の dead_end が fixture に入り、`withoutCommands` が commands だけを外す）。`bun run verify` → exit 0。build と実行は A9 で流す（費用の承認が要る）
 
 ## P4: 両ホストで確かめて出す準備
 
@@ -167,3 +168,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-15 / T06 / Codex のタスクごとのレビュー F1（P2）: command_context の行を、予算の集計が CONFIRM の長さを引いて数え、1 行あたり 81 字少なく数える / 採用。T12 を足して直した
 2026-10-15 / T06 / Codex のタスクごとのレビュー F2（P2）: Codex の Bash でパッチの heredoc とコマンドを 1 回にまとめると照合を通らない / 見送り。パッチの本文はファイルの中身で、照合するとコマンドをファイルに書くだけの編集まで止める
 2026-10-15 / T11, T12 / Codex の再レビュー F1（P2、再現済み）: T11 で演算子を空白と同じに扱ったため、別々のコマンドや URL の `&` の中にも一致する / 採用。T13 を足して直した。T12 は指摘なし
+2026-10-15 / T08 / 変更欄: tsundoku の world にコマンドを打つ課題が無く、2 本の arm を作る口も無かった / 前: tasks.json, fixture.ts。後: world.json にセッション s-en-typecheck、cases.json に setup trace_en_typecheck（dead_end に commands ["npx tsc"]）、tasks.json に課題 dead-end-typecheck、build.ts に --no-commands（build-lib.ts の withoutCommands）
+2026-10-15 / T07 / tasks の検査の違反（結果行の書式）を残したまま T07 をコミットした。検査をパイプに通して終了コードを失った / T08 のコミットで書式を直した

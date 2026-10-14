@@ -7704,6 +7704,39 @@
         }
       }
     },
+    "trace_en_typecheck": {
+      "capture": "s-en-typecheck",
+      "trace": {
+        "session": "s-en-typecheck",
+        "record": {
+          "units": [
+            {
+              "key": "npx-tsc",
+              "kind": "dead_end",
+              "text": "Type-checking with npx tsc fails in this repository: it has no TypeScript or tsconfig, and npx cannot fetch one without the network. Load the file with node --experimental-strip-types instead",
+              "evidence": [
+                {
+                  "source": "session:s-en-typecheck#1.assistant",
+                  "quote": "npx tsc failed here: the repository has no TypeScript or tsconfig, and npx cannot fetch it without the network.",
+                  "role": "states"
+                }
+              ],
+              "commands": ["npx tsc"],
+              "aliases": [
+                "型チェック",
+                "型検査",
+                "TypeScript",
+                "コンパイラ",
+                "tsc",
+                "type check",
+                "typecheck",
+                "compiler"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "harvest_pr20": {
       "harvest": {
         "pr": 20,

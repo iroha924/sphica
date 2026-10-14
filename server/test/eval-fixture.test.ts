@@ -12,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { createDriver } from "../evals/acceptance/driver.ts";
 import { loadAcceptance } from "../evals/acceptance/load.ts";
-import { fixtureSteps } from "../evals/cloud/build-lib.ts";
+import { fixtureSteps, withoutCommands } from "../evals/cloud/build-lib.ts";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { checkAnchor } from "../src/anchors.ts";
 import { openReader } from "../src/db.ts";
@@ -388,4 +388,13 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     compliance: "fail",
     poison: "fail",
   });
+});
+
+test("the arm without command anchors keeps every step but the dead ends' commands", () => {
+  const steps = fixtureSteps(plan, false);
+  const bare = withoutCommands(steps);
+  const text = (x: unknown) => JSON.stringify(x);
+  assert.match(text(steps), /"commands":\["npx tsc"\]/);
+  assert.doesNotMatch(text(bare), /"commands"/);
+  assert.equal(text(bare), text(steps).replace(/,"commands":\[[^\]]*\]/g, ""));
 });

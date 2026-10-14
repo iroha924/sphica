@@ -56,6 +56,16 @@ type FixturePlan = {
 };
 
 /**
+ * The same steps with every unit's command anchors taken out: the arm of a comparison whose records, search, and hooks match the other's
+ * except that no dead end stops a call.
+ */
+export function withoutCommands(steps: Step[]): Step[] {
+  return steps.map((step) =>
+    JSON.parse(JSON.stringify(step), (key, value) => (key === "commands" ? undefined : value)),
+  );
+}
+
+/**
  * The acceptance steps that build the tsundoku fixture, in order: each listed case's own steps (its given cases are not run, so the list
  * names them in order), then each setup, then the counterfactual's steps for a swapped build.
  */

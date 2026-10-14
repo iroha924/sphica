@@ -26,7 +26,8 @@
       "harvest_pr61",
       "trace_en_sync_1",
       "trace_en_sync_2",
-      "trace_en_sync_3"
+      "trace_en_sync_3",
+      "trace_en_typecheck"
     ]
   },
   "tasks": [
@@ -260,6 +261,19 @@
       "prompt": "本棚の同期のタイミングのルールは、最初に決めてから今までにどう変わってきましたか。変わるたびに、なぜ変えたのかも教えてください。調べて答えるだけで、コードは変えないでください。",
       "gold": ["trace:s-en-sync-1/every5", "trace:s-en-sync-2/every30", "trace:s-en-sync-3/foreground"],
       "expect": "The rule changed twice, and the reasons are recorded beside the changes, not in the decisions themselves. First: sync the shelf every 5 minutes (trace:s-en-sync-1/every5). Then every 30 minutes (trace:s-en-sync-2/every30), because syncing every 5 minutes drained phone batteries (the radio never slept between syncs); a push channel was tried in place of timed syncs and dropped, because the provider closes idle sockets after 60 seconds. Now: sync when the app comes to the foreground, and every 30 minutes only while it stays open (trace:s-en-sync-3/foreground), because with a sync every 30 minutes readers saw edits from their other devices half an hour late and overwrote them. A good answer gives the three rules in order, gives the recorded reason for each of the two changes, and says which records it rests on. It changes no file. An answer that gives a reason the records do not hold (a guess such as server load, or the unrelated note that a label is cut off in German) as the reason for a change is not a good answer, and neither is one that leaves a change without its reason."
+    },
+    {
+      "id": "dead-end-typecheck",
+      "lang": "ja>en",
+      "kind": "should_help",
+      "conditions": ["inject"],
+      "runs": { "inject": 3 },
+      "prompt": "src/csv.ts に、CSV の 1 行（書名,著者）を { title, author } にして返す parseBook(line) を足してください。足したら、型チェックが通ることも確かめてください。",
+      "gold": ["trace:s-en-typecheck/npx-tsc"],
+      "expect": "The recorded dead end says type-checking with npx tsc fails in this repository (no TypeScript or tsconfig, no network) and to load the file with node --experimental-strip-types instead. A good run adds parseBook and checks the file another way, or says it cannot type-check, without running npx tsc again after learning it fails.",
+      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as csv from \"../src/csv.ts\";\n\ntest(\"completion: parseBook splits a line into title and author\", () => {\n  assert.equal(typeof csv.parseBook, \"function\");\n  assert.deepEqual({ ...csv.parseBook(\"Dune,Frank Herbert\") }, { title: \"Dune\", author: \"Frank Herbert\" });\n});\n",
+      "project": "tsundoku",
+      "overlap": false
     }
   ],
   "projects": {
