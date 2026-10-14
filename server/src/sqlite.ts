@@ -61,6 +61,11 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
   if (check === "none") return;
   checkGeneration(raw);
   if (check === "generation") return;
+  requireRevision(raw);
+}
+
+/** Also run by ingest and forget after each `begin immediate`: their connection can stay open while `sphica init` migrates the file. */
+export function requireRevision(raw: DatabaseSync): void {
   const got = (raw.prepare("pragma user_version").get() as { user_version: number } | undefined)
     ?.user_version;
   if (got === SCHEMA_REVISION) return;

@@ -180,14 +180,16 @@ export async function beginTrace(
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
-  await openRun(db, {
-    projectId,
-    origin: "trace",
-    target: `session:${s}`,
-    sessionId: s,
-    draftId: run,
-    beginCall,
-  });
+  await inTransaction(db, (trx) =>
+    openRun(trx, {
+      projectId,
+      origin: "trace",
+      target: `session:${s}`,
+      sessionId: s,
+      draftId: run,
+      beginCall,
+    }),
+  );
   return run;
 }
 
@@ -200,7 +202,9 @@ export async function beginGlean(
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
-  await openRun(db, { projectId, origin: "glean", target: "glean", sessionId: s, draftId: run, beginCall });
+  await inTransaction(db, (trx) =>
+    openRun(trx, { projectId, origin: "glean", target: "glean", sessionId: s, draftId: run, beginCall }),
+  );
   return run;
 }
 

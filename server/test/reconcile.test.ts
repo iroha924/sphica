@@ -31,8 +31,12 @@ const target = (p: number): Target => ({
   sources: null,
 });
 
+/** Opens a run in a transaction, as trace and glean do */
+const opened = (db: TempDb, v: Parameters<typeof openRun>[1]) =>
+  inTransaction(db.ingest, (trx) => openRun(trx, v));
+
 const runIn = (db: TempDb, p: number) =>
-  openRun(db.ingest, {
+  opened(db, {
     projectId: p,
     origin: "trace",
     target: "session:s1",
@@ -302,7 +306,7 @@ test("order: withdrawing the owner's successor and adopting the waiting proposal
         root: null,
         sources: null,
       };
-      const runId = await openRun(db.ingest, {
+      const runId = await opened(db, {
         projectId: p,
         origin: "glean",
         target: "session:g1",
@@ -448,7 +452,7 @@ test("judge budget: one check or save into a place with a long chain and many wa
     };
     // record_check runs this same save and rolls it back, holding the lock as long
     const draft = "budget-check";
-    await openRun(db.ingest, {
+    await opened(db, {
       projectId: p,
       origin: "trace",
       target: "session:s1",
@@ -506,7 +510,7 @@ test("a replacement that ends after the clock went back ends no earlier than it 
       db.owner.prepare("select revision from unit where key = ?").get(`${PREFIX}next`)?.revision,
     );
     const gleaned: Target = { ...target(p), origin: "glean", prefix: "glean:" };
-    const runId = await openRun(db.ingest, {
+    const runId = await opened(db, {
       projectId: p,
       origin: "glean",
       target: "session:s1",
@@ -555,7 +559,7 @@ test("record_check waits for a write lock another process holds, as save does, a
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "Keep it." });
     const draft = "waits";
-    await openRun(db.ingest, {
+    await opened(db, {
       projectId: p,
       origin: "trace",
       target: "session:s1",

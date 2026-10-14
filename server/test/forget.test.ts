@@ -8,7 +8,9 @@ import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
+import { SCHEMA_REVISION } from "../src/db.ts";
 import { beginGlean, checkText } from "../src/extract.ts";
 import { applyForget, type ForgetOutcome, forgetWords, previewForget } from "../src/forget.ts";
 import { lookOverview } from "../src/overview.ts";
@@ -613,4 +615,48 @@ test("forgetting the words that moved an anchor removes only that reason: the ch
   );
   assert.equal(lifecycle(u), "active");
   assert.ok(revision(u) > before);
+});
+
+/**
+ * Runs fn while `sphica init` of a newer Sphica migrates the database just before the nth `begin immediate` this process prepares: after
+ * the connection opened and checked the revision, and, for the second one of a forget, after the deletion committed.
+ */
+async function migratedAt<T>(nth: number, fn: () => Promise<T>): Promise<T> {
+  const prepare = DatabaseSync.prototype.prepare;
+  let seen = 0;
+  DatabaseSync.prototype.prepare = function (this: DatabaseSync, ...args: Parameters<typeof prepare>) {
+    if (args[0] === "begin immediate" && ++seen === nth)
+      db.owner.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+    return prepare.apply(this, args);
+  };
+  try {
+    return await fn();
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+    db.owner.exec(`pragma user_version = ${SCHEMA_REVISION}`);
+  }
+}
+
+test("revision: a preview or a forget whose database was migrated after its connection opened is refused, and nothing is forgotten", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  await assert.rejects(
+    migratedAt(1, () => previewForget(db.file, p, [src])),
+    new RegExp(`expects revision ${SCHEMA_REVISION}\\.`),
+  );
+  const seen = await previewForget(db.file, p, [src]);
+  await assert.rejects(
+    migratedAt(1, () => applyForget(db.file, p, [src], seen)),
+    new RegExp(`expects revision ${SCHEMA_REVISION}\\.`),
+  );
+  assert.equal(exists(src), true);
+  assert.equal(indexed("sqlite"), 1);
+});
+
+test("revision: a forget whose database was migrated after the deletion committed keeps the deletion and leaves the cleanup unfinished", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const seen = await previewForget(db.file, p, [src]);
+  const { cleanup } = await migratedAt(2, () => applyForget(db.file, p, [src], seen));
+  assert.equal(cleanup, "incomplete");
+  assert.equal(exists(src), false);
+  assert.equal(indexed("sqlite"), 0);
 });

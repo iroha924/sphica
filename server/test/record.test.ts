@@ -114,7 +114,7 @@ test("a run whose start is later than the clock finishes at its start", async ()
       status: "running",
       started_at: later,
     });
-    await finishRun(db.ingest, runId);
+    await inTransaction(db.ingest, (trx) => finishRun(trx, runId));
     assert.deepEqual(
       { ...db.owner.prepare("select status, finished_at from extraction_run where id = ?").get(runId) },
       { status: "saved", finished_at: later },
@@ -917,13 +917,15 @@ test("trace reads pending sessions, a draft's run, a session's messages and edit
       pending.rows.map((r) => [r.id, Number(r.waiting), Number(r.first)]),
       [["s1", 1, m]],
     );
-    const runId = await openRun(db.ingest, {
-      projectId: p,
-      origin: "trace",
-      target: "session:s1",
-      sessionId: "s1",
-      draftId: "dx",
-    });
+    const runId = await inTransaction(db.ingest, (trx) =>
+      openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: "dx",
+      }),
+    );
     assert.equal((await runOf(db.reader, "dx"))?.id, runId);
     assert.equal(await runOf(db.reader, "none"), null);
     assert.deepEqual(

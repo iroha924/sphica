@@ -49,7 +49,7 @@ import {
   stopped,
   title,
 } from "./cli/view.ts";
-import { dbFile, type Reads, SCHEMA_REVISION } from "./db.ts";
+import { dbFile, inTransaction, type Reads, SCHEMA_REVISION } from "./db.ts";
 import { refusalText, workerPlace } from "./git.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
@@ -508,12 +508,14 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
       return;
     }
     await withDb("ingest", async (db) => {
-      const added = await db
-        .insertInto("project")
-        .values({ key: place.key, name: place.name })
-        .onConflict((oc) => oc.column("key").doNothing())
-        .returning("id")
-        .executeTakeFirst();
+      const added = await inTransaction(db, (trx) =>
+        trx
+          .insertInto("project")
+          .values({ key: place.key, name: place.name })
+          .onConflict((oc) => oc.column("key").doNothing())
+          .returning("id")
+          .executeTakeFirst(),
+      );
       console.log(
         indent(
           `${mark(added ? "ok" : "none")} ${inline(place.name)} ${added ? "registered" : "already registered"} (${inline(place.key)}, ${inline(place.root)})`,

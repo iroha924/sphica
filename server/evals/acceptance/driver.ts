@@ -15,7 +15,7 @@ import { checkAnchor } from "../../src/anchors.ts";
 import { askedBefore, askedText } from "../../src/asked.ts";
 import { callerOf } from "../../src/caller.ts";
 import { flush, observeRecordCall, onHook } from "../../src/capture.ts";
-import { openReader } from "../../src/db.ts";
+import { inTransaction, openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
@@ -858,19 +858,22 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (step.work && typeof step.work === "object") {
         const w = step.work as { key: string; title: string; current: string; next?: string[] };
-        await writer()
-          .insertInto("work")
-          .values({
-            project_id: await projectId(),
-            key: w.key,
-            title: w.title,
-            goal: w.title,
-            current: w.current,
-            next: JSON.stringify(w.next ?? []),
-            status: "active",
-            updated_at: new Date().toISOString(),
-          })
-          .execute();
+        const pid = await projectId();
+        await inTransaction(writer(), (trx) =>
+          trx
+            .insertInto("work")
+            .values({
+              project_id: pid,
+              key: w.key,
+              title: w.title,
+              goal: w.title,
+              current: w.current,
+              next: JSON.stringify(w.next ?? []),
+              status: "active",
+              updated_at: new Date().toISOString(),
+            })
+            .execute(),
+        );
         return;
       }
       if (step.database === "missing") {

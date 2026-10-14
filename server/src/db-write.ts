@@ -4,11 +4,19 @@
 // Writing connections (owner, ingest, capture, forget). **Never imported from MCP or search** (scripts/check-architecture.mjs).
 // Connection setup order is fixed: open → defensive and pragmas → the tokenizer function → authorizer.
 
-import { constants as C, DatabaseSync } from "node:sqlite";
+import { constants as C, DatabaseSync, type StatementSync } from "node:sqlite";
 import type { Kysely } from "kysely";
 import { kyselyOn } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { dbFile, prepare, type Role, requireFile, requireRuntime, SHADOW } from "./sqlite.ts";
+import {
+  dbFile,
+  prepare,
+  type Role,
+  requireFile,
+  requireRevision,
+  requireRuntime,
+  SHADOW,
+} from "./sqlite.ts";
 import { terms } from "./text.ts";
 
 export type WriteRole = Exclude<Role, "reader">;
@@ -339,6 +347,64 @@ function forgetAuthorizer(action: number, p1: string | null, p2: string | null):
 }
 
 /**
+ * Ingest and forget write only inside a transaction whose `begin immediate` found this Sphica's revision while holding the write lock: a
+ * record server keeps its connection open while `sphica init` may migrate the database. Returns the authorizer's verdict for the
+ * actions it decides, null for the rest. FTS5's own tables are left out: it writes them while committing, when no transaction shows.
+ */
+function checkedWrites(
+  raw: DatabaseSync,
+): (action: number, p1: string | null, p2: string | null) => number | null {
+  let checked = false;
+  raw.prepare = ((text: string, ...rest: unknown[]) => {
+    const st = (
+      DatabaseSync.prototype.prepare as (this: DatabaseSync, t: string, ...r: unknown[]) => StatementSync
+    ).call(raw, text, ...rest);
+    if (text !== "begin immediate") return st;
+    const begin = () => {
+      st.run();
+      try {
+        requireRevision(raw);
+      } catch (e) {
+        try {
+          raw.prepare("rollback").run();
+        } catch {}
+        throw e;
+      }
+      checked = true;
+    };
+    return {
+      columns: () => st.columns(),
+      run: () => {
+        begin();
+        return { changes: 0, lastInsertRowid: 0 };
+      },
+      all: () => {
+        begin();
+        return [];
+      },
+      get: () => {
+        begin();
+        return undefined;
+      },
+      iterate: () => {
+        throw new Error("begin immediate runs through run, all, or get");
+      },
+    } as unknown as StatementSync;
+  }) as typeof raw.prepare;
+  return (action, p1, p2) => {
+    if (action === C.SQLITE_PRAGMA && p1 === "user_version" && p2 === null) return C.SQLITE_OK;
+    // A transaction begun any other way, or one that ended (committed or rolled back by SQLite itself), never counts as checked
+    if (action === C.SQLITE_TRANSACTION && p1 === "BEGIN") checked = false;
+    if (action === C.SQLITE_SAVEPOINT && !raw.isTransaction) checked = false;
+    if (writes(action) && !SHADOW.test(p1 ?? "")) {
+      if (!raw.isTransaction) checked = false;
+      if (!checked) return C.SQLITE_DENY;
+    }
+    return null;
+  };
+}
+
+/**
  * Opens a writing connection. Only owner's `sphica init` passes `create` (a missing database is never created silently).
  * **The tokenizer function is always registered.** A connection without it writing to knowledge / message would fail the FTS trigger
  * with no such function (the index is never silently incomplete; fail-closed).
@@ -365,10 +431,14 @@ export function connectWriter(
     raw.close();
     throw e;
   }
-  if (role === "ingest")
-    raw.setAuthorizer((action, p1, p2, _db, trigger) => ingestAuthorizer(action, p1, p2, trigger));
-  else if (role === "forget") raw.setAuthorizer(forgetAuthorizer);
-  else if (role === "capture") {
+  if (role === "ingest" || role === "forget") {
+    const gate = checkedWrites(raw);
+    raw.setAuthorizer(
+      (action, p1, p2, _db, trigger) =>
+        gate(action, p1, p2) ??
+        (role === "ingest" ? ingestAuthorizer(action, p1, p2, trigger) : forgetAuthorizer(action, p1, p2)),
+    );
+  } else if (role === "capture") {
     let own = false;
     raw.setAuthorizer((action, p1, p2, _db, triggerOrView) =>
       captureAuthorizer(own, action, p1, p2, triggerOrView),
