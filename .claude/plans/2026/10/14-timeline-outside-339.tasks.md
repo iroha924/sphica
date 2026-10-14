@@ -68,13 +68,14 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
 
 schema の Skill が新しい表を言い、リリースの Skill が revision を上げるときの到着の順序を言う。
 
-- [ ] T04: Skill に `unit_answer` と、revision を上げるリリースの到着の順序を書く
+- [x] T04: Skill に `unit_answer` と、revision を上げるリリースの到着の順序を書く
   - 種別: 変更
   - 計画: S4
   - 依存: T02（`reconcile` が `unit_answer` を書いていないと、Skill が先に違うことを言う）
   - 変更: `.agents/skills/knowledge-schema/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run verify:ai` → 通る。`rg -n "unit_answer" .agents/skills/knowledge-schema/SKILL.md` → 表の一覧と `reconcile` の説明に出る。`rg -n "mcp-record" .agents/skills/plugin-release/SKILL.md` → 移行の前に古い記録 MCP が無いことを確かめる段がある
   - コミット: `docs(skills): name unit_answer and the order of arrival for a release that raises the revision`
+  - 結果: `bun run verify:ai` → 通った（AI config: 28 invariants、リンクのエラー 0）。`bun run markdown` → 0 issues。`rg -n "unit_answer" .agents/skills/knowledge-schema/SKILL.md` → 表の一覧（66 行目）と `reconcile` の説明（74・76 行目）に出る。`rg -n "mcp-record" .agents/skills/plugin-release/SKILL.md` → 移行の前に古い記録 MCP が無いことを確かめる段（166・167 行目）がある。Skill に書いた「開いたままの古い接続は移行の後も書ける」は、fixture のコピーで確かめた（直す前のコードの ingest 接続を開く → 新しいコードで revision 13 に移行 → 同じ接続で `extraction_run` に insert できる。古いコードの新しい接続は「expects revision 12」で断られる）
 
 ## 記録
 
