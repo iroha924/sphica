@@ -1867,6 +1867,13 @@ test("migrating revision 12 copies each withdrawal an answer caused to the one r
       )
       .all();
   const before = states();
+  const revisions = () =>
+    Object.fromEntries(
+      (
+        raw.prepare("select key, revision from unit order by id").all() as { key: string; revision: number }[]
+      ).map((r) => [r.key.replace("trace:s1/", ""), Number(r.revision)]),
+    );
+  const revised = revisions();
   const said = migrate(raw);
   assert.deepEqual(
     raw
@@ -1881,6 +1888,19 @@ test("migrating revision 12 copies each withdrawal an answer caused to the one r
     ],
   );
   assert.deepEqual(states(), before);
+  // A copied row is a new relation of the question and of its answer: both revisions rise, once per row, and no other record's does
+  const rose = Object.entries(revisions()).flatMap(([key, now]) =>
+    now === revised[key] ? [] : [[key, now - (revised[key] ?? 0)]],
+  );
+  assert.deepEqual(rose.sort(), [
+    ["a", 2],
+    ["a_b", 1],
+    ["axb", 1],
+    ["named", 1],
+    ["older", 1],
+    ["plain", 1],
+    ["underscore", 1],
+  ]);
   assert.match(said, /Changed while migrating to revision 13: 5 rows/);
   for (const key of ["unknown", "by-question", "other-run", "not-asked", "two-fit"])
     assert.match(said, new RegExp(`trace:s1/${key} \\(state \\d+\\)`), key);

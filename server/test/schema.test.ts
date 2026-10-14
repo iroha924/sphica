@@ -1898,7 +1898,15 @@ test("an answer is written for a question's withdrawal by a record the withdrawa
     forget_id: insert(db, "forget_batch", { project_id: p, at: now }),
   });
   refuses(() => answer(forgotten.withdrawal, found), /the withdrawal's own run saved/);
+  const revisions = () =>
+    [asked.unit, found].map((id) => Number(one("select revision from unit where id = ?", id).revision));
+  const was = revisions();
   answer(asked.withdrawal, found);
+  // The row is a relation of both records, so each revision rises and a draft made before it is refused
+  assert.deepEqual(
+    revisions(),
+    was.map((r) => r + 1),
+  );
   refuses(() => answer(asked.withdrawal, found), /constraint failed/);
   refuses(() => sql("update unit_answer set answer_unit = ?", asked.unit), /never changed/);
   refuses(() => sql("delete from unit_answer"), /goes only with its withdrawal or its record/);

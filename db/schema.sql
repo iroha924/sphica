@@ -1079,6 +1079,10 @@ end;
 create trigger unit_rev_link_u after update on unit_link begin
   update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
 end;
+create trigger unit_rev_answer_i after insert on unit_answer begin
+  update unit set revision = revision + 1
+  where id in (new.answer_unit, (select unit_id from unit_state where id = new.state_id));
+end;
 create trigger unit_rev_anchor_i after insert on unit_anchor begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_anchor_u after update on unit_anchor begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_retirement_i after insert on unit_anchor_retirement begin

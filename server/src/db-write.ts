@@ -206,6 +206,7 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
       "adoption_d",
       "link_i",
       "link_u",
+      "answer_i",
       "replacement_i",
       "replacement_u",
       "anchor_i",

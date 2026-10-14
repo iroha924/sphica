@@ -60,6 +60,16 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
   - コミット: `fix(check): find a write to a judged table whose quoted name is escaped in a string`
   - 結果: red: 検査を直す前に同じコマンド → 2 件 pass、1 件 fail。直した後 → 3 件 pass、0 件 fail。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`bun run check` → exit 0。review-shipping は指摘なし（直す前後の正規表現が `server/src` の 60 ファイルで同じ結果になること、以前の形が全部まだ落ちることを確かめたと返った）
 
+- [x] T07: `unit_answer` の行が、答えた記録と質問の revision を上げる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（`unit_answer` の表と移行に trigger を足す）
+  - 変更: `db/schema.sql`, `db/migrations/0013.sql`, `server/src/db-write.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
+  - red: テストを足した後、trigger を足す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 行を入れても、移行で写しても、どの記録の revision も上がらず、2 件失敗する
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/db.test.ts` → 全部通る。`bun run codegen:check` → 0
+  - コミット: `fix(schema): raise both records' revisions when an answer is kept beside a withdrawal`
+  - 結果: red: trigger を足す前に上のコマンド → 104 件 pass、2 件 fail（schema のテストは revision が上がらない、移行のテストは上がった記録の一覧が空）。足した後 `test/schema.test.ts test/migrate.test.ts test/db.test.ts` → 135 件 pass、0 件 fail。`bun run codegen:check` → matches。`caffeinate -i bun run verify` → exit 0（acceptance 142 pass）。持ち主の DB の新しいコピーを移行 → revision 13、`unit_answer` 1 行、u541 は 7 → 8、u544 は 14 → 15、計測は 1 行のまま。review-shipping は出荷を止める指摘なし（pack した `mcp-record.js` で質問を閉じる保存が通り、質問は 4 → 6、答えた記録は 5 になったと返った）
+
 ## P2: timeline の返信を直す
 
 頼んだ記録と関係の無い行が timeline から消え、連なりの記録が答えた質問の取り下げだけが残る。
@@ -101,3 +111,6 @@ schema の Skill が新しい表を言い、リリースの Skill が revision �
 - 2026-10-14 / T03, T05 / Codex のコミットのレビュー（4e740e59 と 22fd1023、新しい会話）は指摘 0 件。一式のテストは流さず、メモリ上の SQLite で保存の実際の経路・移行した DB の返信・予算の件数を個別に確かめたと返った / 採否なし
 - 2026-10-14 / 全体 / Codex の全差分のレビュー（deb3c4fd..ec79cac0、新しい会話、high）は P1・P2 なし、P3 が 1 件: `scripts/check-architecture.mjs` の検査が、文字列の中でエスケープした引用符（`into \"unit_answer\"`）を見つけない。再現したと返った / 採る。修正タスク T06 を足した。変数に入れた表名や実行時に組み立てた表名までは追わない（PR 本文の Declined findings に書く）
 - 2026-10-14 / 全体 / plan の完了条件: A4 `git diff --stat deb3c4fd -- server/src` → 6 ファイルだけ。A5 計測 → 直す前 288 行（179 件）、直した後 1 行（u544 の timeline の u541、state 1129）、移行の注記 0 件。A6 fixture の比較 → gold の 3 件は 0 行の差、`battery`・`push`・`german-label`・`late-edits` は連なりの外の `became superseded` が 1 行ずつ消えるだけ。A7 bundle した `mcp.js` を両ホストの起動の形で呼んだ返信（1,960 字）が互いに、また `timelineRefs` の返信と一致。pack した成果物は 54 ファイル、`check-tarball.mjs` が通る / A8〜A10 は push の後
+- 2026-10-14 / 全体 / PR #341 を作った。CI は d7438139 で全項目 pass（`check` の Node 24.15 と 26、macos、windows、git-2-34、リリースの dry run、`verification-section`、CodeQL）
+- 2026-10-14 / T01 / GitHub の Codex のレビュー（d7438139）は 1 件（P2）: `unit_answer` の行を足しても答えた記録の `unit.revision` が上がらず、「記録の関係が変わるたびに revision を上げる」という schema の決まりから外れる / 採る。今の読み手は `unit_answer` を見ないので実害の出る経路は見つからなかったが、後から trigger を足すにはもう一度 revision を上げることになる。修正タスク T07 を足した。計画の方針 3 の「`INGEST_TRIGGER_WRITES` は変えない」はここで変わる（trigger が `unit` を更新するので 1 行足した）
+- 2026-10-14 / T07 / review-shipping の観測: この PR の前の head の `0013.sql` で revision 13 になった DB には、新しい trigger が入らない / 該当する DB は無い。持ち主の DB は revision 12 のまま（読み取り専用で確かめた）で、0.6.57 は未公開。移行したのは scratchpad のコピーだけ

@@ -31,6 +31,11 @@ create trigger unit_answer_no_delete before delete on unit_answer
 when exists (select 1 from unit_state where id = old.state_id) and exists (select 1 from unit where id = old.answer_unit) begin
   select raise(abort, 'an answer goes only with its withdrawal or its record');
 end;
+-- Made before the copy below, so each copied row raises the revision of its question and of its answer as a saved one does
+create trigger unit_rev_answer_i after insert on unit_answer begin
+  update unit set revision = revision + 1
+  where id in (new.answer_unit, (select unit_id from unit_state where id = new.state_id));
+end;
 
 -- The reason is compared with whole keys, not cut at a separator: a key's own characters cannot end it early. substr, not like, since
 -- a key's _ would match any character there. Only pairs the insert trigger accepts are picked, so the copy never stops the migration
