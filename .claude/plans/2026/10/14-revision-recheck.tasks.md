@@ -45,13 +45,14 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `fix(db): refuse an ingest or forget write when the revision changed after the connection opened`
   - 結果: red は修正前に 2 件とも失敗（`Missing expected rejection` / `Missing expected exception`）。修正後、同じコマンドで 2 件とも通る。`bun run test` → tests 1294 / pass 1294 / fail 0
 
-- [ ] T03: 移行窓・持ち越し・自動 rollback・FTS の正常系・既存の禁止・forget の preview / apply のテストを足す
+- [x] T03: 移行窓・持ち越し・自動 rollback・FTS の正常系・既存の禁止・forget の preview / apply のテストを足す
   - 種別: 追加
   - 計画: S4
   - 依存: T02（検査付き begin と authorizer の `checked` が無いと、拒否を確かめるテストが書けない）
   - 変更: `server/test/db.test.ts`, `server/test/forget.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern=revision test/db.test.ts test/forget.test.ts` → plan の A2〜A9 に当たるテストが全部通る
   - コミット: `test(db): cover the revision check's lock, carry-over, rollback, FTS, and forget paths`
+  - 結果: `--test-name-pattern=revision test/db.test.ts test/forget.test.ts` → tests 14 / pass 14。authorizer の拒否の 1 行を外すと、外の書き込みと forget の optimize の 2 件が落ちることを確かめて戻した。既存の禁止は `attempt` が検査済みトランザクションの中で流すので、checked が true のまま確かめている。shadow table の直接の書き込みの検査に forget を足した。`bun run test` → tests 1303 / pass 1303 / fail 0
 
 ## 記録
 

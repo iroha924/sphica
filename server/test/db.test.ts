@@ -12,6 +12,7 @@ import { type Kysely, sql } from "kysely";
 import { inRolledBack, inTransaction, openReader, SCHEMA_REVISION } from "../src/db.ts";
 import type { DB } from "../src/db-types.ts";
 import { connectWriter, INGEST_TRIGGER_WRITES } from "../src/db-write.ts";
+import { beginTrace, saveText } from "../src/extract.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { connectReader } from "../src/sqlite.ts";
 import { sha256 } from "../src/text.ts";
@@ -620,7 +621,7 @@ test("the capture connection cannot touch base tables, units, other sources, or 
 
 // The ingest and owner authorizers cannot tell writes to FTS5 shadow tables from FTS5's own writes. defensive mode stops them.
 test("no write connection can modify FTS internal tables directly", () => {
-  for (const open of [ingest, capture, () => connectWriter("owner", db.file)])
+  for (const open of [ingest, capture, forget, () => connectWriter("owner", db.file)])
     for (const text of [
       "insert into source_fts_docsize (id, sz) values (999, x'00')",
       "delete from unit_fts_data",
@@ -1036,3 +1037,181 @@ test("a forget connection opened before the revision changed refuses to begin a 
     raw.close();
   }
 });
+
+/** Raises the database's revision while fn runs, as `sphica init` of a newer Sphica would, and puts it back after */
+function migrated<T>(file: string, fn: () => T): T {
+  const owner = connectWriter("owner", file);
+  owner.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+  const back = () => owner.exec(`pragma user_version = ${SCHEMA_REVISION}`);
+  try {
+    const out = fn();
+    if (out instanceof Promise) return out.finally(() => (back(), owner.close())) as T;
+    back();
+    owner.close();
+    return out;
+  } catch (e) {
+    back();
+    owner.close();
+    throw e;
+  }
+}
+
+/** A write each role's code makes, so a refusal is the revision check's and not the table rules' */
+const allowedWrite = {
+  ingest: () => `insert into project (key, name) values ('git:github.com/o/${Math.random()}', 'o/x')`,
+  forget: () => `insert into forget_batch (project_id, at) values (${p}, '${now}')`,
+};
+
+/** A write each role may make that breaks a constraint with OR ROLLBACK, so SQLite ends the transaction itself */
+const conflict = {
+  ingest: "insert or rollback into project (key, name) values ('git:github.com/o/r', 'o/again')",
+  forget: `insert or rollback into forget_batch (project_id, at) values (null, '${now}')`,
+};
+
+test("a capture connection opened before the revision changed keeps writing after it", () => {
+  const raw = capture();
+  try {
+    raw.prepare("select 1").get();
+    migrated(db.file, () =>
+      raw
+        .prepare(
+          "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('rev-cap', ?, 'codex', 'rev-cap', null, ?)",
+        )
+        .run(p, now),
+    );
+  } finally {
+    raw.close();
+  }
+  assert.equal(db.owner.prepare("select count(*) as n from session where id = 'rev-cap'").get()?.n, 1);
+});
+
+test("a checked begin holds the write lock, so the revision cannot change until the transaction ends", () => {
+  for (const role of ["ingest", "forget"] as const) {
+    const raw = connectWriter(role, db.file);
+    const owner = connectWriter("owner", db.file, false, 0);
+    try {
+      raw.prepare("begin immediate").run();
+      assert.throws(() => owner.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`), /locked|busy/, role);
+      raw.prepare("rollback").run();
+      assert.equal(
+        (owner.prepare("pragma user_version").get() as { user_version: number }).user_version,
+        SCHEMA_REVISION,
+      );
+    } finally {
+      owner.close();
+      raw.close();
+    }
+  }
+});
+
+test("after a revision refusal the connection holds no transaction, others can write, and it writes again once the revision is back", () => {
+  for (const role of ["ingest", "forget"] as const) {
+    const raw = connectWriter(role, db.file);
+    try {
+      migrated(db.file, () =>
+        assert.throws(() => raw.prepare("begin immediate").run(), /expects revision/, role),
+      );
+      assert.equal(raw.isTransaction, false, role);
+      const other = connectWriter("owner", db.file, false, 0);
+      other.exec("begin immediate; commit");
+      other.close();
+      raw.prepare("begin immediate").run();
+      raw.prepare(allowedWrite[role]()).run();
+      raw.prepare("commit").run();
+    } finally {
+      raw.close();
+    }
+  }
+});
+
+test("revision: ingest and forget refuse writes outside a checked transaction, also right after one committed or rolled back", () => {
+  for (const role of ["ingest", "forget"] as const) {
+    const write = allowedWrite[role];
+    const raw = connectWriter(role, db.file);
+    const refused = (what: string, begin: () => void) => {
+      begin();
+      assert.throws(() => raw.prepare(write()).run(), /not authorized/, `${role}: ${what}`);
+      if (raw.isTransaction) raw.prepare("rollback").run();
+    };
+    try {
+      refused("autocommit", () => {});
+      refused("begin through exec", () => raw.exec("begin immediate"));
+      refused("begin deferred", () => raw.prepare("begin deferred").run());
+      refused("an outermost savepoint", () => raw.prepare("savepoint s").run());
+      raw.prepare("begin immediate").run();
+      raw.prepare(write()).run();
+      raw.prepare("commit").run();
+      refused("autocommit after a commit", () => {});
+      refused("begin through exec after a commit", () => raw.exec("begin"));
+      // SQLite rolls the transaction back itself on this conflict, with no rollback statement
+      raw.prepare("begin immediate").run();
+      refused("autocommit after SQLite rolled back", () => {
+        assert.throws(() => raw.prepare(conflict[role]).run(), /constraint/, role);
+        assert.equal(raw.isTransaction, false, role);
+      });
+    } finally {
+      raw.close();
+    }
+  }
+});
+
+test("revision: a rolled-back transaction, as record_check runs, is refused after the revision changed", async () => {
+  const t = tempDb();
+  try {
+    await t.ingest.selectFrom("project").select("id").execute();
+    await migrated(t.file, () =>
+      assert.rejects(
+        inRolledBack(t.ingest, async () => 1),
+        new RegExp(`expects revision ${SCHEMA_REVISION}\\.`),
+      ),
+    );
+  } finally {
+    await t.done();
+  }
+});
+
+test("revision: a new ingest connection writes the full-text index through the commit, and search sees it", async () => {
+  const t = tempDb();
+  try {
+    const pid = project(t);
+    const m = message(t, pid, { id: "fts-1", text: "Use SQLite. It is enough." });
+    const traced = await beginTrace(t.ingest, pid, "s1");
+    await saveText(t.ingest, traced, pid, null, {
+      units: [
+        {
+          key: "db",
+          kind: "finding",
+          text: "Quokka storage",
+          evidence: [{ source: `s${m}`, quote: "Use SQLite.", role: "states" }],
+        },
+      ],
+    });
+    assert.equal(
+      t.owner.prepare("select count(*) as n from unit_fts where unit_fts match 'quokka'").get()?.n,
+      1,
+    );
+  } finally {
+    await t.done();
+  }
+});
+
+test("revision: forget refuses the full-text optimize outside a checked transaction", () => {
+  const raw = forget();
+  try {
+    assert.match(
+      attemptOn(raw, "insert into source_fts (source_fts) values ('optimize')") ?? "",
+      /not authorized/,
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+function attemptOn(raw: DatabaseSync, text: string): string | null {
+  try {
+    raw.prepare(text).run();
+    return null;
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
