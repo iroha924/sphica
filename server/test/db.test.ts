@@ -29,8 +29,8 @@ before(() => {
 after(() => db.done());
 
 /**
- * Opens a connection, runs one SQL statement, and returns the failure message (null on success). It runs inside `begin immediate`, as the
- * code writes, where the connection can begin one (a reader cannot), so a refusal comes from the table rules, not from an unchecked write.
+ * Opens a connection, runs one SQL statement, and returns the failure message (null on success). A writing connection runs it inside
+ * `begin immediate`, as the code writes, so a refusal comes from the table rules and not from an unchecked write; a failed begin throws.
  */
 function attempt(
   open: () => DatabaseSync,
@@ -38,10 +38,15 @@ function attempt(
   ...args: (string | number | Buffer | null)[]
 ): string | null {
   const raw = open();
-  try {
+  if (open !== reader) {
     try {
       raw.prepare("begin immediate").run();
-    } catch {}
+    } catch (e) {
+      raw.close();
+      throw e;
+    }
+  }
+  try {
     raw.prepare(text).run(...args);
     if (raw.isTransaction) raw.prepare("commit").run();
     return null;

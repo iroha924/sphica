@@ -74,6 +74,16 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `fix(evals): register the fixture project in a transaction`
   - 結果: 直す前の `HOME=<一時> SPHICA_HOME=<一時> node evals/cloud/fixture.ts new <一時>/f.db o/r` → `Error: not authorized`。直した後、同じコマンド → exit 0、`project` の行は `git:github.com/o/r` の 1 件
 
+- [x] T06: テストの `attempt` が、書き込みの接続で begin に失敗したら黙って進まずに投げるようにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T02（`attempt` を検査付きの begin の中で流す形にしたのは T02）
+  - 変更: `server/test/db.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/db.test.ts` → 失敗しない（begin の失敗を握りつぶすので、拒否を期待するテストが表の規則によらず通りうる。コードを読んで確かめた欠陥で、落ちる入力は作っていない）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/db.test.ts` → 全件通る
+  - コミット: `test(db): throw when a writing connection cannot begin in attempt`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/db.test.ts` → tests 38 / pass 38 / fail 0
+
 ## 記録
 
 - 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
@@ -84,3 +94,4 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 - 2026-10-14 / T04 / verify の acceptance で、ドライバーが前提のデータの work を ingest 接続に autocommit で書いて拒否された / 修正タスク T04 を足して直した
 - 2026-10-14 / T05 / verify が流さない評価用のスクリプトを探し、`evals/cloud/fixture.ts` の `new` が ingest 接続に autocommit で書いていた（`evals/cloud/build.ts` は読むだけ）/ 修正タスク T05 を足して直した
 - 2026-10-14 / T05 / 完了条件の欄がコマンドの形でないまま検査が落ちたのに、検査の出力をパイプに通したためコミットが通った / 完了条件・red・結果の欄をコマンドの形に直した（前の値: 「同じコマンド → 0 で終わり、…」ほか）
+- 2026-10-14 / T06 / review-shipping の全差分のレビュー: 出荷して壊れるものは無し、指摘 1 件（`attempt` が begin の失敗を握りつぶし、拒否のテストが空振りしうる）/ 採用して T06 で直した。reader は begin が `not authorized` になるので、reader だけ begin しない
