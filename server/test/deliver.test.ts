@@ -3553,6 +3553,8 @@ test("a command anchor matches only its whole words in a row on one line, readin
     "",
   ])
     assert.equal(runsCommand(command, anchor), false, command);
+  // An operator inside a word is part of it, so an anchor holding one still matches itself
+  assert.equal(runsCommand("curl https://x.test/?a=1&b=2 -o out", "curl https://x.test/?a=1&b=2"), true);
 });
 
 /** Dead ends about `npm run thumbs --worker`, n of them, each quoting one message */

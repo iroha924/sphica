@@ -9,10 +9,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { createDriver } from "../evals/acceptance/driver.ts";
 import { loadAcceptance } from "../evals/acceptance/load.ts";
-import { fixtureSteps, withoutCommands } from "../evals/cloud/build-lib.ts";
+import { fixtureSteps, stripCommands } from "../evals/cloud/build-lib.ts";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { checkAnchor } from "../src/anchors.ts";
 import { openReader } from "../src/db.ts";
@@ -390,11 +391,63 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
   });
 });
 
-test("the arm without command anchors keeps every step but the dead ends' commands", () => {
-  const steps = fixtureSteps(plan, false);
-  const bare = withoutCommands(steps);
-  const text = (x: unknown) => JSON.stringify(x);
-  assert.match(text(steps), /"commands":\["npx tsc"\]/);
-  assert.doesNotMatch(text(bare), /"commands"/);
-  assert.equal(text(bare), text(steps).replace(/,"commands":\[[^\]]*\]/g, ""));
+test("the arm without command anchors is the same fixture with only the command anchors and their search words taken out", async () => {
+  const { world } = loadAcceptance();
+  const driver = await createDriver(world);
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "eval-strip-")));
+  try {
+    for (const step of fixtureSteps(plan, false)) await driver.run(step);
+    const full = path.join(dir, "full.db");
+    const bare = path.join(dir, "bare.db");
+    await driver.snapshot(full);
+    fs.copyFileSync(full, bare);
+    assert.equal(await stripCommands(bare), 1);
+    const dump = (file: string) => {
+      const raw = new DatabaseSync(file, { readOnly: true });
+      try {
+        const tables = (
+          raw
+            .prepare(
+              "select name from sqlite_schema where type = 'table' and name not like 'unit_fts%' and name not like 'source_fts%' order by name",
+            )
+            .all() as { name: string }[]
+        ).map((t) => t.name);
+        const rows = Object.fromEntries(
+          tables.map((t) => [t, JSON.stringify(raw.prepare(`select * from "${t}" order by rowid`).all())]),
+        );
+        const schema = JSON.stringify(
+          raw.prepare("select type, name, sql from sqlite_schema order by name").all(),
+        );
+        return { rows, schema };
+      } finally {
+        raw.close();
+      }
+    };
+    const a = dump(full);
+    const b = dump(bare);
+    assert.equal(a.schema, b.schema, "the guard is back as it was");
+    assert.notEqual(a.rows.unit_command, "[]");
+    assert.equal(b.rows.unit_command, "[]");
+    for (const t of Object.keys(a.rows)) if (t !== "unit_command") assert.equal(b.rows[t], a.rows[t], t);
+    // The dead end's text and aliases say tsc too, so only the identifier column tells the command anchor apart
+    const ident = (file: string) => {
+      const raw = new DatabaseSync(file, { readOnly: true });
+      try {
+        return Number(
+          (
+            raw.prepare("select count(*) as n from unit_fts where unit_fts match 'ident:npx'").get() as {
+              n: number;
+            }
+          ).n,
+        );
+      } finally {
+        raw.close();
+      }
+    };
+    assert.equal(ident(full), 1);
+    assert.equal(ident(bare), 0);
+  } finally {
+    await driver.done();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

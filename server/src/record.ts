@@ -228,6 +228,9 @@ function commandProblem(command: string): string | null {
   if (words.length < 2) return "needs the program and at least one more word";
   if (words[0]?.startsWith("-")) return "must start with the program, not an option";
   if (/['"`]/.test(command)) return "must not contain quotes";
+  // Delivery ends a command at such an operator, so an anchor holding one would never match even itself
+  if (words.some((w) => /^[;|&]|[;|&]$/.test(w)))
+    return "must be one command, with no ; | & at a word's start or end";
   // The same range the schema's CHECK refuses, so a command check passes is never refused mid-save
   const control = (ch: string) =>
     ch.charCodeAt(0) <= 0x1f || (ch.charCodeAt(0) >= 0x7f && ch.charCodeAt(0) <= 0x9f);

@@ -142,6 +142,34 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `test(eval): add a task whose first command is a recorded dead end (T08)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → pass 4 / fail 0（新しい setup の dead_end が fixture に入り、`withoutCommands` が commands だけを外す）。`bun run verify` → exit 0。build と実行は A9 で流す（費用の承認が要る）
 
+- [x] T14: 演算子を語の頭か終わりに含むコマンドの anchor を保存で拒む
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T13（照合がコマンドを演算子で区切る）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `server/test/deliver.test.ts`, `plugin/skills/trace/SKILL.md`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="commands it is about" test/record.test.ts` → `node build.mjs &` と `npm test | tail -20` が保存され、拒否の行が無くて落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/record.test.ts test/deliver.test.ts` → 2 つが「must be one command」で外れ、語の内側に演算子を含む anchor（URL の `&`）は自分のコマンドに一致する
+  - コミット: `fix(record): refuse a command anchor that holds two commands, which could never match (T14)`
+  - 結果: red を実測（fail 1、拒否の行が無い）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/record.test.ts` → pass 83 / fail 0。deliver のテストも pass
+
+- [x] T15: scale の「止める」ケースで deny されたかも見る
+  - 種別: 変更
+  - 計画: S8
+  - 依存: T07（直す測定のケースが要る）
+  - 変更: `server/evals/scale/run.ts`
+  - 完了条件: `bun run verify` → 0 で終わり、止めるケースの最初の呼び出しが deny でなければ「not stopped」が problems に出る
+  - コミット: `test(scale): count a stop only when the hook denied the call (T15)`
+  - 結果: `bun run verify` → exit 0。scale の全体は T09 の後の測り直しで流す
+
+- [x] T16: eval の anchor なしの側を、ありの側の fixture のコピーから commands だけを外して作る
+  - 種別: 変更
+  - 計画: S9
+  - 依存: T08（--no-commands が要る）
+  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/test/eval-fixture.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → コピーから外した fixture は unit_command が空で FTS の ident に npx が無く、ほかの表の行と schema は元と同じ
+  - コミット: `test(eval): build the arm without command anchors from a copy of the other arm's fixture (T16)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → pass 4 / fail 0
+
 ## P4: 両ホストで確かめて出す準備
 
 実機で deny の理由が届くかを確かめ、届かないホストは知らせるだけに戻して README に書く。
@@ -170,3 +198,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-15 / T11, T12 / Codex の再レビュー F1（P2、再現済み）: T11 で演算子を空白と同じに扱ったため、別々のコマンドや URL の `&` の中にも一致する / 採用。T13 を足して直した。T12 は指摘なし
 2026-10-15 / T08 / 変更欄: tsundoku の world にコマンドを打つ課題が無く、2 本の arm を作る口も無かった / 前: tasks.json, fixture.ts。後: world.json にセッション s-en-typecheck、cases.json に setup trace_en_typecheck（dead_end に commands ["npx tsc"]）、tasks.json に課題 dead-end-typecheck、build.ts に --no-commands（build-lib.ts の withoutCommands）
 2026-10-15 / T07 / tasks の検査の違反（結果行の書式）を残したまま T07 をコミットした。検査をパイプに通して終了コードを失った / T08 のコミットで書式を直した
+2026-10-15 / T13, T07, T08 / Codex のレビュー F1〜F4（P2）: 2 本の arm を --compare で比べられない、組み立て直すと差が commands だけにならない、演算子を含む anchor が自分に一致しない、scale の止めるケースが deny を見ない / F2〜F4 は採用（T16、T14、T15）。F1 は一部採用: 2 本は build ごとに集計して並べると計画に書いた
+2026-10-15 / T09 / 対話の Codex を expect で 3 回操作したが、ターンが始まらず hook まで届かなかった（history.jsonl にはプロンプトがあり、ログはスレッドの開始まで）。codex exec では止めて理由が届くことを確かめた / 持ち主に聞く

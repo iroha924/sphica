@@ -245,6 +245,8 @@ type Case = {
   calls?: number;
   /** The shell command, when the case runs one of its own */
   command?: (f: Fixture) => string;
+  /** The first call of each session must be stopped (denied), not only name the record */
+  stops?: true;
 };
 
 const reviewed = (f: Fixture) => [f.keys.last ?? "", ...(f.keys.free ? [f.keys.free] : [])];
@@ -292,6 +294,7 @@ const CASES: Case[] = [
     input: { tool_name: "Bash" },
     command: (f) => `cd app && tool${f.keys.deadIndex} build --flag${f.keys.deadIndex} --verbose`,
     expect: (f) => [f.keys.dead ?? ""],
+    stops: true,
     only: "stress",
   },
   {
@@ -395,7 +398,7 @@ function call(
   f: Fixture,
   limitMs: number,
   extra: NodeJS.ProcessEnv = {},
-): Promise<Call & { text: string }> {
+): Promise<Call & { text: string; stopped: boolean }> {
   return new Promise((resolve) => {
     const start = performance.now();
     const child = spawn(process.execPath, [HOOK], {
@@ -415,15 +418,15 @@ function call(
     child.on("close", () => {
       clearTimeout(timer);
       const ms = performance.now() - start;
-      if (killed) return resolve({ ms, problem: "timeout", text: "" });
-      if (!out) return resolve({ ms, problem: null, text: "" });
+      if (killed) return resolve({ ms, problem: "timeout", text: "", stopped: false });
+      if (!out) return resolve({ ms, problem: null, text: "", stopped: false });
       try {
         // A stopped call carries its records as the reason, not as context
         const o = JSON.parse(out)?.hookSpecificOutput;
         const text = String(o?.additionalContext ?? o?.permissionDecisionReason ?? "");
-        resolve({ ms, problem: null, text });
+        resolve({ ms, problem: null, text, stopped: o?.permissionDecision === "deny" });
       } catch {
-        resolve({ ms, problem: "invalid output", text: "" });
+        resolve({ ms, problem: "invalid output", text: "", stopped: false });
       }
     });
     child.stdin.end(JSON.stringify(input));
@@ -455,6 +458,7 @@ async function measure(f: Fixture, timeouts: Record<string, number>): Promise<Ro
         // Only the first read of a session has to name its record: later ones may be spent by the budget
         const problem = got.problem ?? judge(got.text, k === 0 ? c.expect(f) : []);
         if (problem) problems.push(problem);
+        if (c.stops && k === 0 && !got.stopped) problems.push("not stopped");
         if (!c.expect(f).length && !c.calls && got.text && c.event === "UserPromptSubmit")
           problems.push("a prompt naming nothing delivered");
       }

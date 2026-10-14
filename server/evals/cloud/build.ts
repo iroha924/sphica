@@ -5,7 +5,8 @@
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
 // Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]
 //      [--dist <dir with mcp.js and deliver.js>] [--fixture <fixture.db>]  (old and new builds of one comparison share the fixture)
-//      [--no-commands]  (the tsundoku fixture without dead ends' command anchors, the other arm of the command-anchor comparison)
+//      [--no-commands]  (the fixture with dead ends' command anchors taken out: give the other arm's fixture with --fixture so the two
+//      differ only in those rows)
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -19,7 +20,7 @@ import { CONFIRM_GOLD, leadFor, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher, withoutCommands } from "./build-lib.ts";
+import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher, stripCommands } from "./build-lib.ts";
 import { evalCache, holdingLock, requireInside } from "./codex-home.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
@@ -51,11 +52,6 @@ const runs = Number(args.runs);
 if (!Number.isInteger(runs) || runs < 1)
   throw new Error("--runs takes a whole number of Claude runs per task and condition");
 const commands = !args["no-commands"];
-// The flag changes how the fixture is built, so it cannot apply to one given as is or to a project whose fixture is not built here
-if (!commands && (args.fixture || args.project !== "tsundoku"))
-  throw new Error(
-    "--no-commands builds the tsundoku fixture; it cannot go with --fixture or another project",
-  );
 const buildId = `${args.project}-${variant}${commands ? "" : "-nocommands"}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
 const out = path.resolve(args.out ?? path.join(evalCache(), "builds", buildId));
 // The build holds the gold, the tasks, and the slots' records long after the lock is released: only the cache is denied to every fenced Codex
@@ -107,8 +103,7 @@ async function fixture(file: string, leave: (tree: string) => void): Promise<voi
   const { world } = loadAcceptance();
   const driver = await createDriver(world);
   try {
-    const steps = fixtureSteps(plan, args.variant === "swapped");
-    for (const step of commands ? steps : withoutCommands(steps)) await driver.run(step);
+    for (const step of fixtureSteps(plan, args.variant === "swapped")) await driver.run(step);
     await driver.snapshot(file);
   } finally {
     try {
@@ -244,6 +239,9 @@ async function main(leave: (tree: string) => void) {
   if (args.fixture) fs.copyFileSync(path.resolve(args.fixture), base);
   else if (args.project === "tsundoku") await fixture(base, leave);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
+  // A dead end with no command anchor stops no call; everything else in the copy stays as the other arm has it
+  if (!commands && !(await stripCommands(base)))
+    throw new Error("--no-commands: the fixture holds no command anchor to take out");
   const manifest: Record<string, unknown> = {
     build: buildId,
     variant,

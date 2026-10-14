@@ -200,7 +200,13 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
                 role: "states",
               },
             ],
-            commands: ["echo 'pnpm' test", `GITHUB_TOKEN=${secret} gh pr list`, "pnpm test\u0085x\u0080"],
+            commands: [
+              "echo 'pnpm' test",
+              `GITHUB_TOKEN=${secret} gh pr list`,
+              "pnpm test\u0085x\u0080",
+              "node build.mjs &",
+              "npm test | tail -20",
+            ],
           },
           {
             key: "not-dead-end",
@@ -227,6 +233,8 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
       /quoted: command 1 must not contain quotes; left out/,
       /quoted: command 2 holds text Sphica masks as a secret; left out/,
       /quoted: command 3 must not contain control or invisible characters; left out/,
+      /quoted: command 4 must be one command, with no ; \| & at a word's start or end; left out/,
+      /quoted: command 5 must be one command, with no ; \| & at a word's start or end; left out/,
       /not-dead-end: commands go only on a dead end; left out/,
     ])
       assert.match(said, why);
