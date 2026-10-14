@@ -7,7 +7,7 @@
 
 import { type Kysely, sql } from "kysely";
 import { backupDir, backups } from "./backups.ts";
-import { iso } from "./db.ts";
+import { inTransaction, iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { reconcile } from "./reconcile.ts";
@@ -268,10 +268,12 @@ export async function applyForget(
       }
       // The sources are gone once committed: a cleanup that fails (a busy database) is reported as unfinished, never as a failed forget
       try {
-        await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
-        // A removed field value leaves its words in the unit index segments until they are merged. Every run merges, since a run
-        // after a failed cleanup no longer sees the values it removed
-        await sql`insert into unit_fts (unit_fts) values ('optimize')`.execute(c);
+        await inTransaction(c, async (trx) => {
+          await sql`insert into source_fts (source_fts) values ('optimize')`.execute(trx);
+          // A removed field value leaves its words in the unit index segments until they are merged. Every run merges, since a run
+          // after a failed cleanup no longer sees the values it removed
+          await sql`insert into unit_fts (unit_fts) values ('optimize')`.execute(trx);
+        });
         const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
         return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
       } catch {

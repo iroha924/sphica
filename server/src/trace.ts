@@ -4,7 +4,7 @@
 // What trace reads: sessions not traced yet (the owner's messages for an explicit trace, every speaker's for an automatic one), the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import type { Caller } from "./caller.ts";
-import { iso, type Reads } from "./db.ts";
+import { inTransaction, iso, type Reads } from "./db.ts";
 import type { DB, Session } from "./db-types.ts";
 import type { BeginOrigin } from "./knowledge.ts";
 
@@ -151,21 +151,23 @@ export async function runOf(db: Reads, draftId: string): Promise<Run | null> {
 
 /** Logs a record tool call before it does anything. It commits on its own, so a call that fails or is rolled back keeps its row. */
 export async function logCall(db: Kysely<DB>, projectId: number, tool: string, c: Caller): Promise<number> {
-  const r = await db
-    .insertInto("record_call")
-    .values({
-      project_id: projectId,
-      tool,
-      host: c.host,
-      caller_session: c.session,
-      caller_turn: c.turn,
-      tool_use_id: c.toolUseId,
-      mode: c.mode,
-      mode_raw: c.raw,
-      called_at: iso(Date.now()),
-    })
-    .returning("id")
-    .executeTakeFirstOrThrow();
+  const r = await inTransaction(db, (trx) =>
+    trx
+      .insertInto("record_call")
+      .values({
+        project_id: projectId,
+        tool,
+        host: c.host,
+        caller_session: c.session,
+        caller_turn: c.turn,
+        tool_use_id: c.toolUseId,
+        mode: c.mode,
+        mode_raw: c.raw,
+        called_at: iso(Date.now()),
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow(),
+  );
   return r.id;
 }
 

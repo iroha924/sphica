@@ -22,13 +22,14 @@ base: main
 
 ingest と forget の接続の書き込みが、全部 `begin immediate` で始まるトランザクションの中で起きるようになる（挙動は変わらない）。
 
-- [ ] T01: トランザクションの外の書き込みを `inTransaction` に入れ、バージョンを上げる
+- [x] T01: トランザクションの外の書き込みを `inTransaction` に入れ、バージョンを上げる
   - 種別: 変更
   - 計画: S3, S5
   - 依存: なし
   - 変更: `server/src/trace.ts`, `server/src/extract.ts`, `server/src/cli.ts`, `server/src/forget.ts`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `bun run release:plan -- --base 94196c67` → plugin。`bun run test` → 全件通る
-  - コミット: `refactor(record): write the call log, runs, project registration, and forget's cleanup in transactions`
+  - コミット: `refactor(record): write the call log, runs, registration, and forget cleanup in transactions`
+  - 結果: `bun run test` → tests 1292 / pass 1292 / fail 0。`release:plan` は作業ツリーでは none（コミット間の比較のため）、コミット後に確かめる
 
 ## P2: revision の検査
 
