@@ -31,13 +31,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `feat(db): add command anchors for dead ends in schema revision 14 (T01)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → pass 148 / fail 0。`bun run verify` → exit 0（受け入れ 142 件 pass）
 
-- [ ] T02: record server の commands 欄
+- [x] T02: record server の commands 欄
   - 種別: 追加
   - 計画: S2
   - 依存: T01（unit_command の表が要る）
-  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/test/record.test.ts`
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/record.test.ts` → dead_end の commands が正規化して保存され、dead_end 以外・1 語だけ・`-` で始まる・引用符入り・mask で変わる値・6 件以上が problem として拒まれ、拒否の文面に値が出ない
   - コミット: `feat(record): save command anchors on dead ends (T02)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/record.test.ts test/record-state.test.ts test/record-replies.test.ts` → pass 100 / fail 0。`bun run verify` → exit 0（受け入れ 142 件 pass）
 
 - [ ] T03: read と検索でコマンドの anchor を見せる
   - 種別: 追加
@@ -47,13 +48,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/read.test.ts` → read が commands をファイルの Code 欄と分けて出し、search がコマンドの語で記録を見つける
   - コミット: `feat(read): show and search dead ends' command anchors (T03)`
 
-- [ ] T04: trace と harvest の Skill に commands と教訓の書き方を足す
+- [x] T04: trace と harvest の Skill に commands と教訓の書き方を足す
   - 種別: 変更
   - 計画: S6
   - 依存: T02（Skill が案内する commands 欄を record server が受けないと保存が拒まれる）
   - 変更: `plugin/skills/trace/SKILL.md`, `plugin/skills/harvest/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(trace): write dead ends as lessons and anchor them to commands (T04)`
+  - 結果: `bun run verify:ai` → exit 0。`bun run verify` → exit 0（T02 と同じコミット）
 
 ## P2: 一致したコマンドを 1 回だけ止める
 
@@ -109,3 +111,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 
 ## 記録
 2026-10-14 / T01 / plan の unit_command に retired_at と「live な一意」を書いたが、退役の経路を作らず update も禁じるので列は常に NULL になる / retired_at を置かず、一意は (unit_id, command) にした。退役を足すときに migration で列を足す
+2026-10-14 / T02 / extract.ts は check と save の共通の経路のままで変える必要が無かった / 変更欄から `server/src/extract.ts` を外した
+2026-10-14 / T02, T04 / `bun run pairs` が、save が受ける欄（commands）を trace の Skill の表が書いていないと落とした / T04 を T02 と同じコミットで終えた

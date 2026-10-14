@@ -165,6 +165,84 @@ test("an anchor given twice in a record is kept once, since a record holds one l
   }
 });
 
+test("a dead end keeps the commands it is about, spaces collapsed, and any other command is left out without repeating it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "pnpm test --watch はテストの子プロセスが残って落ちた。" });
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    const { checked } = await save(
+      db,
+      target(p),
+      {
+        units: [
+          {
+            key: "watch",
+            kind: "dead_end",
+            text: "テストを watch で流すと子プロセスが残って落ちる",
+            evidence: [
+              {
+                source: `s${m}`,
+                quote: "pnpm test --watch はテストの子プロセスが残って落ちた。",
+                role: "states",
+              },
+            ],
+            commands: [" pnpm  test\t--watch ", "pnpm test --watch", "pnpm", "--watch pnpm"],
+          },
+          {
+            key: "quoted",
+            kind: "dead_end",
+            text: "テストを watch で流すと子プロセスが残って落ちる",
+            evidence: [
+              {
+                source: `s${m}`,
+                quote: "pnpm test --watch はテストの子プロセスが残って落ちた。",
+                role: "states",
+              },
+            ],
+            commands: ["echo 'pnpm' test", `GITHUB_TOKEN=${secret} gh pr list`, "pnpm test\u0085x\u0080"],
+          },
+          {
+            key: "not-dead-end",
+            kind: "finding",
+            text: "テストを watch で流すと子プロセスが残って落ちる",
+            evidence: [
+              {
+                source: `s${m}`,
+                quote: "pnpm test --watch はテストの子プロセスが残って落ちた。",
+                role: "states",
+              },
+            ],
+            commands: ["pnpm test --watch"],
+          },
+        ],
+      },
+      [m],
+    );
+    const said = checked.problems.join(" | ");
+    for (const why of [
+      /watch: command 2 appears twice; left out/,
+      /watch: command 3 needs the program and at least one more word; left out/,
+      /watch: command 4 must start with the program, not an option; left out/,
+      /quoted: command 1 must not contain quotes; left out/,
+      /quoted: command 2 holds text Sphica masks as a secret; left out/,
+      /quoted: command 3 must not contain control or invisible characters; left out/,
+      /not-dead-end: commands go only on a dead end; left out/,
+    ])
+      assert.match(said, why);
+    assert.doesNotMatch(said, /ghp_/);
+    assert.deepEqual(
+      db.owner
+        .prepare("select command from unit_command order by id")
+        .all()
+        .map((r) => r.command),
+      ["pnpm test --watch"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("an anchor's excerpt is masked before it is cut, and a symbol masking swallows is not kept", async () => {
   const db = tempDb();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-"));
