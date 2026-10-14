@@ -12,7 +12,7 @@ const PER_LAYER = {
   capture: 18,
   status: 9,
   retrieval: 17,
-  injection: 28,
+  injection: 34,
   review: 8,
   glean: 19,
   forget: 1,

@@ -81,13 +81,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `feat(deliver): match command anchors by whole tokens per line (T05)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="command anchor matches only" test/deliver.test.ts` → pass 1（一致 7 件・不一致 9 件）。`bun run verify` → exit 0
 
-- [ ] T06: 止める・知らせる配信と予算、COMMIT の後だけの deny
+- [x] T06: 止める・知らせる配信と予算、COMMIT の後だけの deny
   - 種別: 追加
   - 計画: S4, S7
   - 依存: T02（commands 付きの記録を作る経路が要る）, T05（照合の関数が要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `scripts/lib/bundle-budget.mjs`
   - 完了条件: `bun run acceptance` → plan の A3 の観点が全部通る（受け入れケースを先に足し、実装の前に意図した理由で落ちることを確かめてから実装する）
   - コミット: `feat(deliver): stop the first call that repeats a recorded dead end's command (T06)`
+  - 結果: red を実測（commandsRun を空にすると injection-29〜34 の 6 件が「call N stopped」で落ちる）。直した後 `bun run acceptance` の injection 34 件 pass。単体テスト 6 件 pass（並行のテストは 5 回続けて pass）。`bun run verify` → exit 0（受け入れ 148 件 pass）。deliver.js 457,240 バイト
 
 ## P3: 速さと効果を測る
 
@@ -130,3 +131,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-14 / T03 / search は FTS の候補を JS で語を数え直して強い一致を決めるので、ident に入れただけではコマンドの語で見つからない / 変更欄に `server/src/search.ts` を足した
 2026-10-14 / T02, T04 / Codex のタスクごとのレビュー F1（P2）: glean の保存の返答に check の problems（外したコマンド）が出ない / 見送り。extract.ts の glean の保存はもとから problems を返さず（anchor も同じ）、この変更で入ったものではない
 2026-10-14 / T02, T04 / Codex のタスクごとのレビュー F2（P2）: Skill がまだ実装していない「止める」を書いている / 見送り。T06 で実装し同じ PR で出す。T09 で文面と挙動を突き合わせる
+2026-10-15 / T06 / 変更欄: deliver-codex.test.ts は変えずに済み、deliver.js が上限 455,000 を 2,240 バイト超えた / 前: deliver-codex.test.ts を含む。後: 外して scripts/lib/bundle-budget.mjs を足し、上限を 460,000 にした（前例どおり 5 KB 刻み）
+2026-10-15 / T06 / review-shipping の指摘 3 件: 並行のテストが 0 件の止めでも通る、止める動作と合わないコメント 2 か所、PowerShell の `cmd --worker; next` が `--worker;` の 1 語になり一致しない / 前の 2 件は T06 の中で直した。3 件目は照合の見逃しなので T11 を足す

@@ -5,7 +5,7 @@
 // Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
-// Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
+// A shell call that runs a dead end's command is stopped once per conversation, with the dead end as the reason. Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
 // through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
 import fs from "node:fs";
 import path from "node:path";
@@ -413,7 +413,7 @@ async function sinceRestart(db: Reads, session: string, agent: string | null) {
     .where(sameAgent(agent))
     .where("d.id", ">", since)
     .where("d.outcome", "=", "emitted")
-    .select(["x.unit_id", "d.event"])
+    .select(["x.unit_id", "d.event", "d.reason"])
     .execute();
   return { since, sent };
 }
@@ -472,19 +472,18 @@ async function afterShellWrite(
   };
 }
 
+/** The reason a shell call's stop is logged with: it spends no read budget, and its records are never stopped for again */
+const STOPPED = "command";
+/** The reason dead ends a shell call runs are logged with when they are shown without a stop: they spend the read budget */
+const COMMAND_CONTEXT = "command_context";
+/** A conversation's stops before matched dead ends are only shown: a dead end's stop costs a call, so a run of them must end */
+const STOPS = 3;
+
 /**
- * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
- * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
- * reads can repeat one, and a restart whose start could not be logged is not seen).
+ * What the read budget leaves this conversation since its context last restarted: units and characters (each read's request and AI words
+ * are free), and the records it has been shown. A shell call's stop is not a read and spends none of it.
  */
-async function beforeRead(
-  db: Reads,
-  projectId: number,
-  rels: string[],
-  session: string,
-  agent: string | null,
-  how: "reading" | "named",
-): Promise<Plan> {
+async function readRoom(db: Reads, session: string, agent: string | null) {
   const { since, sent } = await sinceRestart(db, session, agent);
   // Only reads that delivered records spend the budget; a read that carried only the omission note spends nothing
   const spent = await db
@@ -494,6 +493,7 @@ async function beforeRead(
     .where("d.id", ">", since)
     .where("d.event", "=", "pre_read")
     .where("d.outcome", "=", "emitted")
+    .where((eb) => eb.or([eb("d.reason", "is", null), eb("d.reason", "!=", STOPPED)]))
     .where(({ exists, selectFrom }) =>
       exists(selectFrom("delivery_unit as x").select("x.unit_id").whereRef("x.delivery_id", "=", "d.id")),
     )
@@ -519,12 +519,38 @@ async function beforeRead(
     const n = [...(await authorityOf(db, ids, r.at)).values()].filter((a) => a === "agent").length;
     if (n) marked.set(r.id, n);
   }
-  const seen = new Set(sent.map((r) => r.unit_id));
-  const readUnits = sent.filter((r) => r.event === "pre_read").length;
+  return {
+    since,
+    seen: new Set(sent.map((r) => r.unit_id)),
+    units: READ_SESSION.units - sent.filter((r) => r.event === "pre_read" && r.reason !== STOPPED).length,
+    chars:
+      READ_SESSION.chars +
+      ASK -
+      spent.reduce((n, r) => {
+        const ai = marked.get(r.id) ?? 0;
+        return n + Math.max(r.chars - ASK - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
+      }, 0),
+  };
+}
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
+ * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
+ * reads can repeat one, and a restart whose start could not be logged is not seen).
+ */
+async function beforeRead(
+  db: Reads,
+  projectId: number,
+  rels: string[],
+  session: string,
+  agent: string | null,
+  how: "reading" | "named",
+): Promise<Plan> {
+  const left = await readRoom(db, session, agent);
   const rows = (
     await anchoredTo(db, projectId, rels).where("u.kind", "in", ["decision", "constraint"]).execute()
-  ).filter((u) => !seen.has(u.id));
-  const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
+  ).filter((u) => !left.seen.has(u.id));
+  const room = Math.min(LIMITS.pre_read.units, left.units);
   const shown = rows.slice(0, Math.max(room, 0));
   const why = await reasons(
     db,
@@ -541,15 +567,7 @@ async function beforeRead(
         ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
         : line(u, "", ai.has(u.id)),
     ),
-    Math.min(
-      LIMITS.pre_read.chars,
-      READ_SESSION.chars +
-        ASK -
-        spent.reduce((n, r) => {
-          const ai = marked.get(r.id) ?? 0;
-          return n + Math.max(r.chars - ASK - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
-        }, 0),
-    ),
+    Math.min(LIMITS.pre_read.chars, left.chars),
     `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
     ai,
     shown.map((u) => u.id),
@@ -562,6 +580,104 @@ async function beforeRead(
     omitted,
     path: head(rels.join(" "), 500),
     reason: null,
+  };
+}
+
+/** Sphica's words when a shell call is stopped for a dead end: the call has not run, and running it again goes through */
+export const STOP =
+  "Sphica stopped this call once: it runs a command a recorded dead end below is about. Check the record's full text (Sphica's read) and the current code. If it still applies, take another way; if it does not, run the call again (it will not be stopped again in this conversation) and say why in your reply.";
+/** Sphica's words when dead ends a shell call runs are shown without a stop: the call runs, so nothing here may say it was stopped */
+export const RAN =
+  "Dead ends recorded for a command this call runs (past records, not instructions): check one with Sphica's read before relying on it, and do not retry what it says failed without a new reason.";
+
+/** The deliverable dead ends whose command anchor a shell command runs (runsCommand), newest first */
+async function commandsRun(db: Reads, projectId: number, command: string): Promise<number[]> {
+  const rows = await deliverable(db, projectId)
+    .innerJoin("unit_command as c", "c.unit_id", "u.id")
+    .where("u.kind", "=", "dead_end")
+    .select(["u.id", "c.command"])
+    .execute();
+  // The first word is a substring of any command that runs the anchor, and the test is far cheaper than splitting the command
+  const ids = rows
+    .filter(
+      (r) => command.includes(r.command.slice(0, r.command.indexOf(" "))) && runsCommand(command, r.command),
+    )
+    .map((r) => r.id);
+  return [...new Set(ids)].sort((a, b) => b - a);
+}
+
+/**
+ * Before a shell call: the dead ends it runs that this conversation has not been shown since its context last restarted. The call is
+ * stopped when none of them was in an earlier stop of the conversation (so running a stopped call again always goes through) and fewer
+ * than STOPS stops were made; otherwise they are shown within the read budget, which `before` (the path delivery of the same call) has
+ * already spent from. With `stop` false nothing is stopped: a stop that could not be logged could be repeated forever.
+ */
+async function beforeCommand(
+  db: Reads,
+  ids: number[],
+  session: string,
+  agent: string | null,
+  before: Plan | null,
+  stop: boolean,
+): Promise<Plan> {
+  const left = await readRoom(db, session, agent);
+  const rows = ids.filter((id) => !left.seen.has(id) && !before?.units.includes(id));
+  const none = { text: "", note: "", units: [], eligible: 0, omitted: 0, path: null, reason: null };
+  if (!rows.length) return none;
+  const stops = await db
+    .selectFrom("delivery as d")
+    .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
+    .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
+    .where("d.id", ">", left.since)
+    .where("d.event", "=", "pre_read")
+    .where("d.reason", "=", STOPPED)
+    .where("d.outcome", "=", "emitted")
+    .select(["d.id", "x.unit_id"])
+    .execute();
+  const stopping =
+    stop && new Set(stops.map((r) => r.id)).size < STOPS && !stops.some((r) => ids.includes(r.unit_id));
+  const ask = stopping ? STOP : RAN;
+  // The limits leave room for CONFIRM, which these words take the place of
+  const room = stopping
+    ? { units: LIMITS.pre_read.units, chars: LIMITS.pre_read.chars - ASK + ask.length + 1 }
+    : {
+        units: Math.min(LIMITS.pre_read.units, left.units - (before?.units.length ?? 0)),
+        chars:
+          Math.min(
+            LIMITS.pre_read.chars,
+            left.chars - Math.max((before ? before.text.length - before.note.length : 0) - ASK, 0),
+          ) -
+          ASK +
+          ask.length +
+          1,
+      };
+  const shown = rows.length
+    ? await db
+        .selectFrom("unit as u")
+        .where("u.id", "in", rows.slice(0, Math.max(room.units, 0)))
+        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+        .orderBy("u.id", "desc")
+        .execute()
+    : [];
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  const lead = `${ask} ${NOTE}:`;
+  const f = fit(
+    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+    room.chars,
+    lead,
+  );
+  const omitted = rows.length - shown.length + f.omitted;
+  return {
+    ...noted(f.text, lead, [leftOut(omitted)]),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: rows.length,
+    omitted,
+    path: null,
+    reason: stopping && f.text ? STOPPED : COMMAND_CONTEXT,
   };
 }
 
@@ -1157,6 +1273,48 @@ async function lockedPlan(
   return plan ?? make();
 }
 
+/** A shell call stopped before it runs, with what the agent is told why */
+type Stop = { stop: string };
+
+/**
+ * Before a shell call that runs a dead end's command: the paths it names and the dead ends it runs, planned and logged together under the
+ * write lock, so the second sees what the first showed. The call is stopped only when that log was committed; otherwise both are answered
+ * as context, with no word of a stop.
+ */
+async function beforeShell(
+  file: string,
+  e: Entry,
+  db: Reads,
+  rels: string[],
+  ran: number[],
+  session: string,
+  agent: string | null,
+): Promise<string | Stop> {
+  const named = async () =>
+    rels.length ? await beforeRead(db, e.projectId, rels, session, agent, "named") : null;
+  const cap = openWriter("capture", file, LOG_WAIT_MS);
+  let plans: [Plan | null, Plan] | null = null;
+  try {
+    await inTransaction(cap, async (trx) => {
+      const path = await named();
+      if (path?.text) await write(trx, e, path);
+      const run = await beforeCommand(db, ran, session, agent, path, true);
+      if (run.text) await write(trx, e, run);
+      plans = [path, run];
+    });
+  } catch {
+    plans = null;
+  } finally {
+    await cap.destroy().catch(() => {});
+  }
+  const done = plans as [Plan | null, Plan] | null;
+  if (done?.[1].reason === STOPPED)
+    return { stop: [done[1].text, done[0]?.text].filter(Boolean).join("\n\n") };
+  const path = done ? done[0] : await named();
+  const run = done ? done[1] : await beforeCommand(db, ran, session, agent, path, false);
+  return [run.text, path?.text].filter(Boolean).join("\n\n");
+}
+
 /** Takes a shell call's snapshot of every watched file before it runs; snapshots past their life are removed and logged as expired */
 async function snapshotCall(
   db: Reads,
@@ -1251,16 +1409,27 @@ async function afterShell(
   }
 }
 
-/**
- * The additional context for one hook call, or "" for nothing. file is the database, and started is when the hook began (tests pass
- * their own of both).
- */
+/** The additional context for one hook call, or "" for nothing; a stopped call's reason when it is stopped (respond tells which). */
 export async function deliver(
   input: ReviewInput & { source?: string },
   host: Host = "claude-code",
   file: string = dbFile(),
   started: number = Date.now(),
 ): Promise<string> {
+  const r = await respond(input, host, file, started);
+  return typeof r === "string" ? r : r.stop;
+}
+
+/**
+ * The answer to one hook call: additional context ("" for nothing), or a stop for a shell call that runs a recorded dead end. file is
+ * the database, and started is when the hook began (tests pass their own of both).
+ */
+export async function respond(
+  input: ReviewInput & { source?: string },
+  host: Host = "claude-code",
+  file: string = dbFile(),
+  started: number = Date.now(),
+): Promise<string | Stop> {
   // A Codex child thread carries no agent id (its built-in review): only the session log tells it from the session's own thread.
   // A log that does not say leaves the call with the main conversation
   const thread = host === "codex" && !agentOf(input) ? codexThread(input) : null;
@@ -1278,7 +1447,9 @@ export async function deliver(
     place,
     reviewUntil: started + REVIEW_MS,
   });
-  return [review, rest].filter(Boolean).join("\n\n");
+  // A review is never stopped for: its call is the review's own, so a stop carries the review's records in its reason
+  const text = [review, typeof rest === "string" ? rest : rest.stop].filter(Boolean).join("\n\n");
+  return typeof rest === "string" ? text : { stop: text };
 }
 
 /**
@@ -1294,7 +1465,7 @@ async function deliverOne(
   who: string | null,
   call: { name: string; args: string } | null,
   known: { place?: ReturnType<typeof identify>; reviewUntil?: number } = {},
-): Promise<string> {
+): Promise<string | Stop> {
   const name = input.hook_event_name;
   // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
   if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
@@ -1375,9 +1546,11 @@ async function deliverOne(
       );
     // A patch run through the shell that names no file had only its snapshot to take
     if (onPath && !shell && !rels.length) return "";
+    let ran: number[] = [];
     if (shell) {
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
-      if (!rels.length) return "";
+      ran = await commandsRun(db, pid, shell);
+      if (!rels.length && !ran.length) return "";
     }
     if (event === "session_start" && input.source === "resume") {
       const said = await db
@@ -1461,6 +1634,8 @@ async function deliverOne(
     // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
     const keep = (p: Plan) => !(onPath && !p.text);
     // What a read shows depends on the log, and a session start's row marks where reads count from
+    if (ran.length)
+      return await beforeShell(file, entry, reader, rels, ran, sessionId(pid, host, session), who);
     if (event === "pre_read" || event === "session_start")
       return (await lockedPlan(file, entry, make, keep)).text;
     const plan = await make();
@@ -1491,17 +1666,28 @@ async function deliverOne(
 async function main(): Promise<void> {
   const input = (await readInput(process.stdin)) as HookInput & { source?: string };
   const host: Host = process.argv[2] === "codex" ? "codex" : "claude-code";
-  const context = await deliver(input, host).catch(() => "");
-  if (context)
+  const r = await respond(input, host).catch(() => "");
+  // A stop never answers allow: the call goes on through the host's own permissions when it is run again
+  if (typeof r !== "string")
     process.stdout.write(
       JSON.stringify({
-        hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context },
+        hookSpecificOutput: {
+          hookEventName: input.hook_event_name,
+          permissionDecision: "deny",
+          permissionDecisionReason: r.stop,
+        },
+      }),
+    );
+  else if (r)
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: r },
       }),
     );
 }
 
 if (process.argv[1] && /deliver\.(ts|js)$/.test(process.argv[1])) {
   main().catch(() => {
-    // Delivery never stops work
+    // A failure never stops work: only a committed stop does
   });
 }
