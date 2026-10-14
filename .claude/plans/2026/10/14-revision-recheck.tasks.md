@@ -95,3 +95,4 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 - 2026-10-14 / T05 / verify が流さない評価用のスクリプトを探し、`evals/cloud/fixture.ts` の `new` が ingest 接続に autocommit で書いていた（`evals/cloud/build.ts` は読むだけ）/ 修正タスク T05 を足して直した
 - 2026-10-14 / T05 / 完了条件の欄がコマンドの形でないまま検査が落ちたのに、検査の出力をパイプに通したためコミットが通った / 完了条件・red・結果の欄をコマンドの形に直した（前の値: 「同じコマンド → 0 で終わり、…」ほか）
 - 2026-10-14 / T06 / review-shipping の全差分のレビュー: 出荷して壊れるものは無し、指摘 1 件（`attempt` が begin の失敗を握りつぶし、拒否のテストが空振りしうる）/ 採用して T06 で直した。reader は begin が `not authorized` になるので、reader だけ begin しない
+- 2026-10-14 / 全体 / Codex の全差分のレビュー（b1b83f98）は指摘 0 件、T06 の再レビュー（8b09c13f）も指摘 0 件 / 対応なし
