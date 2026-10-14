@@ -63,15 +63,19 @@ Four boundaries (the header of schema.sql):
 | Boundary | Tables | Rule |
 |---|---|---|
 | Captured sources | `session`, `source`, `artifact_link`, `edit_observation` | Never rewritten. A changed external item (an edited PR body) is a new `revision` |
-| Units | `unit` and its `unit_option`, `unit_evidence`, `unit_adoption`, `unit_link`, `unit_state`, `unit_anchor`, `unit_alias` | Text never rewritten; corrections are successors (`supersedes`), retractions, and anchor replacements |
+| Units | `unit` and its `unit_option`, `unit_evidence`, `unit_adoption`, `unit_link`, `unit_state`, `unit_answer`, `unit_anchor`, `unit_alias` | Text never rewritten; corrections are successors (`supersedes`), retractions, and anchor replacements |
 | Processing | `extraction_run`, `source_processing` | What each run looked at, so untraced sessions are counted, not guessed |
 | Work and delivery | `work`, `delivery`, `delivery_unit` | Current work, and what the hooks showed (unit ids, never text) |
 
 - **State is judged from facts.** Writes (saves, glean, forget, migration) change only facts: intents (`unit_link` supersedes, one per record),
   evidence, adoption, explicit withdrawals. Then `reconcile()` in `server/src/reconcile.ts` loads every record the change reaches through
   supersedes, runs the pure `judge()` in `server/src/judge.ts`, and writes only the difference: ended replacement rows, opened ones, then
-  `unit_state` rows. It judges again and throws if anything is left over. It is the only writer of `unit_state` and `unit_replacement`
-  (`bun run architecture` checks it); triggers only check that what was written follows the rules
+  `unit_state` rows. It judges again and throws if anything is left over. It is the only writer of `unit_state`, `unit_replacement`, and
+  `unit_answer` (`bun run architecture` checks it); triggers only check that what was written follows the rules
+- **A question an answer closed keeps the record that answered.** When a trace's `answers` withdraws a question, `reconcile()` writes a
+  `unit_answer` row (the withdrawal's state row, the answering record) with that state row, also for an older question closed through the
+  one named. A withdrawal the owner asked for has none. A reader tells who answered from this row (`server/src/timeline.ts`), never from
+  the reason's words; withdrawals from before revision 13 got their row from the migration, when one record of their save had the key
 - **Lifecycle** moves through `unit_state` along a fixed table: the first state is candidate; candidate → active, superseded, or withdrawn;
   active → candidate, superseded, or withdrawn; superseded → active or candidate; withdrawn is final. Its trigger sets `unit.lifecycle`
 - **Support is one view**, `unit_support`: a decision or constraint needs unit-level unretracted evidence and adoption (an `agent` adoption counts only with

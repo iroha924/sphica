@@ -160,6 +160,14 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
 2. If the release changed the DB generation, copy `~/.sphica/sphica.db` (with `-wal` and `-shm`) to a dated backup, move it aside, and run
    `sphica init` in each registered repository (the old records are not carried over; say so in the report). A revision change within a
    generation needs the migration `knowledge-schema` says to design first
+   **A release that raises the revision migrates after step 3, not here.** A connection checks the revision only when it opens, so a
+   record server of the old version that is already running keeps saving into the migrated database, without what the new revision
+   adds (after the move to revision 13 it would close a question and write no `unit_answer` row). Update both plugins first (step 3),
+   have the owner run `/reload-plugins` in open sessions and close the others, then confirm with `pgrep -fl mcp-record` that no record
+   server runs from the old version's cache. Codex starts it as `./dist/mcp-record.js` from the plugin's directory, so its line shows no
+   version: read that process's directory with `lsof -a -p <pid> -d cwd`. A list you cannot read, or a process whose version you cannot
+   tell, is not "none": do not migrate. Only then run `sphica init` in each registered repository. Between the reload and `init` the read
+   and record servers stop with "expects revision N"; capture keeps recording
 3. Claude Code: `claude plugin marketplace update sphica && claude plugin update sphica@sphica`. Codex:
    `codex plugin marketplace upgrade sphica && codex plugin add sphica@sphica`. Then ask the owner to run `/reload-plugins` in open sessions.
    In sessions without an interactive terminal, MCP stays at the old version until the next session.

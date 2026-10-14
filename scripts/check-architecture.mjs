@@ -63,9 +63,10 @@ for (const entry of READERS)
   if (fs.existsSync(path.join(root, entry)) && reach(entry).size < 3)
     fail.push(`cannot follow the imports of ${entry}`);
 
-// Lifecycles and replacements are judged, never written directly: only reconcile writes them, after judging the facts a save changed
+// Lifecycles and replacements are judged, never written directly: only reconcile writes them, after judging the facts a save changed.
+// The record that answered a question is written with the withdrawal it caused, so it has the same one writer
 const JUDGED =
-  /insertInto\(\s*["'](unit_state|unit_replacement)["']|updateTable\(\s*["']unit_replacement["']|into\s+(unit_state|unit_replacement)\b/;
+  /insertInto\(\s*["'](unit_state|unit_replacement|unit_answer)["']|updateTable\(\s*["'](unit_replacement|unit_answer)["']|into\s+\\?["'`[]?(unit_state|unit_replacement|unit_answer)\b/;
 const RECONCILE = "server/src/reconcile.ts";
 const SPARED = new Set([RECONCILE]);
 const sources = fs
@@ -76,7 +77,7 @@ if (!sources.includes(RECONCILE))
   fail.push(`${RECONCILE} does not exist. Fix RECONCILE in check-architecture.mjs`);
 for (const f of sources)
   if (!SPARED.has(f) && JUDGED.test(fs.readFileSync(path.join(root, f), "utf8")))
-    fail.push(`${f} writes unit_state or unit_replacement; only ${RECONCILE} may`);
+    fail.push(`${f} writes unit_state, unit_replacement, or unit_answer; only ${RECONCILE} may`);
 
 // git runs outside the agent's sandbox in a repository whose config the agent writes: only GIT_STARTERS start it, with the options and
 // environment that keep that config from running a command. Two layers, read as tokens so comments do not count: only the modules in
@@ -182,7 +183,7 @@ if (fail.length) {
   console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
   process.exit(1);
 }
-console.log(`lifecycle writers: only ${RECONCILE} writes unit_state and unit_replacement`);
+console.log(`lifecycle writers: only ${RECONCILE} writes unit_state, unit_replacement, and unit_answer`);
 console.log(
   `authority rows: only ${[...AUTHORITY_WRITERS].join(" and ")} write them, from words ${OWN_WORDS} checked`,
 );

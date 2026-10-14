@@ -1275,6 +1275,8 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
       },
     ]);
     assert.equal(u("glean:remember").lifecycle, "withdrawn");
+    // The owner's words withdrew it: no record answered, so none is kept beside the withdrawal
+    assert.equal(Number(db.owner.prepare("select count(*) as n from unit_answer").get()?.n), 0);
 
     const refused = async (op: Record<string, unknown>, want: RegExp) =>
       assert.rejects(ops([{ unit: "glean:csv/no-notes", revision: rev(), ...op }]), want);

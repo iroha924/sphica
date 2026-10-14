@@ -191,3 +191,34 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
   assert.equal(moved.status, 1);
   assert.match(moved.stderr, /glean\.ts writes no authority row where check-architecture\.mjs looks/);
 });
+
+test("only reconcile.ts writes states, replacements, and the record that answered a question", () => {
+  const ok = check({});
+  assert.equal(ok.status, 0);
+  assert.match(
+    ok.stdout,
+    /lifecycle writers: only server\/src\/reconcile\.ts writes unit_state, unit_replacement, and unit_answer/,
+  );
+  for (const write of [
+    'export const save = (trx: any) => trx.insertInto("unit_state").values({}).execute();',
+    "export const save = (trx: any) => trx.insertInto('unit_replacement').values({}).execute();",
+    'export const end = (trx: any) => trx.updateTable("unit_replacement").set({}).execute();',
+    'export const save = (trx: any) => trx.insertInto(\n  "unit_answer",\n).values({}).execute();',
+    'export const change = (trx: any) => trx.updateTable("unit_answer").set({}).execute();',
+    'export const sql = "insert into unit_answer (state_id, answer_unit) values (1, 2)";',
+    // A quoted name is the same table
+    "export const sql = 'insert into \"unit_answer\" (state_id, answer_unit) values (1, 2)';",
+    'export const sql = "insert into `unit_state` (unit_id) values (1)";',
+    'export const sql = "insert into [unit_replacement] (from_unit) values (1)";',
+    // A quote escaped inside the string that holds the statement
+    'export const sql = "insert into \\"unit_answer\\" (state_id, answer_unit) values (1, 2)";',
+  ]) {
+    const r = check({ "stray.ts": `${write}\n` });
+    assert.equal(r.status, 1, write);
+    assert.match(
+      r.stderr,
+      /server\/src\/stray\.ts writes unit_state, unit_replacement, or unit_answer; only server\/src\/reconcile\.ts may/,
+      write,
+    );
+  }
+});

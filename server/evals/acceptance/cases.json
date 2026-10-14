@@ -1386,6 +1386,62 @@
       ]
     },
     {
+      "id": "retrieval-16",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "The timeline of a finding leaves out the decision another record of the same trace replaced",
+      "given": [
+        {
+          "trace_en_sync_1": true
+        },
+        {
+          "trace_en_sync_2": true
+        }
+      ],
+      "when": {
+        "timeline": ["trace:s-en-sync-2/battery"]
+      },
+      "then": [
+        {
+          "read_contains": "## Timeline of trace:s-en-sync-2/battery"
+        },
+        {
+          "read_contains": "saved: finding, Syncing every 5 minutes drained phone batteries"
+        },
+        {
+          "read_lacks": ["trace:s-en-sync-1/every5 (u"]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-17",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "summary": "The timeline of an answer shows the questions it closed, also the older one closed through the question that replaced it, and not the older one coming back on the way",
+      "given": [
+        {
+          "case": "reconcile-12"
+        }
+      ],
+      "when": {
+        "timeline": ["trace:s-en-cache-answer/cover-disk"]
+      },
+      "then": [
+        {
+          "read_contains": "## Timeline of trace:s-en-cache-answer/cover-disk"
+        },
+        {
+          "read_contains": ") became withdrawn: answered by trace:s-en-cache-answer/cover-disk\n"
+        },
+        {
+          "read_contains": ") became withdrawn: answered by trace:s-en-cache-answer/cover-disk (through trace:s-en-cache-where/cache-where-open)"
+        },
+        {
+          "read_lacks": ["became active: trace:s-en-cache-where/cache-where-open no longer replaces it"]
+        }
+      ]
+    },
+    {
       "id": "injection-01",
       "layer": "injection",
       "lang": "ja>ja",

@@ -415,7 +415,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 12);
+  assert.equal(one("pragma user_version").user_version, 13);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1851,5 +1851,79 @@ test("a retirement reason quotes the owner, in the anchor's project, on a retire
   reason(other2, again);
   sql("delete from unit where id = ?", u);
   assert.equal(one("select count(*) as n from unit_anchor_retirement").n, 0);
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
+});
+
+test("an answer is written for a question's withdrawal by a record the withdrawal's run saved, and goes only with its withdrawal or its record", () => {
+  const earlier = run(db, p);
+  const saving = run(db, p);
+  const change = (unitId: number, from: string | null, to: string, by: Values) =>
+    insert(db, "unit_state", {
+      unit_id: unitId,
+      from_state: from,
+      to_state: to,
+      at: now,
+      reason: "r",
+      ...by,
+    });
+  /** A record that was saved and then withdrawn: its first state, and the withdrawal */
+  const closed = (key: string, kind: string, by: Values, projectId = p, savedBy = earlier) => {
+    const u = unit({ key, kind }, projectId, savedBy);
+    const first = change(u, null, "candidate", { run_id: savedBy });
+    return { unit: u, first, withdrawal: change(u, "candidate", "withdrawn", by) };
+  };
+  const answer = (stateId: number, unitId: number) =>
+    insert(db, "unit_answer", { state_id: stateId, answer_unit: unitId });
+  const asked = closed("asked", "question", { run_id: saving });
+  const found = unit({ key: "found", kind: "finding" }, p, saving);
+  refuses(() => answer(asked.first, found), /written for the withdrawal of a question/);
+  refuses(
+    () => answer(closed("dropped", "finding", { run_id: saving }).withdrawal, found),
+    /written for the withdrawal of a question/,
+  );
+  refuses(
+    () => answer(asked.withdrawal, unit({ key: "asked-again", kind: "question" }, p, saving)),
+    /a question does not answer another/,
+  );
+  refuses(
+    () => answer(asked.withdrawal, unit({ key: "theirs", kind: "finding" }, other)),
+    /different projects/,
+  );
+  refuses(
+    () => answer(asked.withdrawal, unit({ key: "older", kind: "finding" }, p, earlier)),
+    /the withdrawal's own run saved/,
+  );
+  // A withdrawal the owner's forget caused has no run, so no record of a save closed it
+  const forgotten = closed("forgotten", "question", {
+    forget_id: insert(db, "forget_batch", { project_id: p, at: now }),
+  });
+  refuses(() => answer(forgotten.withdrawal, found), /the withdrawal's own run saved/);
+  const revisions = () =>
+    [asked.unit, found].map((id) => Number(one("select revision from unit where id = ?", id).revision));
+  const was = revisions();
+  answer(asked.withdrawal, found);
+  // The row is a relation of both records, so each revision rises and a draft made before it is refused
+  assert.deepEqual(
+    revisions(),
+    was.map((r) => r + 1),
+  );
+  refuses(() => answer(asked.withdrawal, found), /constraint failed/);
+  refuses(() => sql("update unit_answer set answer_unit = ?", asked.unit), /never changed/);
+  refuses(() => sql("delete from unit_answer"), /goes only with its withdrawal or its record/);
+  // The answering record's deletion takes the row and leaves the withdrawal
+  sql("delete from unit where id = ?", found);
+  assert.equal(one("select count(*) as n from unit_answer").n, 0);
+  assert.equal(one("select to_state from unit_state where id = ?", asked.withdrawal).to_state, "withdrawn");
+  // A project goes with its questions, their withdrawals, and the answers, whichever record was saved first
+  const late = run(db, p);
+  const before = unit({ key: "answer-first", kind: "decision" }, p, late);
+  answer(closed("asked-after", "question", { run_id: late }, p, late).withdrawal, before);
+  answer(
+    closed("asked-before", "question", { run_id: late }).withdrawal,
+    unit({ key: "answer-after", kind: "decision" }, p, late),
+  );
+  assert.equal(one("select count(*) as n from unit_answer").n, 2);
+  sql("delete from project where id = ?", p);
+  assert.equal(one("select count(*) as n from unit_answer").n, 0);
   assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
 });

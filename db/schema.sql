@@ -8,7 +8,7 @@
 -- Four boundaries:
 --   captured sources   session, source, artifact_link, edit_observation: what was said or written, never rewritten
 --                      (the owner can forget chosen sources: forget_batch and source_forgotten keep what was removed, without its text)
---   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
+--   extracted units    unit and its option, evidence, adoption, link, state, answer, anchor, alias tables: what was decided or implemented
 --   processing         extraction_run, source_processing, harvest_run_source: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
@@ -660,6 +660,33 @@ create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
 end;
 
+-- Why a question was withdrawn: the record whose answer closed it, written with the withdrawal's state row. A withdrawal the owner
+-- asked for has no row. The answering record is one the withdrawal's own run saved, so a save closes questions only with what it wrote.
+create table unit_answer (
+  state_id integer primary key not null references unit_state (id) on delete cascade,
+  answer_unit integer not null references unit (id) on delete cascade
+) strict;
+create index unit_answer_unit on unit_answer (answer_unit);
+create trigger unit_answer_check before insert on unit_answer begin
+  select raise(abort, 'an answer is written for the withdrawal of a question')
+  where not exists (select 1 from unit_state t join unit q on q.id = t.unit_id
+    where t.id = new.state_id and t.to_state = 'withdrawn' and q.kind = 'question');
+  select raise(abort, 'a question does not answer another')
+  where (select kind from unit where id = new.answer_unit) is 'question';
+  select raise(abort, 'answer and question belong to different projects')
+  where (select project_id from unit where id = new.answer_unit)
+    is not (select q.project_id from unit_state t join unit q on q.id = t.unit_id where t.id = new.state_id);
+  select raise(abort, 'a question is closed by a record the withdrawal''s own run saved')
+  where (select run_id from unit where id = new.answer_unit) is not (select run_id from unit_state where id = new.state_id);
+end;
+create trigger unit_answer_frozen before update on unit_answer begin
+  select raise(abort, 'an answer is never changed');
+end;
+create trigger unit_answer_no_delete before delete on unit_answer
+when exists (select 1 from unit_state where id = old.state_id) and exists (select 1 from unit where id = old.answer_unit) begin
+  select raise(abort, 'an answer goes only with its withdrawal or its record');
+end;
+
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
 create table unit_anchor (
   id integer primary key autoincrement not null,
@@ -1052,6 +1079,10 @@ end;
 create trigger unit_rev_link_u after update on unit_link begin
   update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
 end;
+create trigger unit_rev_answer_i after insert on unit_answer begin
+  update unit set revision = revision + 1
+  where id in (new.answer_unit, (select unit_id from unit_state where id = new.state_id));
+end;
 create trigger unit_rev_anchor_i after insert on unit_anchor begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_anchor_u after update on unit_anchor begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_retirement_i after insert on unit_anchor_retirement begin
@@ -1270,4 +1301,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 12;
+pragma user_version = 13;

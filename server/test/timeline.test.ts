@@ -590,6 +590,27 @@ test("a timeline stops following a chain at its cap, names where it stopped, and
       middle,
       /^u\d+: its chain was followed for 20 records and stops at u\d+, u\d+; beyond them /,
     );
+    // Past the cap nothing is told, even of a record the chain's last record took the place of: the note says where the chain stops
+    insert(db, "unit_replacement", {
+      from_unit: ids[5] ?? 0,
+      to_unit: ids[4] ?? 0,
+      run_id: runId,
+      started_at: at("2026-09-29T00:00:00Z"),
+    });
+    insert(db, "unit_state", {
+      unit_id: ids[4] ?? 0,
+      from_state: "active",
+      to_state: "superseded",
+      at: at("2026-09-29T00:00:00Z"),
+      reason: "superseded by trace:ext-s1/k5",
+      run_id: runId,
+    });
+    const end = parts(await timelineRefs(db.reader, p, ["trace:ext-s1/k24"]));
+    assert.doesNotMatch(end.lines.join("\n"), /\/k4 \(u\d+\)/);
+    assert.match(
+      end.notes.at(-1) ?? "",
+      new RegExp(`^u${ids[24]}: its chain was followed for 20 records and stops at u${ids[5]}; beyond them `),
+    );
   } finally {
     await db.done();
   }
@@ -895,7 +916,7 @@ test("a timeline takes records only, goes on past a ref that is not one, and nam
   }
 });
 
-test("a timeline finds a record at the same place behind many at the same path, and a change the chain's run made to a record it saved", async () => {
+test("a timeline finds a record at the same place behind many at the same path, and tells a question the chain's run saved and answered by its withdrawal alone", async () => {
   const db = tempDb();
   try {
     const p = project(db);
@@ -959,7 +980,26 @@ test("a timeline finds a record at the same place behind many at the same path, 
     insert(db, "unit_evidence", { unit_id: asked, ...span, role: "states" });
     state(asked, null, "candidate", "r");
     state(asked, "candidate", "active", "evidence found");
-    state(asked, "active", "withdrawn", "answered by trace:ext-s1/entry", at("2026-09-27T00:00:01Z"));
+    const closed = state(
+      asked,
+      "active",
+      "withdrawn",
+      "answered by trace:ext-s1/entry",
+      at("2026-09-27T00:00:01Z"),
+    );
+    insert(db, "unit_answer", { state_id: closed, answer_unit: entry });
+    // Another question the same run withdrew on the owner's words: no record answered it
+    const dropped = record("dropped", "question", at("2026-09-02T00:00:00Z"), others);
+    insert(db, "unit_evidence", { unit_id: dropped, ...span, role: "states" });
+    insert(db, "unit_state", {
+      unit_id: dropped,
+      from_state: null,
+      to_state: "candidate",
+      at: at("2026-09-02T00:00:00Z"),
+      reason: "r",
+      run_id: others,
+    });
+    state(dropped, "candidate", "withdrawn", "withdrawn: no longer asked", at("2026-09-27T00:00:02Z"));
 
     const { lines, notes } = parts(await timelineRefs(db.reader, p, [`u${entry}`]));
     const text = lines.join("\n");
@@ -988,6 +1028,7 @@ test("a timeline finds a record at the same place behind many at the same path, 
       ),
     );
     assert.doesNotMatch(text, /asked \(u\d+\) became (active|candidate)/);
+    assert.doesNotMatch(text, /dropped/);
   } finally {
     await db.done();
   }
@@ -1060,7 +1101,7 @@ test("a timeline looks for records at each of the chain's places through the pat
       "target",
     );
     place(record("decided", "decision", early, others, { stance: "do" }), "src/a.ts", "target");
-    // The chain's run made a record of another run active, and superseded one it saved itself
+    // The chain's run made a record of another run active, and superseded one it saved itself: neither is a change to the chain
     const woken = record("woken", "finding", early, others);
     insert(db, "unit_evidence", { unit_id: woken, ...span, role: "states" });
     state(woken, null, "candidate", "r", others, early);
@@ -1108,8 +1149,6 @@ test("a timeline looks for records at each of the chain's places through the pat
       "second saved [same place]",
       "replaced saved [same run]",
       "entry became active",
-      "woken became active",
-      "replaced became superseded",
     ]);
     assert.deepEqual(first.notes, []);
     // The anchors are reached by path, not by walking every record of the project
@@ -1159,6 +1198,80 @@ test("a timeline looks for records at each of the chain's places through the pat
       wide.notes.at(-1),
       `u${entry}: its chain is anchored at more than 200 places; records at the same place were looked for at the 200 oldest only.`,
     );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a timeline tells no change its run made to a record outside the chain, but for a question a record of the chain answered", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const asking = message(db, p, {
+      id: "a0",
+      speaker: "assistant",
+      text: "Tabs or spaces? Which linter? Keep the old rule?",
+    });
+    const before = message(db, p, { id: "m0", text: "Indent with tabs." });
+    const said = message(db, p, {
+      id: "m1",
+      text: "Indent with spaces. The linter took 40 seconds. Use Biome.",
+    });
+    const question = (key: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "question",
+      text: quote,
+      evidence: [{ source: `s${asking}`, quote, role: "states" }],
+      ...extra,
+    });
+    await save(db, p, {
+      units: [
+        decision("tabs", before, "Indent with tabs."),
+        question("indent-open", "Tabs or spaces?"),
+        question("linter-open", "Which linter?"),
+        question("rule-open", "Keep the old rule?"),
+      ],
+    });
+    await tick();
+    await save(db, p, {
+      units: [question("rule-again", "Keep the old rule?", { supersedes: "trace:ext-s1/rule-open" })],
+    });
+    await tick();
+    // One save: the record asked for, a decision that replaces an earlier one and answers two questions (one of them through the
+    // question that replaced it), and a finding with no adoption that answers a third. All three quote the same message
+    await save(db, p, {
+      units: [
+        finding("slow", said, "The linter took 40 seconds."),
+        decision("spaces", said, "Indent with spaces.", {
+          supersedes: "trace:ext-s1/tabs",
+          answers: ["trace:ext-s1/indent-open", "trace:ext-s1/rule-again"],
+        }),
+        finding("biome", said, "Use Biome.", { answers: ["trace:ext-s1/linter-open"] }),
+      ],
+    });
+    const about = async (key: string) => {
+      const lines = parts(await timelineRefs(db.reader, p, [`trace:ext-s1/${key}`])).lines;
+      // Lines about a record that is neither the chain's nor marked as related, as "<key> <what happened>"
+      return lines.flatMap((l) => {
+        const m = /^\S+ trace:ext-s1\/(\S+) \(u\d+\) (became \w+: .*)$/.exec(l);
+        return m ? [`${m[1]} ${m[2]}`] : [];
+      });
+    };
+    // The record asked for answered nothing and replaced nothing: only its own change is told
+    assert.deepEqual(await about("slow"), ["slow became active: evidence found"]);
+    // The decision's chain is itself and the decision it replaced; the questions it answered are told, the one the finding answered is not
+    assert.deepEqual((await about("spaces")).sort(), [
+      "indent-open became withdrawn: answered by trace:ext-s1/spaces",
+      "rule-again became withdrawn: answered by trace:ext-s1/spaces",
+      "rule-open became withdrawn: answered by trace:ext-s1/spaces (through trace:ext-s1/rule-again)",
+      "spaces became active: evidence and adoption found",
+      "tabs became active: evidence and adoption found",
+      "tabs became superseded: superseded by trace:ext-s1/spaces",
+    ]);
+    assert.deepEqual((await about("biome")).sort(), [
+      "biome became active: evidence found",
+      "linter-open became withdrawn: answered by trace:ext-s1/biome",
+    ]);
   } finally {
     await db.done();
   }

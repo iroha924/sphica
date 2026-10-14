@@ -3045,6 +3045,14 @@ const lastState = (db: TempDb, key: string) =>
     )
     .get(key) as { to_state: string; reason: string; source_id: number | null } | undefined;
 const lives = (db: TempDb, ...keys: string[]) => keys.map((k) => lifecycle(db, `trace:ext-s1/${k}`));
+/** Each withdrawal an answer caused, as the rows beside the state history hold it: the question, then the record that answered */
+const answers = (db: TempDb) =>
+  db.owner
+    .prepare(
+      "select q.key as question, a.key as answer from unit_answer w join unit_state t on t.id = w.state_id join unit q on q.id = t.unit_id join unit a on a.id = w.answer_unit order by t.id",
+    )
+    .all()
+    .map((r) => [r.question, r.answer]);
 
 test("answers: the owner's decision and a supported finding each close an open question, and the reason names the answer", async () => {
   const db = tempDb();
@@ -3092,6 +3100,11 @@ test("answers: the owner's decision and a supported finding each close an open q
       },
     );
     assert.equal(lastState(db, "trace:ext-s1/size-open")?.reason, "answered by trace:ext-s1/size");
+    // Who answered is a row beside each withdrawal, so a reader need not take it from the reason's words
+    assert.deepEqual(answers(db), [
+      ["trace:ext-s1/issue-open", "trace:ext-s1/no-issue"],
+      ["trace:ext-s1/size-open", "trace:ext-s1/size"],
+    ]);
     // Closed for good: a later save that reaches the answer leaves the question withdrawn
     const more = message(db, p, { id: "o2", text: "やっぱり issue にする。" });
     await save(db, target(p), {
@@ -3148,6 +3161,8 @@ test("answers: an answer that stays a candidate, or an AI's own decision, leaves
       out,
       /△ trace:ext-s1\/split-open: left open: trace:ext-s1\/one-function is an AI's decision, and a question closes only on the owner's or a maintainer's adoption/,
     );
+    // An answer that closed nothing leaves no row
+    assert.deepEqual(answers(db), []);
   } finally {
     await db.done();
   }
@@ -3689,9 +3704,12 @@ test("answers: an older question the answer also names is said once, as closed t
     const p = project(db);
     await askedLine(db, p, 2);
     const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+    const noted = message(db, p, { id: "o0", text: "計測は 90 KB だった。" });
     const run = await beginTrace(db.ingest, p, "s1");
+    // A record that answers nothing is saved first, so the rows below cannot name the answer by its place in the save
     const { checked, saved } = await checkThenSave(db, run, p, {
       units: [
+        found("size", noted, "計測は 90 KB だった。"),
         ownerDecided("store", said, "SQLite にする。", true, {
           answers: ["trace:ext-s1/q2", "trace:ext-s1/q1"],
         }),
@@ -3710,6 +3728,11 @@ test("answers: an older question the answer also names is said once, as closed t
       );
       assert.doesNotMatch(text ?? "", /q1: already/);
     }
+    // The older question, closed through the one that replaced it, keeps the same answering record
+    assert.deepEqual(answers(db), [
+      ["trace:ext-s1/q2", "trace:ext-s1/store"],
+      ["trace:ext-s1/q1", "trace:ext-s1/store"],
+    ]);
   } finally {
     await db.done();
   }

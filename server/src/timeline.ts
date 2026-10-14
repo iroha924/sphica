@@ -1,8 +1,9 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// The timeline of a record for MCP read: the records tied to it by replacement, what happened to each and when, and the findings, dead
-// ends, and questions saved by the same runs or anchored at the same places. An overview in time order; the quoted words are read's.
+// The timeline of a record for MCP read: the records tied to it by replacement, what happened to each and when, the questions they
+// answered, and the findings, dead ends, and questions saved by the same runs or anchored at the same places. An overview in time
+// order; the quoted words are read's.
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
@@ -114,7 +115,7 @@ async function linesOf(
     .execute();
   const unit = new Map(units.map((u) => [u.id, u]));
   const runs = [...new Set(units.map((u) => u.run_id))];
-  const [intents, rows, gaps, states, evidence, adoption, anchors, conflicts, sameRun, outside] =
+  const [intents, rows, gaps, states, evidence, adoption, anchors, conflicts, sameRun, answered] =
     await Promise.all([
       db
         .selectFrom("unit_link")
@@ -223,21 +224,16 @@ async function linesOf(
         .orderBy("id", "desc")
         .limit(RELATED_READ + 1)
         .execute(),
-      // A change a chain record's run made to a record outside the chain, such as a question it answered. For a record that run saved
-      // itself, becoming a candidate and active is the save, which its own line tells; only its leaving is a change
+      // The withdrawal of a question a record of the chain answered, found by the row kept beside it and not by the reason's words.
+      // Whatever else a chain record's run did to a record outside the chain is not a change to the chain, and is left out
       db
-        .selectFrom("unit_state as t")
+        .selectFrom("unit_answer as w")
+        .innerJoin("unit_state as t", "t.id", "w.state_id")
         .innerJoin("unit as o", "o.id", "t.unit_id")
         .select(["t.id", "t.at", "t.to_state", "t.reason", "o.id as unit", "o.key"])
         .where("o.project_id", "=", projectId)
-        .where("t.run_id", "in", runs)
+        .where("w.answer_unit", "in", ids)
         .where("o.id", "not in", ids)
-        .where((eb) =>
-          eb.or([
-            eb("o.run_id", "<>", eb.ref("t.run_id")),
-            eb("t.to_state", "in", ["superseded", "withdrawn"]),
-          ]),
-        )
         .execute(),
     ]);
   // The places the chain is anchored at now, each once, oldest anchor first. They are matched in the query itself, so the cap on what
@@ -467,7 +463,7 @@ async function linesOf(
         text: `${pair}: resolved, ${cut(c.resolution)}`,
       });
   }
-  for (const o of outside)
+  for (const o of answered)
     lines.push({
       at: o.at,
       order: ORDER.state,
