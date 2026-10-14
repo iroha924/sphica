@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import type { Kysely } from "kysely";
 import { dbInit } from "../../src/admin.ts";
+import { inTransaction } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { openWriter } from "../../src/db-write.ts";
 import { beginHarvest, checkText, contextText, RecordRefused, saveText } from "../../src/extract.ts";
@@ -48,10 +49,12 @@ async function main() {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("give owner/repo");
     dbInit(file);
     const db = openWriter("ingest", file);
-    await db
-      .insertInto("project")
-      .values({ key: `git:github.com/${repo}`, name: repo })
-      .execute();
+    await inTransaction(db, (trx) =>
+      trx
+        .insertInto("project")
+        .values({ key: `git:github.com/${repo}`, name: repo })
+        .execute(),
+    );
     await db.destroy();
     return;
   }

@@ -64,6 +64,16 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `test(acceptance): write the work fixture in a transaction`
   - 結果: red は verify の中で 3 件失敗（`not authorized`、`driver.ts:861`）。直した後、`bun run acceptance` → tests 142 / pass 142 / fail 0。biome ci → 0
 
+- [x] T05: 評価用のフィクスチャのスクリプトが、プロジェクトの登録をトランザクションの中で書くようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T02（検査済みでない書き込みの拒否が入って、スクリプトの autocommit の書き込みが拒否された）
+  - 変更: `server/evals/cloud/fixture.ts`
+  - red: `node evals/cloud/fixture.ts new <一時ディレクトリ>/f.db o/r`（`HOME` と `SPHICA_HOME` を一時ディレクトリにして）→ `Error: not authorized`
+  - 完了条件: 同じコマンド → 0 で終わり、`project` に `git:github.com/o/r` の行が 1 つある
+  - コミット: `fix(evals): register the fixture project in a transaction`
+  - 結果: red は `Error: not authorized`。直した後、同じコマンドが exit 0、`project` の行は `git:github.com/o/r` の 1 件
+
 ## 記録
 
 - 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
@@ -72,3 +82,4 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 - 2026-10-14 / T02 / Codex のタスクごとのレビュー（f24d89b4）は指摘 0 件 / 対応なし
 - 2026-10-14 / T03 / verify の lint（Biome）が、足したテストのカンマ演算子で止まった / ブロックに書き直した
 - 2026-10-14 / T04 / verify の acceptance で、ドライバーが前提のデータの work を ingest 接続に autocommit で書いて拒否された / 修正タスク T04 を足して直した
+- 2026-10-14 / T05 / verify が流さない評価用のスクリプトを探し、`evals/cloud/fixture.ts` の `new` が ingest 接続に autocommit で書いていた（`evals/cloud/build.ts` は読むだけ）/ 修正タスク T05 を足して直した
