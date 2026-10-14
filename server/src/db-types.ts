@@ -370,6 +370,11 @@ export interface UnitAnchorRetirement {
   span_start: number;
 }
 
+export interface UnitAnswer {
+  answer_unit: number;
+  state_id: Generated<number>;
+}
+
 export interface UnitEvidence {
   added_at: string;
   id: Generated<number>;
@@ -509,6 +514,7 @@ export interface DB {
   unit_alias: UnitAlias;
   unit_anchor: UnitAnchor;
   unit_anchor_retirement: UnitAnchorRetirement;
+  unit_answer: UnitAnswer;
   unit_evidence: UnitEvidence;
   unit_field: UnitField;
   unit_link: UnitLink;

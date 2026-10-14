@@ -29,6 +29,7 @@ const REV8 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV9 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev9.sql"), "utf8");
 const REV10 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev10.sql"), "utf8");
 const REV11 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev11.sql"), "utf8");
+const REV12 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev12.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -170,6 +171,7 @@ for (const [from, schema] of [
   [9, REV9],
   [10, REV10],
   [11, REV11],
+  [12, REV12],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -261,6 +263,7 @@ for (const [from, schema] of [
   [9, REV9],
   [10, REV10],
   [11, REV11],
+  [12, REV12],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -1793,4 +1796,95 @@ test("migrating revision 10 removes only harvest runs still running, says so, an
   assert.match(said, /a harvest run still running, begun before its sources were kept: 2 rows/);
   assert.match(said, /run \d+ pr:7 begun [^\n]*removed; begin the harvest again/);
   assert.match(said, /run \d+ pr:8 begun /);
+});
+
+test("migrating revision 12 copies each withdrawal an answer caused to the one record of its save the reason names, and lists the rest", () => {
+  const raw = create("old.db", REV12);
+  const write = (sql: string, ...args: (string | number | Buffer | null)[]) =>
+    Number(raw.prepare(sql).run(...args).lastInsertRowid);
+  write("insert into project (key, name) values ('git:github.com/o/r', 'o/r')");
+  const saved = (origin = "trace") =>
+    write(
+      "insert into extraction_run (project_id, origin, target, status, started_at) values (1, ?, 'session:s1', 'running', ?)",
+      origin,
+      now,
+    );
+  const record = (key: string, kind: string, by: number) => {
+    const id = write(
+      "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, ?, ?, ?, ?, 'supported', ?, ?, ?)",
+      `trace:s1/${key}`,
+      kind,
+      kind === "decision" ? "do" : null,
+      key,
+      by,
+      now,
+      sha256(key),
+    );
+    write(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'extracted', ?)",
+      id,
+      now,
+      by,
+    );
+    return id;
+  };
+  const withdrawn = (unit: number, reason: string, by: number) =>
+    write(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, 'candidate', 'withdrawn', ?, ?, ?)",
+      unit,
+      now,
+      reason,
+      by,
+    );
+  const earlier = saved();
+  const closing = saved();
+  const later = saved();
+  const glean = saved("glean");
+  const question = (key: string) => record(key, "question", earlier);
+  const a = record("a", "decision", closing);
+  // Keys that share a start, and one that reads as a pattern for another: neither is taken for the other
+  const under = record("a_b", "finding", closing);
+  const letter = record("axb", "finding", closing);
+  const named = withdrawn(question("named"), "answered by trace:s1/a", closing);
+  const older = withdrawn(question("older"), "answered by trace:s1/a (through trace:s1/named)", closing);
+  const underscore = withdrawn(question("underscore"), "answered by trace:s1/a_b", closing);
+  const plain = withdrawn(question("plain"), "answered by trace:s1/axb", closing);
+  // The owner's withdrawal names no answer, and says so in its own words
+  withdrawn(record("dropped", "finding", earlier), "withdrawn: answered by trace:s1/a", glean);
+  // No row for these, and each is listed: no such record, a question as the answer, a record another run saved, a record that is no question
+  withdrawn(question("unknown"), "answered by trace:s1/gone", closing);
+  record("asking", "question", closing);
+  withdrawn(question("by-question"), "answered by trace:s1/asking", closing);
+  withdrawn(question("other-run"), "answered by trace:s1/a", later);
+  withdrawn(record("not-asked", "finding", earlier), "answered by trace:s1/a", closing);
+  // Two records of the save fit one reason (a key no save writes, since it holds a space): neither is picked
+  record("a (through x)", "finding", closing);
+  withdrawn(question("two-fit"), "answered by trace:s1/a (through x)", closing);
+  const states = () =>
+    raw
+      .prepare(
+        "select id, unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id from unit_state order by id",
+      )
+      .all();
+  const before = states();
+  const said = migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare("select state_id, answer_unit from unit_answer order by state_id")
+      .all()
+      .map((r) => ({ ...r })),
+    [
+      { state_id: named, answer_unit: a },
+      { state_id: older, answer_unit: a },
+      { state_id: underscore, answer_unit: under },
+      { state_id: plain, answer_unit: letter },
+    ],
+  );
+  assert.deepEqual(states(), before);
+  assert.match(said, /Changed while migrating to revision 13: 5 rows/);
+  for (const key of ["unknown", "by-question", "other-run", "not-asked", "two-fit"])
+    assert.match(said, new RegExp(`trace:s1/${key} \\(state \\d+\\)`), key);
+  for (const key of ["named", "older", "underscore", "plain", "dropped"])
+    assert.doesNotMatch(said, new RegExp(`trace:s1/${key} `), key);
+  assert.deepEqual(raw.prepare("pragma foreign_key_check").all(), []);
 });

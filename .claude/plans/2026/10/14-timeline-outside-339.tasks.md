@@ -22,13 +22,14 @@ base: main
 
 revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそこへ書く。これまでの取り下げは移行で写る。timeline の返信はまだ変わらない。
 
-- [ ] T01: schema を revision 13 にして `unit_answer` を足し、これまでの取り下げを移行で写し、0.6.57 にする
+- [x] T01: schema を revision 13 にして `unit_answer` を足し、これまでの取り下げを移行で写し、0.6.57 にする
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `db/schema.sql`, `db/migrations/0013.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/test/fixtures/schema-rev12.sql`, `server/test/schema.test.ts`, `server/test/db.test.ts`, `server/test/migrate.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/migrate.test.ts test/schema.test.ts test/db.test.ts` → 全部通る（revision 12 からの移行が fresh と同じ定義になる、写しが `answered by` の取り下げだけを取り違えずに写す、trigger が断る、ingest だけが insert できる）。`bun run codegen:check` → 0。`bun run release:plan -- --base 9fec994c` → `plugin`、4 か所が 0.6.57
   - コミット: `feat(schema): keep the record that answered a question beside its withdrawal (revision 13)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/migrate.test.ts test/schema.test.ts test/db.test.ts` → 135 件 pass、0 件 fail（revision 1〜12 からの移行が fresh と同じ定義、写しは 4 件を写して 5 件を注記）。`db/migrations/0013.sql` の `having count(*) = 1` を外すと、写しのテストが 1 件 fail する（戻した）。`bun run codegen:check` → matches。`caffeinate -i bun run verify` → exit 0（acceptance 140 pass。2 件が一致する場合のテストを足す前の作業ツリーで）。`bun run release:plan -- --base 9fec994c` → コミットの前は `none`（コミットどうしを比べるため）で、バージョンの行は 4 か所とも 0.6.57。コミットの後の結果は記録節に書く。review-shipping は指摘なし
 
 - [ ] T02: 質問を閉じる保存が `unit_answer` を書く
   - 種別: 追加

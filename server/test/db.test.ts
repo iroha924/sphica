@@ -180,6 +180,51 @@ test("the ingest connection writes a retired anchor's reason but never changes o
   assert.match(attempt(ingest, "delete from unit_anchor_retirement") ?? "", /not authorized/);
 });
 
+test("only the ingest connection writes the record that answered a question, and never changes or removes it", () => {
+  const r = run(db, p);
+  const said = Number(
+    (db.owner.prepare("select id from source where external_id = 'm-1'").get() as { id: number }).id,
+  );
+  const record = (key: string, kind: string) => {
+    const u = insert(db, "unit", {
+      project_id: p,
+      key,
+      kind,
+      text: key,
+      extraction: "supported",
+      run_id: r,
+      created_at: now,
+      content_hash: sha256(key),
+    });
+    insert(db, "unit_evidence", {
+      unit_id: u,
+      source_id: said,
+      span_start: 0,
+      span_end: 3,
+      role: "states",
+      run_id: r,
+      added_at: now,
+    });
+    return u;
+  };
+  const asked = record("answer-asked", "question");
+  const answer = record("answer-given", "finding");
+  const state = (from_state: string | null, to_state: string) =>
+    insert(db, "unit_state", { unit_id: asked, from_state, to_state, at: now, reason: "r", run_id: r });
+  state(null, "candidate");
+  const withdrawn = state("candidate", "withdrawn");
+  const write = "insert into unit_answer (state_id, answer_unit) values (?, ?)";
+  for (const [who, open] of [
+    ["reader", reader],
+    ["capture", capture],
+    ["forget", () => connectWriter("forget", db.file)],
+  ] as const)
+    assert.match(attempt(open, write, withdrawn, answer) ?? "", /readonly|not authorized/, who);
+  assert.equal(attempt(ingest, write, withdrawn, answer), null);
+  assert.match(attempt(ingest, "update unit_answer set answer_unit = ?", asked) ?? "", /not authorized/);
+  assert.match(attempt(ingest, "delete from unit_answer") ?? "", /not authorized/);
+});
+
 // The record server reads text anyone wrote. Its connection writes only what its code writes: anything else is refused before it runs
 test("the ingest connection is refused every write its code never makes", () => {
   const r = run(db, p);
