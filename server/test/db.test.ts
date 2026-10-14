@@ -27,7 +27,10 @@ before(() => {
 });
 after(() => db.done());
 
-/** Opens a connection, runs one SQL statement, and returns the failure message (null on success). */
+/**
+ * Opens a connection, runs one SQL statement, and returns the failure message (null on success). It runs inside `begin immediate`, as the
+ * code writes, where the connection can begin one (a reader cannot), so a refusal comes from the table rules, not from an unchecked write.
+ */
 function attempt(
   open: () => DatabaseSync,
   text: string,
@@ -35,9 +38,14 @@ function attempt(
 ): string | null {
   const raw = open();
   try {
+    try {
+      raw.prepare("begin immediate").run();
+    } catch {}
     raw.prepare(text).run(...args);
+    if (raw.isTransaction) raw.prepare("commit").run();
     return null;
   } catch (e) {
+    if (raw.isTransaction) raw.prepare("rollback").run();
     return (e as Error).message;
   } finally {
     raw.close();
@@ -711,7 +719,7 @@ test("the forget connection removes a source with what cites it, and cannot writ
   const raw = forget();
   try {
     raw.exec("pragma secure_delete = on");
-    raw.exec("begin immediate");
+    raw.prepare("begin immediate").run();
     const batch = Number(
       raw.prepare("insert into forget_batch (project_id, at) values (?, ?) returning id").get(p, now)?.id,
     );
@@ -726,8 +734,10 @@ test("the forget connection removes a source with what cites it, and cannot writ
         "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'active', 'candidate', ?, 'forgotten', ?)",
       )
       .run(u, now, batch);
-    raw.exec("commit");
+    raw.prepare("commit").run();
+    raw.prepare("begin immediate").run();
     raw.exec("insert into source_fts (source_fts) values ('optimize')");
+    raw.prepare("commit").run();
     raw.prepare("pragma wal_checkpoint(TRUNCATE)").get();
   } finally {
     raw.close();
@@ -992,4 +1002,37 @@ test("rolled-back and committing transactions on one connection run one after an
   assert.deepEqual(order, ["preview", "save", "second preview"]);
   assert.deepEqual(await projectKeys(db.reader), ["local:preview-6"]);
   db.owner.prepare("delete from project where key like 'local:preview%'").run();
+});
+
+// A record server keeps its connection for its whole session, so `sphica init` can migrate the database under it
+test("an ingest connection opened before the revision changed refuses to write after it, and writes nothing", async () => {
+  const t = tempDb();
+  try {
+    await t.ingest.selectFrom("project").select("id").execute();
+    t.owner.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+    await assert.rejects(
+      inTransaction(t.ingest, (trx) =>
+        trx.insertInto("project").values({ key: "git:github.com/o/late", name: "o/late" }).execute(),
+      ),
+      new RegExp(`expects revision ${SCHEMA_REVISION}\\.`),
+    );
+    assert.equal(t.owner.prepare("select count(*) as n from project").get()?.n, 0);
+  } finally {
+    await t.done();
+  }
+});
+
+test("a forget connection opened before the revision changed refuses to begin a write after it", () => {
+  const raw = connectWriter("forget", db.file);
+  try {
+    db.owner.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+    assert.throws(
+      () => raw.prepare("begin immediate").run(),
+      new RegExp(`expects revision ${SCHEMA_REVISION}\\.`),
+    );
+    assert.equal(raw.isTransaction, false);
+  } finally {
+    db.owner.exec(`pragma user_version = ${SCHEMA_REVISION}`);
+    raw.close();
+  }
 });

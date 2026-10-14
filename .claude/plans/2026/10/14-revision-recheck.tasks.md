@@ -35,14 +35,15 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
 
 開いた後に revision が変わった ingest / forget の接続が書き込みを拒否する。
 
-- [ ] T02: ingest と forget の接続に、検査付きの begin と、検査済みでない書き込みを拒否する authorizer を入れる
+- [x] T02: ingest と forget の接続に、検査付きの begin と、検査済みでない書き込みを拒否する authorizer を入れる
   - 種別: 修正
   - 計画: S1, S2
   - 依存: T01（トランザクションの外の書き込みが残っていると、authorizer の強制でそれらが拒否されてテストが落ちる）
-  - 変更: `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/db.test.ts`
+  - 変更: `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/db.test.ts`, `server/test/github.test.ts`, `server/test/reconcile.test.ts`, `server/test/record.test.ts`
   - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern=revision test/db.test.ts` → ingest と forget の「開いた後の移行」のテストが、書き込みが通ってしまい失敗する
   - 完了条件: 同じコマンド → 通る。`bun run test` → 全件通る
   - コミット: `fix(db): refuse an ingest or forget write when the revision changed after the connection opened`
+  - 結果: red は修正前に 2 件とも失敗（`Missing expected rejection` / `Missing expected exception`）。修正後、同じコマンドで 2 件とも通る。`bun run test` → tests 1294 / pass 1294 / fail 0
 
 - [ ] T03: 移行窓・持ち越し・自動 rollback・FTS の正常系・既存の禁止・forget の preview / apply のテストを足す
   - 種別: 追加
@@ -53,3 +54,7 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `test(db): cover the revision check's lock, carry-over, rollback, FTS, and forget paths`
 
 ## 記録
+
+- 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
+- 2026-10-14 / T02 / 内部の関数（`storeItems`、`linkIssues`、`openRun`、`finishRun`）をトランザクションの外から直接呼ぶテストと、生の ingest / forget 接続で autocommit の書き込みをするテストが拒否された。本番の呼び出しは全部トランザクションの中 / テストを `inTransaction`・`begin immediate` の中で呼ぶ形に直し、変更欄に `server/test/github.test.ts`, `server/test/reconcile.test.ts`, `server/test/record.test.ts` を足した（前の値: `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/db.test.ts`）
+- 2026-10-14 / T02 / テストの `statements()` は prototype の `prepare` を差し替えるので、接続を開いたときに bind したラッパーでは文が数えられなかった / ラッパーは呼ぶたびに prototype の `prepare` を引く

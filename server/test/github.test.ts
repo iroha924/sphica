@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { inTransaction } from "../src/db.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import {
   type Get,
@@ -21,6 +22,10 @@ import {
 } from "../src/github.ts";
 import { readRefs } from "../src/read.ts";
 import { at, insert, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
+
+/** Stores items in a transaction, as harvest does */
+const store = (db: TempDb, projectId: number, items: Parameters<typeof storeItems>[2]) =>
+  inTransaction(db.ingest, (trx) => storeItems(trx, projectId, items));
 
 /** The sources a harvest of pull request n begun now would keep */
 async function currentSources(db: TempDb, p: number, n: number) {
@@ -223,7 +228,7 @@ test("a review comment on a path with a control character is kept without the pa
   assert.deepEqual([bell.path, bell.lines], [null, null]);
   const db = tempDb();
   try {
-    await storeItems(db.ingest, project(db), [bell]);
+    await store(db, project(db), [bell]);
     assert.equal(
       db.owner.prepare("select path from source where external_id = 'review_comment:77'").get()?.path,
       null,
@@ -246,15 +251,15 @@ test("stores sources with who wrote them, adds a revision only when text changed
     const first = await readPull(fake("Fixes #14. Switch to pnpm."), 7);
     let ids: (number | null)[] = [];
     const asked = await statements(async () => {
-      ids = await storeItems(db.ingest, p, first.items);
+      ids = await store(db, p, first.items);
     });
     // Each item is looked up by its id through the unique index of items, not by scanning the project's sources: once for its latest
     // revision, and once for the id of a revision just written (an empty item never stored has none)
     const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
     assert.equal(lookups.length, first.items.length + ids.filter((id) => id !== null).length);
     for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
-    await linkIssues(db.ingest, p, 7, first.closes);
-    await linkIssues(db.ingest, p, 7, first.closes);
+    await inTransaction(db.ingest, (trx) => linkIssues(trx, p, 7, first.closes));
+    await inTransaction(db.ingest, (trx) => linkIssues(trx, p, 7, first.closes));
     const kinds = db.owner
       .prepare(
         "select kind, author_kind, author_association, revision, available_at is not null as known, indexed from source order by id",
@@ -269,9 +274,9 @@ test("stores sources with who wrote them, adds a revision only when text changed
       kinds.filter((k) => k[0] === "commit_message").map((k) => k[1]),
       ["person"],
     );
-    assert.deepEqual(await storeItems(db.ingest, p, first.items), ids, "unchanged text keeps its rows");
+    assert.deepEqual(await store(db, p, first.items), ids, "unchanged text keeps its rows");
     const second = await readPull(fake("Fixes #14. Switch to pnpm. Edited."), 7);
-    const again = await storeItems(db.ingest, p, second.items);
+    const again = await store(db, p, second.items);
     assert.notEqual(again[0], ids[0]);
     assert.deepEqual(again.slice(1), ids.slice(1));
     // A body that was always empty is not kept, but keeps its place: the ids line up with the items
@@ -279,7 +284,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
       { ...(first.items[0] as (typeof first.items)[number]), externalId: "blank", text: "" },
       ...first.items.slice(1),
     ];
-    const placed = await storeItems(db.ingest, p, blank);
+    const placed = await store(db, p, blank);
     assert.deepEqual(placed, [null, ...ids.slice(1)]);
     // A review comment's diff hunk is masked like its body: a key in the changed code never lands in the database
     const withHunk = first.items.find((it) => it.hunk !== null) ?? first.items[0];
@@ -289,7 +294,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
       artifact: "pr:99",
       hunk: "+API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123",
     };
-    await storeItems(db.ingest, p, [leaked]);
+    await store(db, p, [leaked]);
     const hunk = String(
       db.owner.prepare("select diff_hunk from source where external_id = 'hunk-1'").get()?.diff_hunk,
     );
@@ -306,13 +311,13 @@ test("stores sources with who wrote them, adds a revision only when text changed
     );
     assert.ok(current.some((s) => s.artifact === "issue:14"));
     // A cleared body becomes an empty current revision: the old text stays as history but is no longer what the pull request says
-    await storeItems(db.ingest, p, (await readPull(fake("   "), 7)).items);
+    await store(db, p, (await readPull(fake("   "), 7)).items);
     assert.deepEqual(
       (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body").map((s) => [s.revision, s.text]),
       [[3, ""]],
     );
     // The cleared body closes no issue: the next harvest drops the link, so the issue stops being part of the pull request
-    await linkIssues(db.ingest, p, 7, []);
+    await inTransaction(db.ingest, (trx) => linkIssues(trx, p, 7, []));
     assert.equal(
       (await currentSources(db, p, 7)).some((s) => s.artifact === "issue:14"),
       false,
@@ -365,10 +370,10 @@ test("a cleared issue body, comment, review, and review comment become empty cur
             "issues/14/comments": [said(cleared ? "" : "Confirmed", 76)],
           }) as Record<string, unknown>
         )[q.split("?")[0] ?? ""];
-    await storeItems(db.ingest, p, (await readPull(pull(false), 7, "o/r")).items);
-    await linkIssues(db.ingest, p, 7, [14]);
+    await store(db, p, (await readPull(pull(false), 7, "o/r")).items);
+    await inTransaction(db.ingest, (trx) => linkIssues(trx, p, 7, [14]));
     const before = Number(db.owner.prepare("select count(*) as n from source").get()?.n);
-    await storeItems(db.ingest, p, (await readPull(pull(true), 7, "o/r")).items);
+    await store(db, p, (await readPull(pull(true), 7, "o/r")).items);
     const kinds = ["pr_comment", "review", "review_comment", "issue_body", "issue_comment"];
     const current = (await currentSources(db, p, 7)).filter((s) => kinds.includes(s.kind));
     assert.deepEqual(
@@ -379,7 +384,7 @@ test("a cleared issue body, comment, review, and review comment become empty cur
     const old = db.owner.prepare("select id from source where text = 'Why not yarn?'").get()?.id;
     assert.match(await readRefs(db.reader, p, [`s${old}`], null), /Why not yarn\?/);
     // Cleared again, nothing is added; an item never stored with text is not stored empty
-    await storeItems(db.ingest, p, (await readPull(pull(true), 7, "o/r")).items);
+    await store(db, p, (await readPull(pull(true), 7, "o/r")).items);
     assert.equal(
       Number(db.owner.prepare("select count(*) as n from source").get()?.n),
       before + kinds.length,
@@ -419,7 +424,7 @@ test("a review comment range that runs backwards or across sides keeps only its 
           ]
         : base(q, all);
     const read = await readPull(get, 7);
-    await storeItems(db.ingest, p, read.items);
+    await store(db, p, read.items);
     const rows = db.owner
       .prepare(
         "select external_id, line_start, line_end from source where kind = 'review_comment' order by external_id",
@@ -668,13 +673,13 @@ test("tombstone: harvest does not store an item the owner forgot, and stores it 
   try {
     const p = project(db);
     const first = await readPull(fake("Switch to pnpm."), 7);
-    const ids = await storeItems(db.ingest, p, first.items);
+    const ids = await store(db, p, first.items);
     const body = ids[0] as number;
     await applyForget(db.file, p, [body], await previewForget(db.file, p, [body]));
-    const again = await storeItems(db.ingest, p, first.items);
+    const again = await store(db, p, first.items);
     assert.deepEqual(again, [null, ...ids.slice(1)]);
     assert.equal(db.owner.prepare("select count(*) as n from source where kind = 'pr_body'").get()?.n, 0);
-    const edited = await storeItems(db.ingest, p, (await readPull(fake("Switch to pnpm. Edited."), 7)).items);
+    const edited = await store(db, p, (await readPull(fake("Switch to pnpm. Edited."), 7)).items);
     assert.equal(typeof edited[0], "number");
     // An edit's time is not in the REST response, so a revision after a forgotten one has no known time it became visible
     assert.equal(
@@ -694,13 +699,13 @@ test("tombstone: after the newest revision is forgotten, an older one is not sho
   const db = tempDb();
   try {
     const p = project(db);
-    await storeItems(db.ingest, p, (await readPull(fake("Version A."), 7)).items);
-    const b = (await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items))[0] as number;
+    await store(db, p, (await readPull(fake("Version A."), 7)).items);
+    const b = (await store(db, p, (await readPull(fake("Version B."), 7)).items))[0] as number;
     await applyForget(db.file, p, [b], await previewForget(db.file, p, [b]));
-    await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items);
+    await store(db, p, (await readPull(fake("Version B."), 7)).items);
     const bodies = (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body");
     assert.deepEqual(bodies, [], "version A is not the pull request's current body");
-    await storeItems(db.ingest, p, (await readPull(fake("Version C."), 7)).items);
+    await store(db, p, (await readPull(fake("Version C."), 7)).items);
     assert.deepEqual(
       (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body").map((s) => [s.text, s.revision]),
       [["Version C.", 3]],

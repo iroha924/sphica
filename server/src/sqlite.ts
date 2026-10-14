@@ -61,6 +61,11 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
   if (check === "none") return;
   checkGeneration(raw);
   if (check === "generation") return;
+  requireRevision(raw);
+}
+
+/** Refuses a database at another revision than this Sphica's. */
+export function requireRevision(raw: DatabaseSync): void {
   const got = (raw.prepare("pragma user_version").get() as { user_version: number } | undefined)
     ?.user_version;
   if (got === SCHEMA_REVISION) return;
