@@ -100,6 +100,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `fix(deliver): end a command's words at ; | & too, as PowerShell chains with ; (T11)`
   - 結果: red を実測（fail 1、`pnpm test --watch; Get-ChildItem`）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 66 / fail 0。injection の受け入れ 34 件 pass
 
+- [x] T12: 知らせるだけの配信の文字数を、その文面の長さで予算に数える
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（直す予算の集計が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="spend the read budget's characters" test/deliver.test.ts` → 記録を含む command_context の行が合計 3,150 字になり、3,000 字を超えて落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → 同じ会話の command_context の記録が 3,000 字を超えない
+  - コミット: `fix(deliver): count dead ends shown without a stop by their own words in the read budget (T12)`
+  - 結果: red を実測（3,150 字で fail）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 67 / fail 0（同じ会話で 2,984 字）
+
 ## P3: 速さと効果を測る
 
 全件の照合の速さと、anchor の有無での効果を測る。
@@ -143,3 +153,5 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-14 / T02, T04 / Codex のタスクごとのレビュー F2（P2）: Skill がまだ実装していない「止める」を書いている / 見送り。T06 で実装し同じ PR で出す。T09 で文面と挙動を突き合わせる
 2026-10-15 / T06 / 変更欄: deliver-codex.test.ts は変えずに済み、deliver.js が上限 455,000 を 2,240 バイト超えた / 前: deliver-codex.test.ts を含む。後: 外して scripts/lib/bundle-budget.mjs を足し、上限を 460,000 にした（前例どおり 5 KB 刻み）
 2026-10-15 / T06 / review-shipping の指摘 3 件: 並行のテストが 0 件の止めでも通る、止める動作と合わないコメント 2 か所、PowerShell の `cmd --worker; next` が `--worker;` の 1 語になり一致しない / 前の 2 件は T06 の中で直した。3 件目は照合の見逃しなので T11 を足す
+2026-10-15 / T06 / Codex のタスクごとのレビュー F1（P2）: command_context の行を、予算の集計が CONFIRM の長さを引いて数え、1 行あたり 81 字少なく数える / 採用。T12 を足して直した
+2026-10-15 / T06 / Codex のタスクごとのレビュー F2（P2）: Codex の Bash でパッチの heredoc とコマンドを 1 回にまとめると照合を通らない / 見送り。パッチの本文はファイルの中身で、照合するとコマンドをファイルに書くだけの編集まで止める

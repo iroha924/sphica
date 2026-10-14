@@ -3695,3 +3695,45 @@ test("calls at the same time stop a conversation once, and a dead end that is no
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("dead ends shown without a stop spend the read budget's characters as they were shown, never past it", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m-long", text: "The long build failed." });
+    const long = (key: string, command: string) => ({
+      key,
+      kind: "dead_end",
+      text: `${key}: ${"the build with this flag fails on every runner we tried ".repeat(6)}`,
+      why: "the runner image lacks the native toolchain the flag needs, ".repeat(4),
+      evidence: [{ source: `s${m}`, quote: "The long build failed.", role: "states" }],
+      commands: [command],
+    });
+    await save(db, p, {
+      units: [
+        ...["s1", "s2", "s3"].map((k) => long(k, `stop${k} run`)),
+        ...Array.from({ length: 8 }, (_, i) => long(`c${i}`, `ctx${i} run`)),
+      ],
+    });
+    for (const k of ["s1", "s2", "s3"])
+      assert.ok(stopText(await shellCall(db, repo, "c6", `stop${k} run`)), k);
+    for (let i = 0; i < 8; i++)
+      assert.equal(typeof (await shellCall(db, repo, "c6", `ctx${i} run`)), "string");
+    const rows = db.owner
+      .prepare(
+        // A delivery that carried only the omission note spends nothing
+        "select d.chars from delivery d join session s on s.id = d.session_id where s.external_id = 'c6' and d.reason = 'command_context' and exists (select 1 from delivery_unit x where x.delivery_id = d.id)",
+      )
+      .all()
+      .map((r) => Number(r.chars) - RAN.length - 1);
+    assert.ok(rows.length >= 2, `${rows.length} context deliveries`);
+    assert.ok(
+      rows.reduce((a, b) => a + b, 0) <= 3000,
+      `records shown as context took ${rows.reduce((a, b) => a + b, 0)} characters`,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

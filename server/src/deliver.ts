@@ -497,7 +497,7 @@ async function readRoom(db: Reads, session: string, agent: string | null) {
     .where(({ exists, selectFrom }) =>
       exists(selectFrom("delivery_unit as x").select("x.unit_id").whereRef("x.delivery_id", "=", "d.id")),
     )
-    .select(["d.id", "d.at", "d.chars"])
+    .select(["d.id", "d.at", "d.chars", "d.reason"])
     .execute();
   // A read that showed an AI's decision also carried the AI words, which spend no budget, like the request: told from its records'
   // authority as of when it was delivered
@@ -528,7 +528,9 @@ async function readRoom(db: Reads, session: string, agent: string | null) {
       ASK -
       spent.reduce((n, r) => {
         const ai = marked.get(r.id) ?? 0;
-        return n + Math.max(r.chars - ASK - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
+        // Each delivery's request is free: CONFIRM, or the words dead ends shown without a stop carry in its place
+        const ask = r.reason === COMMAND_CONTEXT ? RAN.length + 1 : ASK;
+        return n + Math.max(r.chars - ask - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
       }, 0),
   };
 }
