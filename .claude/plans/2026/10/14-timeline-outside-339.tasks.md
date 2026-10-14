@@ -40,6 +40,16 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
   - コミット: `feat(record): write the answering record when a save closes a question`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/architecture.test.ts` → 85 件 pass、0 件 fail。`server/src/reconcile.ts` と `server/src/record.ts` を stash すると、足した検査のうち 2 件が fail する。連鎖で渡す答えを保存の先頭の記録に替えると、連鎖のテストが 1 件 fail する（戻した）。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`caffeinate -i bun run verify` → exit 0（acceptance 140 pass。下の 2 つのテストを足す前の作業ツリーで）。足した後に `bun run check` → exit 0、`bun run --cwd server test` → 1291 件 pass、0 件 fail
 
+- [x] T05: `reconcile.ts` だけが書く検査が、引用符付きの表名も見つける
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（検査に `unit_answer` を足したのが T02）
+  - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
+  - red: テストに引用符付きの表名の 3 ケースを足した後、検査を直す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/architecture.test.ts` → `insert into "unit_answer"` を書くファイルで検査が 0 で終わり、テストが失敗する
+  - 完了条件: 同じコマンド → 全部通る。`bun run architecture` → 通る
+  - コミット: `fix(check): find a write to a judged table whose name is quoted`
+  - 結果: red: 検査を直す前に同じコマンド → 2 件 pass、1 件 fail（`export const sql = 'insert into "unit_answer" (state_id, answer_unit) values (1, 2)';` で exit 0）。直した後 → 3 件 pass、0 件 fail。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`caffeinate -i bun run verify` → exit 0（acceptance 142 pass、T03 の変更も入った作業ツリーで）。review-shipping は指摘なし
+
 ## P2: timeline の返信を直す
 
 頼んだ記録と関係の無い行が timeline から消え、連なりの記録が答えた質問の取り下げだけが残る。
@@ -72,3 +82,4 @@ schema の Skill が新しい表を言い、リリースの Skill が revision �
 - 2026-10-14 / T02 / 変更欄に `server/test/extract.test.ts`（glean の取り下げに行が無いこと）、`server/test/forget.test.ts`（出典を forget しても行が残ること）、`server/test/architecture.test.ts` を足した。前の値は `server/src/reconcile.ts`, `server/src/record.ts`, `scripts/check-architecture.mjs`, `server/test/record.test.ts` / 計画の方針 6 のテストの置き場所が 1 ファイルに収まらなかった
 - 2026-10-14 / T02 / review-shipping は出荷を止める指摘なし。テストの穴を 2 つ挙げた（連鎖のテストは記録が 1 件で取り違えても通る、`reconcile.ts` だけが書く検査に違反で落ちるテストが無い） / 両方直した。連鎖のテストに答えない記録を足し、`architecture.test.ts` に違反で落ちるテストを足した
 - 2026-10-14 / 全体 / 過去の記録 `trace:15ab6a31-…/record-upkeep-plan`（2026-10-11、0.6.51 の answers）は「schema と revision は変えない」と決め、「リンクの種類 answers と状態 answered を足す」を棄却している。今回の計画はその決定を覆す / 持ち主に知らせた。push と PR の作成の前に確認を取る
+- 2026-10-14 / T02 / Codex のコミットのレビュー（e838b374、新しい会話、high）は 1 件: `scripts/check-architecture.mjs` の検査が、引用符付きの表名（`insert into "unit_answer"`）を見つけない。メモリ上で再現したと返った。保存と取り下げの経路には指摘なし / 採る。修正タスク T05 を T02 の後ろに足した
