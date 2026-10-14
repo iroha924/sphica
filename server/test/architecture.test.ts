@@ -210,6 +210,8 @@ test("only reconcile.ts writes states, replacements, and the record that answere
     "export const sql = 'insert into \"unit_answer\" (state_id, answer_unit) values (1, 2)';",
     'export const sql = "insert into `unit_state` (unit_id) values (1)";',
     'export const sql = "insert into [unit_replacement] (from_unit) values (1)";',
+    // A quote escaped inside the string that holds the statement
+    'export const sql = "insert into \\"unit_answer\\" (state_id, answer_unit) values (1, 2)";',
   ]) {
     const r = check({ "stray.ts": `${write}\n` });
     assert.equal(r.status, 1, write);

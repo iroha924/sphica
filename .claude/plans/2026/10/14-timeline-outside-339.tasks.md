@@ -50,6 +50,16 @@ revision 13 の DB に `unit_answer` ができ、質問を閉じる保存がそ�
   - コミット: `fix(check): find a write to a judged table whose name is quoted`
   - 結果: red: 検査を直す前に同じコマンド → 2 件 pass、1 件 fail（`export const sql = 'insert into "unit_answer" (state_id, answer_unit) values (1, 2)';` で exit 0）。直した後 → 3 件 pass、0 件 fail。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`caffeinate -i bun run verify` → exit 0（acceptance 142 pass、T03 の変更も入った作業ツリーで）。review-shipping は指摘なし
 
+- [x] T06: `reconcile.ts` だけが書く検査が、文字列の中でエスケープした引用符の付いた表名も見つける
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T05（引用符付きの表名を見る正規表現を広げる）
+  - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
+  - red: テストに `insert into \"unit_answer\"` のケースを足した後、検査を直す前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/architecture.test.ts` → そのケースで検査が 0 で終わり、テストが失敗する
+  - 完了条件: 同じコマンド → 全部通る。`bun run architecture` → 通る
+  - コミット: `fix(check): find a write to a judged table whose quoted name is escaped in a string`
+  - 結果: red: 検査を直す前に同じコマンド → 2 件 pass、1 件 fail。直した後 → 3 件 pass、0 件 fail。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state, unit_replacement, and unit_answer`。`bun run check` → exit 0。review-shipping は指摘なし（直す前後の正規表現が `server/src` の 60 ファイルで同じ結果になること、以前の形が全部まだ落ちることを確かめたと返った）
+
 ## P2: timeline の返信を直す
 
 頼んだ記録と関係の無い行が timeline から消え、連なりの記録が答えた質問の取り下げだけが残る。
@@ -88,3 +98,6 @@ schema の Skill が新しい表を言い、リリースの Skill が revision �
 - 2026-10-14 / T03 / `server/test/timeline.test.ts` の既存のテスト 1 件の名前を変えた。前は「…and a change the chain's run made to a record it saved」、今は「…and tells a question the chain's run saved and answered by its withdrawal alone」（issue #339 が前の名前で引いている） / 見ているものが「run が保存した記録への変化」から「連なりの記録が答えた質問の取り下げ」に変わったため
 - 2026-10-14 / T03 / review-shipping の観測: planner の統計が無い DB で連なりが 20 件あると、新しい問い合わせは project の全記録を歩く計画になる（4 万件の記録で 12 ms） / 直さない。`read` には hook の時間の上限が無く、記録の数に比例する程度のため
 - 2026-10-14 / T03 / コミットの件名を短くした。前は `fix(read): tell only a question a chain record answered among changes to records outside a timeline's chain`（113 字で、commit-msg の検査の上限 100 字を超えた）、今は `fix(read): tell only an answered question among changes outside a timeline's chain` / 検査に合わせた
+- 2026-10-14 / T03, T05 / Codex のコミットのレビュー（4e740e59 と 22fd1023、新しい会話）は指摘 0 件。一式のテストは流さず、メモリ上の SQLite で保存の実際の経路・移行した DB の返信・予算の件数を個別に確かめたと返った / 採否なし
+- 2026-10-14 / 全体 / Codex の全差分のレビュー（deb3c4fd..ec79cac0、新しい会話、high）は P1・P2 なし、P3 が 1 件: `scripts/check-architecture.mjs` の検査が、文字列の中でエスケープした引用符（`into \"unit_answer\"`）を見つけない。再現したと返った / 採る。修正タスク T06 を足した。変数に入れた表名や実行時に組み立てた表名までは追わない（PR 本文の Declined findings に書く）
+- 2026-10-14 / 全体 / plan の完了条件: A4 `git diff --stat deb3c4fd -- server/src` → 6 ファイルだけ。A5 計測 → 直す前 288 行（179 件）、直した後 1 行（u544 の timeline の u541、state 1129）、移行の注記 0 件。A6 fixture の比較 → gold の 3 件は 0 行の差、`battery`・`push`・`german-label`・`late-edits` は連なりの外の `became superseded` が 1 行ずつ消えるだけ。A7 bundle した `mcp.js` を両ホストの起動の形で呼んだ返信（1,960 字）が互いに、また `timelineRefs` の返信と一致。pack した成果物は 54 ファイル、`check-tarball.mjs` が通る / A8〜A10 は push の後

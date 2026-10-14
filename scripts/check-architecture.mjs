@@ -66,7 +66,7 @@ for (const entry of READERS)
 // Lifecycles and replacements are judged, never written directly: only reconcile writes them, after judging the facts a save changed.
 // The record that answered a question is written with the withdrawal it caused, so it has the same one writer
 const JUDGED =
-  /insertInto\(\s*["'](unit_state|unit_replacement|unit_answer)["']|updateTable\(\s*["'](unit_replacement|unit_answer)["']|into\s+["'`[]?(unit_state|unit_replacement|unit_answer)\b/;
+  /insertInto\(\s*["'](unit_state|unit_replacement|unit_answer)["']|updateTable\(\s*["'](unit_replacement|unit_answer)["']|into\s+\\?["'`[]?(unit_state|unit_replacement|unit_answer)\b/;
 const RECONCILE = "server/src/reconcile.ts";
 const SPARED = new Set([RECONCILE]);
 const sources = fs
