@@ -54,8 +54,21 @@ ingest と forget の接続の書き込みが、全部 `begin immediate` で始�
   - コミット: `test(db): cover the revision check's lock, carry-over, rollback, FTS, and forget paths`
   - 結果: `--test-name-pattern=revision test/db.test.ts test/forget.test.ts` → tests 14 / pass 14。authorizer の拒否の 1 行を外すと、外の書き込みと forget の optimize の 2 件が落ちることを確かめて戻した。既存の禁止は `attempt` が検査済みトランザクションの中で流すので、checked が true のまま確かめている。shadow table の直接の書き込みの検査に forget を足した。`bun run test` → tests 1303 / pass 1303 / fail 0
 
+- [x] T04: 受け入れテストのドライバーが前提のデータ（work）をトランザクションの中で書くようにし、足したテストの lint を直す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T02（検査済みでない書き込みの拒否が入って、ドライバーの autocommit の書き込みが拒否された）
+  - 変更: `server/evals/acceptance/driver.ts`, `server/test/db.test.ts`
+  - red: `bun run acceptance` → injection-04、status-08、status-09 が `not authorized` で失敗する
+  - 完了条件: `bun run acceptance` → 全件通る。`server/node_modules/.bin/biome ci . --error-on-warnings` → 0 で終わる
+  - コミット: `test(acceptance): write the work fixture in a transaction`
+  - 結果: red は verify の中で 3 件失敗（`not authorized`、`driver.ts:861`）。直した後、`bun run acceptance` → tests 142 / pass 142 / fail 0。biome ci → 0
+
 ## 記録
 
 - 2026-10-14 / T01 / Codex のタスクごとのレビュー（9b79166c）は指摘 0 件 / 対応なし
 - 2026-10-14 / T02 / 内部の関数（`storeItems`、`linkIssues`、`openRun`、`finishRun`）をトランザクションの外から直接呼ぶテストと、生の ingest / forget 接続で autocommit の書き込みをするテストが拒否された。本番の呼び出しは全部トランザクションの中 / テストを `inTransaction`・`begin immediate` の中で呼ぶ形に直し、変更欄に `server/test/github.test.ts`, `server/test/reconcile.test.ts`, `server/test/record.test.ts` を足した（前の値: `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/db.test.ts`）
 - 2026-10-14 / T02 / テストの `statements()` は prototype の `prepare` を差し替えるので、接続を開いたときに bind したラッパーでは文が数えられなかった / ラッパーは呼ぶたびに prototype の `prepare` を引く
+- 2026-10-14 / T02 / Codex のタスクごとのレビュー（f24d89b4）は指摘 0 件 / 対応なし
+- 2026-10-14 / T03 / verify の lint（Biome）が、足したテストのカンマ演算子で止まった / ブロックに書き直した
+- 2026-10-14 / T04 / verify の acceptance で、ドライバーが前提のデータの work を ingest 接続に autocommit で書いて拒否された / 修正タスク T04 を足して直した

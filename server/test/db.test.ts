@@ -1045,7 +1045,11 @@ function migrated<T>(file: string, fn: () => T): T {
   const back = () => owner.exec(`pragma user_version = ${SCHEMA_REVISION}`);
   try {
     const out = fn();
-    if (out instanceof Promise) return out.finally(() => (back(), owner.close())) as T;
+    if (out instanceof Promise)
+      return out.finally(() => {
+        back();
+        owner.close();
+      }) as T;
     back();
     owner.close();
     return out;
