@@ -110,6 +110,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `fix(deliver): count dead ends shown without a stop by their own words in the read budget (T12)`
   - 結果: red を実測（3,150 字で fail）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 67 / fail 0（同じ会話で 2,984 字）
 
+- [x] T13: 演算子は空白に接するときだけコマンドの区切りにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T11（直す区切り方が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="command anchor matches only" test/deliver.test.ts` → `pnpm;test --watch` が一致して落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → `pnpm;test --watch`・`pnpm|test --watch`・`pnpm test|--watch`・`pnpm; test --watch`・URL の `&` の中は一致せず、`pnpm test --watch; Get-ChildItem` と `npm ci && pnpm test --watch&` は一致する
+  - コミット: `fix(deliver): split commands only at operators beside a space, never inside a word (T13)`
+  - 結果: red を実測（fail 1、`pnpm;test --watch`）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 67 / fail 0。injection の受け入れ 34 件 pass
+
 ## P3: 速さと効果を測る
 
 全件の照合の速さと、anchor の有無での効果を測る。
@@ -155,3 +165,4 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 2026-10-15 / T06 / review-shipping の指摘 3 件: 並行のテストが 0 件の止めでも通る、止める動作と合わないコメント 2 か所、PowerShell の `cmd --worker; next` が `--worker;` の 1 語になり一致しない / 前の 2 件は T06 の中で直した。3 件目は照合の見逃しなので T11 を足す
 2026-10-15 / T06 / Codex のタスクごとのレビュー F1（P2）: command_context の行を、予算の集計が CONFIRM の長さを引いて数え、1 行あたり 81 字少なく数える / 採用。T12 を足して直した
 2026-10-15 / T06 / Codex のタスクごとのレビュー F2（P2）: Codex の Bash でパッチの heredoc とコマンドを 1 回にまとめると照合を通らない / 見送り。パッチの本文はファイルの中身で、照合するとコマンドをファイルに書くだけの編集まで止める
+2026-10-15 / T11, T12 / Codex の再レビュー F1（P2、再現済み）: T11 で演算子を空白と同じに扱ったため、別々のコマンドや URL の `&` の中にも一致する / 採用。T13 を足して直した。T12 は指摘なし

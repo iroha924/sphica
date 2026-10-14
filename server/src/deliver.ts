@@ -601,7 +601,7 @@ async function commandsRun(db: Reads, projectId: number, command: string): Promi
     .execute();
   // The first word is a substring of any command that runs the anchor, and the test is far cheaper than splitting the command
   const ids = rows
-    .filter((r) => command.includes(words(r.command)[0] ?? "") && runsCommand(command, r.command))
+    .filter((r) => command.includes(r.command.split(" ")[0] ?? "") && runsCommand(command, r.command))
     .map((r) => r.id);
   return [...new Set(ids)].sort((a, b) => b - a);
 }
@@ -739,22 +739,41 @@ async function namedInCommand(
     );
 }
 
-/** A command's words: they end at spaces and at the operator characters ; | & (PowerShell 5.1 chains with ; and no space) */
-const words = (text: string) => text.split(/[\s;|&]+/).filter(Boolean);
+/**
+ * A line's commands, each as its words. Words end at spaces; ; | & at a word's start or end (beside a space) also end a command, so
+ * PowerShell's `cmd; next` splits while `a;b` and a URL's `&` stay inside one word.
+ */
+function commandsOf(line: string): string[][] {
+  const out: string[][] = [[]];
+  const close = () => {
+    if (out.at(-1)?.length) out.push([]);
+  };
+  for (const token of line.split(/\s+/).filter(Boolean)) {
+    const lead = /^[;|&]+/.exec(token)?.[0].length ?? 0;
+    const word = token.slice(lead).replace(/[;|&]+$/, "");
+    if (lead) close();
+    if (word) out.at(-1)?.push(word);
+    if (lead + word.length < token.length) close();
+  }
+  return out;
+}
 
 /**
- * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, on one line. No other shell syntax is
- * read, so a word keeps any quote around it (a quoted mention never matches) while an unquoted mention (`echo pnpm test --watch`) does.
+ * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, in one command of one line. No other
+ * shell syntax is read, so a word keeps any quote around it (a quoted mention never matches) while an unquoted mention
+ * (`echo pnpm test --watch`) does.
  */
 export function runsCommand(command: string, anchor: string): boolean {
-  const want = words(anchor);
+  const want = anchor.split(" ").filter(Boolean);
   if (!want.length) return false;
-  return command.split(/\r\n|\n|\r/).some((line) => {
-    const got = words(line);
-    for (let i = 0; i + want.length <= got.length; i++)
-      if (want.every((w, j) => got[i + j] === w)) return true;
-    return false;
-  });
+  return command
+    .split(/\r\n|\n|\r/)
+    .flatMap(commandsOf)
+    .some((got) => {
+      for (let i = 0; i + want.length <= got.length; i++)
+        if (want.every((w, j) => got[i + j] === w)) return true;
+      return false;
+    });
 }
 
 /**

@@ -3526,10 +3526,10 @@ test("a command anchor matches only its whole words in a row on one line, readin
     // Known false matches: an unquoted mention, and the middle of a quoted one
     "echo pnpm test --watch",
     "echo 'note pnpm test --watch now'",
-    // Operators end a word without a space, as PowerShell 5.1 chains with ;
+    // An operator at a word's end closes the command, as PowerShell 5.1 chains with ; and a space
     "pnpm test --watch; Get-ChildItem",
-    "npm ci;pnpm test --watch",
-    "npm ci&&pnpm test --watch|tee log",
+    "npm ci && pnpm test --watch&",
+    "npm ci; pnpm test --watch | tee log",
   ])
     assert.equal(runsCommand(command, anchor), true, command);
   for (const command of [
@@ -3541,6 +3541,15 @@ test("a command anchor matches only its whole words in a row on one line, readin
     "echo 'pnpm test --watch'",
     '"pnpm" test --watch',
     "pnpm test --watch=false;",
+    // Operators join separate commands, never one command's words
+    "pnpm;test --watch",
+    "pnpm|test --watch",
+    "pnpm&&test --watch",
+    "pnpm test|--watch",
+    "pnpm; test --watch",
+    'curl "https://example.test/?q=x&pnpm test --watch&v=1"',
+    // A known miss: an operator with no space on either side
+    "npm ci;pnpm test --watch",
     "",
   ])
     assert.equal(runsCommand(command, anchor), false, command);
