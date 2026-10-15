@@ -118,8 +118,9 @@ function stress(i: number, prefix: (b: number) => string): Unit {
     return {
       key: `k${i}`,
       kind: "dead_end",
-      text: `Rule ${i}: building tool${i} with --flag${i} fails on the runners.`,
-      commands: [`tool${i} build --flag${i}`],
+      text: `Rule ${i}: running tool${i} with --flag${i} fails on the runners.`,
+      // Real anchors share their program, so every one of them passes the program test of a shell call that runs it
+      commands: [`npm run tool${i} --flag${i}`],
       aliases: ["scale", "benchmark"],
     };
   if (r < 26)
@@ -292,7 +293,7 @@ const CASES: Case[] = [
     name: "shell command running a dead end's command (stopped)",
     event: "PreToolUse",
     input: { tool_name: "Bash" },
-    command: (f) => `cd app && tool${f.keys.deadIndex} build --flag${f.keys.deadIndex} --verbose`,
+    command: (f) => `cd app && npm run tool${f.keys.deadIndex} --flag${f.keys.deadIndex} --verbose`,
     expect: (f) => [f.keys.dead ?? ""],
     stops: true,
     only: "stress",
@@ -303,6 +304,14 @@ const CASES: Case[] = [
     input: { tool_name: "Bash" },
     command: () => "npm test -- --watch=false 2>&1 | tail -20",
     expect: () => [],
+  },
+  {
+    name: "shell script of 500 npm lines no record is about",
+    event: "PreToolUse",
+    input: { tool_name: "Bash" },
+    command: () => Array.from({ length: 500 }, (_, k) => `npm run task${k} --workspace app`).join("\n"),
+    expect: () => [],
+    only: "stress",
   },
   {
     name: "read a file 500 records share",
@@ -461,6 +470,8 @@ async function measure(f: Fixture, timeouts: Record<string, number>): Promise<Ro
         if (c.stops && k === 0 && !got.stopped) problems.push("not stopped");
         if (!c.expect(f).length && !c.calls && got.text && c.event === "UserPromptSubmit")
           problems.push("a prompt naming nothing delivered");
+        if (!c.expect(f).length && c.command && (got.text || got.stopped))
+          problems.push("a command no record is about delivered");
       }
     }
     times.sort((a, b) => a - b);

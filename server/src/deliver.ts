@@ -599,9 +599,15 @@ async function commandsRun(db: Reads, projectId: number, command: string): Promi
     .where("u.kind", "=", "dead_end")
     .select(["u.id", "c.command"])
     .execute();
-  // The first word is a substring of any command that runs the anchor, and the test is far cheaper than splitting the command
+  // The first word is a substring of any command that runs the anchor, and the test is far cheaper than splitting the command, which
+  // is done once for every anchor that passes it
+  let words: string[][] | undefined;
+  const split = () => {
+    words ??= commandWords(command);
+    return words;
+  };
   const ids = rows
-    .filter((r) => command.includes(r.command.split(" ")[0] ?? "") && runsCommand(command, r.command))
+    .filter((r) => command.includes(r.command.split(" ")[0] ?? "") && holds(split(), r.command))
     .map((r) => r.id);
   return [...new Set(ids)].sort((a, b) => b - a);
 }
@@ -764,16 +770,23 @@ function commandsOf(line: string): string[][] {
  * (`echo pnpm test --watch`) does.
  */
 export function runsCommand(command: string, anchor: string): boolean {
+  return holds(commandWords(command), anchor);
+}
+
+/** A shell command's commands over all its lines, one list of words each (commandsOf) */
+function commandWords(command: string): string[][] {
+  return command.split(/\r\n|\n|\r/).flatMap(commandsOf);
+}
+
+/** Whether one of the commands holds the anchor's words, each whole and in a row */
+function holds(commands: string[][], anchor: string): boolean {
   const want = anchor.split(" ").filter(Boolean);
   if (!want.length) return false;
-  return command
-    .split(/\r\n|\n|\r/)
-    .flatMap(commandsOf)
-    .some((got) => {
-      for (let i = 0; i + want.length <= got.length; i++)
-        if (want.every((w, j) => got[i + j] === w)) return true;
-      return false;
-    });
+  return commands.some((got) => {
+    for (let i = 0; i + want.length <= got.length; i++)
+      if (want.every((w, j) => got[i + j] === w)) return true;
+    return false;
+  });
 }
 
 /**
