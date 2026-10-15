@@ -660,9 +660,12 @@ export async function checkRecord(
       problems.push(`${key}: commands go only on a dead end; left out`);
     else
       for (const [i, c] of u.commands.entries()) {
-        const command = c.trim().split(/\s+/).join(" ");
-        // Delivery splits a call's lines into commands, so a line break is checked before spaces are collapsed
-        const wrong = /[\r\n]/.test(c.trim()) ? "must be one line" : commandProblem(command);
+        // Every space delivery splits words on is collapsed except line breaks and other controls, which stay for the check to refuse
+        const command = c
+          .trim()
+          .split(/[^\S\n\v\f\r]+/)
+          .join(" ");
+        const wrong = commandProblem(command);
         if (wrong) problems.push(`${key}: command ${i + 1} ${wrong}; left out`);
         else if (commands.includes(command))
           problems.push(`${key}: command ${i + 1} appears twice; left out`);

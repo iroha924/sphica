@@ -187,7 +187,14 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
                 role: "states",
               },
             ],
-            commands: [" pnpm  test\t--watch ", "pnpm test --watch", "pnpm", "--watch pnpm"],
+            // Other spaces collapse too, since delivery splits a call's words on any of them
+            commands: [
+              " pnpm  test\t--watch ",
+              "pnpm test --watch",
+              "pnpm",
+              "--watch pnpm",
+              "pnpm\u3000test\u00a0--watch",
+            ],
           },
           {
             key: "quoted",
@@ -219,8 +226,14 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
                 role: "states",
               },
             ],
-            // A shell ends a command at a line break and at ; | & inside a word too, so an anchor holding either names two commands
-            commands: ["pnpm test\n--watch", "pnpm test\r--watch", "npm ci;pnpm test", "pnpm test|tail"],
+            // Controls other than tabs are refused, never collapsed, and a shell ends a command at ; | & even inside a word
+            commands: [
+              "pnpm test\n--watch",
+              "pnpm\vtest --watch",
+              "npm ci;pnpm test",
+              "pnpm test|tail",
+              "pnpm\ftest --x",
+            ],
           },
           {
             key: "not-dead-end",
@@ -244,13 +257,15 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
       /watch: command 2 appears twice; left out/,
       /watch: command 3 needs the program and at least one more word; left out/,
       /watch: command 4 must start with the program, not an option; left out/,
+      /watch: command 5 appears twice; left out/,
       /quoted: command 1 must not contain quotes; left out/,
       /quoted: command 2 holds text Sphica masks as a secret; left out/,
       /quoted: command 3 must not contain control or invisible characters; left out/,
       /quoted: command 4 must be one command, with no ; \| &; left out/,
       /quoted: command 5 must be one command, with no ; \| &; left out/,
-      /joined: command 1 must be one line; left out/,
-      /joined: command 2 must be one line; left out/,
+      /joined: command 1 must not contain control or invisible characters; left out/,
+      /joined: command 2 must not contain control or invisible characters; left out/,
+      /joined: command 5 must not contain control or invisible characters; left out/,
       /joined: command 3 must be one command, with no ; \| &; left out/,
       /joined: command 4 must be one command, with no ; \| &; left out/,
       /not-dead-end: commands go only on a dead end; left out/,

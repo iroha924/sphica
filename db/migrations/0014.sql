@@ -9,7 +9,7 @@ create table unit_command (
   unit_id integer not null references unit (id) on delete cascade,
   command text not null check (instr(cast(command as blob), x'00') = 0 and length(command) between 3 and 200 and command = trim(command)
     and command glob '* *'
-    and command not glob '*  *' and command not glob '-*' and command not glob '*[''"`]*'
+    and command not glob '*  *' and command not glob '-*' and command not glob '*[''"`]*' and command not glob '*[;|&]*'
     and command not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
   run_id integer not null references extraction_run (id),
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
