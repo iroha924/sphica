@@ -3707,6 +3707,48 @@ test("calls at the same time stop a conversation once, and a dead end that is no
   }
 });
 
+test("a dead end withdrawn while the call waits for the write lock is not in the stop", async (t) => {
+  const db = tempDb();
+  const repo = checkout();
+  t.after(async () => {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const p = project(db);
+  await deadEnds(db, p, 2);
+  const ready = path.join(repo, "holder-ready");
+  // The holder takes the write lock, says so, and withdraws the first dead end and commits 150 ms later, while the call waits on the
+  // lock it matched the dead ends before. The script is fixed text; the paths and the key come in as arguments
+  const holder = spawn(process.execPath, [
+    "-e",
+    'const {DatabaseSync}=require("node:sqlite");const fs=require("fs");const [file,ready,key]=process.argv.slice(1);const d=new DatabaseSync(file);d.exec("begin immediate");fs.writeFileSync(ready,"");setTimeout(()=>{d.prepare("insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, \'active\', \'withdrawn\', strftime(\'%Y-%m-%dT%H:%M:%fZ\'), \'withdrawn meanwhile\', (select run_id from unit_state where run_id is not null order by id desc limit 1) from unit where key = ?").run(key);d.exec("commit");d.close();},150);',
+    db.file,
+    ready,
+    "trace:ext-s1/npm-run-thumbs-worker-0",
+  ]);
+  const exited = new Promise((resolve) => holder.on("exit", resolve));
+  t.after(async () => {
+    holder.kill();
+    await exited;
+  });
+  const until = Date.now() + 10_000;
+  while (!fs.existsSync(ready)) {
+    assert.ok(Date.now() < until, "the holder never took the lock");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const r = await shellCall(db, repo, "c7", "npm run thumbs --worker");
+  await exited;
+  assert.equal(
+    db.owner.prepare("select lifecycle from unit where key = 'trace:ext-s1/npm-run-thumbs-worker-0'").get()
+      ?.lifecycle,
+    "withdrawn",
+  );
+  // A busy machine may miss the lock and answer with context instead: the withdrawn dead end must be in neither
+  const text = stopText(r) ?? String(r);
+  assert.match(text, /trace:ext-s1\/npm-run-thumbs-worker-1/, text);
+  assert.doesNotMatch(text, /npm-run-thumbs-worker-0/);
+});
+
 test("dead ends shown without a stop spend the read budget's characters as they were shown, never past it", async () => {
   const db = tempDb();
   const repo = checkout();

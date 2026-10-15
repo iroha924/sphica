@@ -120,6 +120,25 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `fix(deliver): split commands only at operators beside a space, never inside a word (T13)`
   - 結果: red を実測（fail 1、`pnpm;test --watch`）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 67 / fail 0。injection の受け入れ 34 件 pass
 
+- [x] T18: 止める前に、一致した dead_end がまだ配信できるかをロックの中で確かめ直す
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す止める配信が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="withdrawn while" test/deliver.test.ts` → ロックを待つ間に取り下げた dead_end が止める理由に出て落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → 取り下げた dead_end は止める理由に出ず、残った dead_end だけで止める
+  - コミット: `fix(deliver): match a shell call's dead ends again under the write lock before stopping it (T18)`
+  - 結果: red を実測（直す前のコードで 3 回とも fail、止める理由に取り下げた worker-0 が出た）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → pass 68 / fail 0、`bun run verify` → exit 0。review-shipping: 出荷で壊れるものなし。テストは 12 コアに 48 並列の負荷では直す前のコードでも 37/48 で通る（照合がロックの前に間に合わない）。負荷なしでは 3/3・16/16 で落ちる
+
+- [ ] T19: シェルの入力をコマンドの照合 1 回につき 1 度だけ語に分ける
+  - 種別: 修正
+  - 計画: S5, S8
+  - 依存: T13（直す照合が要る）
+  - 変更: `server/src/deliver.ts`, `server/evals/scale/run.ts`
+  - red: `node server/evals/scale/run.ts` → stress 10000 の「500 行のスクリプト」のケースの時間を、直す前のコードで測る
+  - 完了条件: `node server/evals/scale/run.ts` → 同じケースが直す前より速く、全ケースの problems が none
+  - コミット: `perf(deliver): split a shell call into words once for every command anchor (T19)`
+
 ## P3: 速さと効果を測る
 
 全件の照合の速さと、anchor の有無での効果を測る。

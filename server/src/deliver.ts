@@ -1301,15 +1301,16 @@ type Stop = { stop: string };
 
 /**
  * Before a shell call that runs a dead end's command: the paths it names and the dead ends it runs, planned and logged together under the
- * write lock, so the second sees what the first showed. The call is stopped only when that log was committed; otherwise both are answered
- * as context, with no word of a stop.
+ * write lock, so the second sees what the first showed. The dead ends are matched again there, as one withdrawn while the call waited for
+ * the lock must not stop it. The call is stopped only when that log was committed; otherwise both are answered as context, with no word of
+ * a stop.
  */
 async function beforeShell(
   file: string,
   e: Entry,
   db: Reads,
   rels: string[],
-  ran: number[],
+  shell: string,
   session: string,
   agent: string | null,
 ): Promise<string | Stop> {
@@ -1321,7 +1322,14 @@ async function beforeShell(
     await inTransaction(cap, async (trx) => {
       const path = await named();
       if (path?.text) await write(trx, e, path);
-      const run = await beforeCommand(db, ran, session, agent, path, true);
+      const run = await beforeCommand(
+        db,
+        await commandsRun(db, e.projectId, shell),
+        session,
+        agent,
+        path,
+        true,
+      );
       if (run.text) await write(trx, e, run);
       plans = [path, run];
     });
@@ -1334,7 +1342,9 @@ async function beforeShell(
   if (done?.[1].reason === STOPPED)
     return { stop: [done[1].text, done[0]?.text].filter(Boolean).join("\n\n") };
   const path = done ? done[0] : await named();
-  const run = done ? done[1] : await beforeCommand(db, ran, session, agent, path, false);
+  const run = done
+    ? done[1]
+    : await beforeCommand(db, await commandsRun(db, e.projectId, shell), session, agent, path, false);
   return [run.text, path?.text].filter(Boolean).join("\n\n");
 }
 
@@ -1657,8 +1667,8 @@ async function deliverOne(
     // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
     const keep = (p: Plan) => !(onPath && !p.text);
     // What a read shows depends on the log, and a session start's row marks where reads count from
-    if (ran.length)
-      return await beforeShell(file, entry, reader, rels, ran, sessionId(pid, host, session), who);
+    if (shell && ran.length)
+      return await beforeShell(file, entry, reader, rels, shell, sessionId(pid, host, session), who);
     if (event === "pre_read" || event === "session_start")
       return (await lockedPlan(file, entry, make, keep)).text;
     const plan = await make();
