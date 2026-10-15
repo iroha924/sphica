@@ -140,6 +140,16 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `perf(deliver): split a shell call into words once for every command anchor (T19)`
   - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain --no-delivery-view` → stress 10000 の 500 行のケースは中央値 228 ms（直す前）から 160 ms、全ケースの problems が none。`bun run verify` → exit 0。review-shipping: 照合の結果は前と同じ。指摘 1 件（何も無いはずのシェルのケースが配信を見ていない）を採り、配信や止めがあれば problems に出すようにした。500 行目を dead end のコマンドにすると「a command no record is about delivered」が出ることを確かめた
 
+- [x] T20: 取り下げのテストを、ロックを取れずに context に落ちた呼び出しで落ちないようにする
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T18（直すテストが要る）
+  - 変更: `server/test/deliver.test.ts`
+  - red: holder の commit を 400 ms 後にずらして `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="withdrawn while" test/deliver.test.ts` → ロックの待ちが切れた context の呼び出しに、まだ commit されていない worker-0 が出て落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="withdrawn while" test/deliver.test.ts` → holder の commit が 400 ms でも 150 ms でも pass し、止めたときは worker-0 が理由に出ない
+  - コミット: `test(deliver): check a withdrawn dead end only in a stop, made after the withdrawal commits (T20)`
+  - 結果: red を実測（commit を 400 ms にすると、ロックの待ちが切れた context に worker-0 が出て fail 1）。直した後 `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="withdrawn while" test/deliver.test.ts` → 400 ms で pass 1、150 ms で 3 回とも pass。Codex の再レビュー: 本番のコードの欠陥なし、このテストの指摘 1 件（P2）を採った
+
 ## P3: 速さと効果を測る
 
 全件の照合の速さと、anchor の有無での効果を測る。
