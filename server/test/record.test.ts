@@ -209,6 +209,20 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
             ],
           },
           {
+            key: "joined",
+            kind: "dead_end",
+            text: "テストを watch で流すと子プロセスが残って落ちる",
+            evidence: [
+              {
+                source: `s${m}`,
+                quote: "pnpm test --watch はテストの子プロセスが残って落ちた。",
+                role: "states",
+              },
+            ],
+            // A shell ends a command at a line break and at ; | & inside a word too, so an anchor holding either names two commands
+            commands: ["pnpm test\n--watch", "pnpm test\r--watch", "npm ci;pnpm test", "pnpm test|tail"],
+          },
+          {
             key: "not-dead-end",
             kind: "finding",
             text: "テストを watch で流すと子プロセスが残って落ちる",
@@ -233,8 +247,12 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
       /quoted: command 1 must not contain quotes; left out/,
       /quoted: command 2 holds text Sphica masks as a secret; left out/,
       /quoted: command 3 must not contain control or invisible characters; left out/,
-      /quoted: command 4 must be one command, with no ; \| & at a word's start or end; left out/,
-      /quoted: command 5 must be one command, with no ; \| & at a word's start or end; left out/,
+      /quoted: command 4 must be one command, with no ; \| &; left out/,
+      /quoted: command 5 must be one command, with no ; \| &; left out/,
+      /joined: command 1 must be one line; left out/,
+      /joined: command 2 must be one line; left out/,
+      /joined: command 3 must be one command, with no ; \| &; left out/,
+      /joined: command 4 must be one command, with no ; \| &; left out/,
       /not-dead-end: commands go only on a dead end; left out/,
     ])
       assert.match(said, why);

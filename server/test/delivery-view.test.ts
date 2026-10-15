@@ -145,6 +145,34 @@ test("ranks records by sessions, then deliveries, and names the events they came
   ]);
 });
 
+test("tells a shell call a dead end stopped, and one it was shown on without a stop, apart from other reads", async () => {
+  const db = fresh();
+  const p = project(db);
+  const s1 = session(db, p, "s1");
+  const dead = unit(db, p, "trace:s1/dead", "dead_end");
+  const read = unit(db, p, "trace:s1/read");
+  delivery(db, s1, { at: ago(3), reason: "command", units: [dead] });
+  delivery(db, s1, { at: ago(2), reason: "command_context", units: [dead] });
+  delivery(db, s1, { at: ago(1), path: "src/a.ts", units: [read] });
+
+  const out = await deliveryOverview(db.reader, p, 7, NOW);
+  const table = out.split("\n").filter((l) => l.startsWith("| pre_read"));
+  assert.deepEqual(table, [
+    "| pre_read (command, not stopped) | emitted | 1 | 0 | 0 | 0 | 0 |",
+    "| pre_read (command, stopped) | emitted | 1 | 0 | 0 | 0 | 0 |",
+    "| pre_read | emitted | 1 | 0 | 0 | 0 | 0 |",
+  ]);
+  assert.ok(
+    out.includes(
+      `- trace:s1/dead (u${dead}, dead_end, candidate now): 1 session, 2 deliveries, via pre_read (command, not stopped), pre_read (command, stopped);`,
+    ),
+    out,
+  );
+  assert.ok(out.includes(`- ${ago(3)} pre_read (command, stopped), main: trace:s1/dead (u${dead})`), out);
+  assert.ok(out.includes(`- ${ago(2)} pre_read (command, not stopped), main: trace:s1/dead (u${dead})`), out);
+  assert.ok(out.includes(`- ${ago(1)} pre_read, main src/a.ts: trace:s1/read (u${read})`), out);
+});
+
 test("shows the most recent sessions with each delivery's time, event, agent, path, and keys", async () => {
   const db = fresh();
   const p = project(db);

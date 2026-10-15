@@ -34,6 +34,14 @@ const WHO: Who[] = ["main", "subagent", "subagent, id unknown"];
 const who = (named: boolean, event: string, reason: string | null): Who =>
   named ? "subagent" : event === "session_start" && reason === "subagent" ? "subagent, id unknown" : "main";
 
+/** An event as the view names it: a shell call a dead end's command stopped, or showed the dead end on without a stop, apart from reads */
+const eventName = (event: string, reason: string | null) =>
+  reason === "command"
+    ? `${event} (command, stopped)`
+    : reason === "command_context"
+      ? `${event} (command, not stopped)`
+      : event;
+
 export const DELIVERY_LIMITS_TEXT = [
   "Counted are the logged delivery rows only: since 0.6.16 a read or edit that showed nothing is not logged (older rows show it as nothing), and a delivery answered while the write lock was busy, or whose log write failed, is not either.",
   "A session's rows are dropped once its last delivery is older than 90 days, so a long period is not a rolling window.",
@@ -160,9 +168,8 @@ export async function deliveryOverview(
           "in",
           top.map((t) => t.id),
         )
-        .select(["du.unit_id", "d.event"])
+        .select(["du.unit_id", "d.event", "d.reason"])
         .distinct()
-        .orderBy("d.event")
         .execute()
     : [];
   const shown = await Promise.all(
@@ -271,7 +278,11 @@ export async function deliveryOverview(
   };
 
   const events = new Map<number, string[]>();
-  for (const v of via) events.set(v.unit_id, [...(events.get(v.unit_id) ?? []), v.event]);
+  for (const v of via) {
+    const name = eventName(v.event, v.reason);
+    const seen = events.get(v.unit_id) ?? [];
+    if (!seen.includes(name)) events.set(v.unit_id, [...seen, name].sort());
+  }
   const topLines: string[] = [];
   for (const t of top) {
     const line = `- ${head(inline(t.key), DELIVERY_LIMITS.key)} (u${t.id}, ${t.kind}, ${t.lifecycle} now): ${t.sessions} session${Number(t.sessions) === 1 ? "" : "s"}, ${t.deliveries} deliver${Number(t.deliveries) === 1 ? "y" : "ies"}, via ${(events.get(t.id) ?? []).join(", ")}; named later in ${namedIn.get(t.id) ?? 0} of those sessions`;
@@ -340,7 +351,7 @@ function countTable(
 ): string[] {
   const rows = new Map<string, { by: Map<Who, number>; keyless: number; left: number }>();
   for (const g of groups) {
-    const id = `${g.event}\0${g.outcome}`;
+    const id = `${eventName(g.event, g.reason)}\0${g.outcome}`;
     const row = rows.get(id) ?? { by: new Map(), keyless: 0, left: 0 };
     const w = who(Boolean(Number(g.named)), g.event, g.reason);
     const n = Number(g.n);
@@ -378,5 +389,5 @@ function deliveryLine(
     )
     .join(", ");
   const more = units.length > DELIVERY_LIMITS.keys ? ` (+${units.length - DELIVERY_LIMITS.keys} more)` : "";
-  return `- ${d.at} ${d.event}, ${w}${agent}${d.path ? ` ${head(inline(d.path), DELIVERY_LIMITS.path)}` : ""}: ${named}${more}`;
+  return `- ${d.at} ${eventName(d.event, d.reason)}, ${w}${agent}${d.path ? ` ${head(inline(d.path), DELIVERY_LIMITS.path)}` : ""}: ${named}${more}`;
 }
