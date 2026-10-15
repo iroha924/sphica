@@ -4,8 +4,6 @@
 // Pieces of building a slot that the builder and the local runner share, kept apart from build.ts so tests can reach them.
 import fs from "node:fs";
 import path from "node:path";
-import { sql } from "kysely";
-import { inTransaction } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 
@@ -79,40 +77,4 @@ export function fixtureSteps(plan: FixturePlan, swapped: boolean): Step[] {
   }
   if (swapped) steps.push(...plan.swapped.steps);
   return steps;
-}
-
-/**
- * Takes every command anchor out of a fixture copy, leaving the rest as it was: the other arm of the command-anchor comparison reads the
- * same records, dates, and revisions. The guard that keeps anchors while their record lives is lifted for the delete and put back as it
- * was, and the units it touched are indexed again. Returns how many units lost their commands.
- */
-export async function stripCommands(file: string): Promise<number> {
-  const db = openWriter("owner", file);
-  try {
-    return await inTransaction(db, async (trx) => {
-      const ids = (await trx.selectFrom("unit_command").select("unit_id").distinct().execute()).map(
-        (r) => r.unit_id,
-      );
-      const guard = (
-        await sql<{
-          sql: string;
-        }>`select sql from sqlite_schema where type = 'trigger' and name = 'unit_command_no_delete'`.execute(
-          trx,
-        )
-      ).rows[0]?.sql;
-      if (!guard) throw new Error("the fixture has no unit_command_no_delete trigger");
-      await sql`drop trigger unit_command_no_delete`.execute(trx);
-      await trx.deleteFrom("unit_command").execute();
-      await sql.raw(guard).execute(trx);
-      for (const id of ids) {
-        await sql`delete from unit_fts where rowid = ${id}`.execute(trx);
-        await sql`insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text where id = ${id}`.execute(
-          trx,
-        );
-      }
-      return ids.length;
-    });
-  } finally {
-    await db.destroy();
-  }
 }

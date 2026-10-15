@@ -170,13 +170,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
   - コミット: `test(eval): build the arm without command anchors from a copy of the other arm's fixture (T16)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → pass 4 / fail 0
 
-- [ ] T17: 役目の無くなった eval の課題と、anchor なしの側を作る仕組みを取り除く
+- [x] T17: 役目の無くなった eval の課題と、anchor なしの側を作る仕組みを取り除く
   - 種別: 削除
   - 計画: S9
   - 依存: T16（取り除く stripCommands が要る）
   - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`, `server/test/eval-fixture.test.ts`
   - 完了条件: `bun run verify` → 0 で終わり、`rg -n "dead-end-typecheck|s-en-typecheck|trace_en_typecheck|no-commands|stripCommands" server` → 何も出ない
   - コミット: `test(eval): remove the dead-end task that cannot measure command stops on a machine with tsc (T17)`
+  - 結果: `bun run verify` → exit 0（acceptance pass 148 / fail 0）。`rg -n "dead-end-typecheck|s-en-typecheck|trace_en_typecheck|no-commands|stripCommands" server` → 何も出ない（exit 1）
 
 ## P4: 両ホストで確かめて出す準備
 

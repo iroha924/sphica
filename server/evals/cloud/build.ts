@@ -5,8 +5,6 @@
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
 // Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]
 //      [--dist <dir with mcp.js and deliver.js>] [--fixture <fixture.db>]  (old and new builds of one comparison share the fixture)
-//      [--no-commands]  (the fixture with dead ends' command anchors taken out: give the other arm's fixture with --fixture so the two
-//      differ only in those rows)
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -20,7 +18,7 @@ import { CONFIRM_GOLD, leadFor, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher, stripCommands } from "./build-lib.ts";
+import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher } from "./build-lib.ts";
 import { evalCache, holdingLock, requireInside } from "./codex-home.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
@@ -42,7 +40,6 @@ const { values: args } = parseArgs({
     dist: { type: "string" },
     // A fixture database to use as is instead of building one, so both sides of a comparison read the same records and dates
     fixture: { type: "string" },
-    "no-commands": { type: "boolean", default: false },
   },
 });
 const dist = path.resolve(args.dist ?? path.join(ROOT, "plugin", "dist"));
@@ -51,8 +48,7 @@ if (variant !== "original" && variant !== "swapped") throw new Error("--variant 
 const runs = Number(args.runs);
 if (!Number.isInteger(runs) || runs < 1)
   throw new Error("--runs takes a whole number of Claude runs per task and condition");
-const commands = !args["no-commands"];
-const buildId = `${args.project}-${variant}${commands ? "" : "-nocommands"}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
+const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
 const out = path.resolve(args.out ?? path.join(evalCache(), "builds", buildId));
 // The build holds the gold, the tasks, and the slots' records long after the lock is released: only the cache is denied to every fenced Codex
 requireInside(evalCache(), out, "--out");
@@ -239,13 +235,9 @@ async function main(leave: (tree: string) => void) {
   if (args.fixture) fs.copyFileSync(path.resolve(args.fixture), base);
   else if (args.project === "tsundoku") await fixture(base, leave);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
-  // A dead end with no command anchor stops no call; everything else in the copy stays as the other arm has it
-  if (!commands && !(await stripCommands(base)))
-    throw new Error("--no-commands: the fixture holds no command anchor to take out");
   const manifest: Record<string, unknown> = {
     build: buildId,
     variant,
-    commands,
     built: new Date().toISOString(),
     commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     bundle: Object.fromEntries(
