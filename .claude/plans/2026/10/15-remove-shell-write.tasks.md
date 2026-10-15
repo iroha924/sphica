@@ -67,7 +67,19 @@ base: main
   - コミット: `test(eval): record the shell_write_delivery trial and its decision`
   - 結果: `node -p "const t=require('./server/evals/post-write/shell-write-trial.json');[t.population.size,t.sample.length,t.result.noise,t.result.conversations,t.result.p90,t.verdict]"` → `[ 53, 40, 37, 47, 4, 'not adopted' ]`。`grep -c -E "python3|sed -i|<<'EOF'|perl -"` → 0（コマンドの文面なし）。`bun run lint` → 通る（pinned Biome で整形した後）
 
+- [x] T05: ROADMAP.md から #219 の試用の項目を外す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（同じく試用の記述を外す文書の直し）
+  - 変更: `ROADMAP.md`
+  - red: `git grep -n "#219" -- ROADMAP.md` → 11 行目に「off by default, and stays or goes by how the trial measures」が出る
+  - 完了条件: `git grep -n -i -E "#219|delivery after shell" -- ROADMAP.md` → 何も出ない
+  - コミット: `docs: drop the decided shell delivery trial from the roadmap`
+  - 結果: `git grep -n "#219" -- ROADMAP.md` → 直す前は 11 行目が出た（red）。直した後 `git grep -n -i -E "#219|delivery after shell" -- ROADMAP.md` → 0 件
+
 ## 記録
 - 2026-10-15 / T03 / review-shipping（T01 の前）が、README.md・README.ja.md の 128 行目（Codex の後の配信）と ARCHITECTURE.md:14（deliver.js が shell の前後で動く）も古くなると指摘した。完了条件の検索はこの 3 行に当たらなかった / T03 の完了条件の検索語を、前の値 `shell_write|SHELL_WRITE|shell-state` から `shell_write|SHELL_WRITE|shell-state|after a shell command|before and after a shell|シェルのコマンドの直後` に変えた（変更欄のファイルは同じ）
 - 2026-10-15 / T01 のレビュー / Codex（369825d0）は指摘 0 件。見ていないのは verify と Windows で、verify は手元で exit 0、Windows は CI で確かめる / 対応なし
 - 2026-10-15 / T02 のレビュー / Codex（79c764e2）は指摘 0 件。見ていない verify・全テスト・退行テストの red は手元で確かめた / 対応なし
+
+- 2026-10-15 / 全差分のレビュー / Codex（a5e18a57..78a972f3）の F1（P3）: ROADMAP.md:11 が試用を判断待ちと書いたまま。README からリンクされている / 受け入れて T05 を足した
