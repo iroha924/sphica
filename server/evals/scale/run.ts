@@ -12,7 +12,6 @@ import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { inTransaction } from "../../src/db.ts";
-import { deliverablePaths } from "../../src/deliver.ts";
 import { deliveryOverview } from "../../src/delivery-view.ts";
 import { checkRecord, saveRecord, type Target } from "../../src/record.ts";
 import { READ_BUDGET } from "../../src/reply-budget.ts";
@@ -486,134 +485,6 @@ async function measure(f: Fixture, timeouts: Record<string, number>): Promise<Ro
   return rows;
 }
 
-const SHELL_ON = { SPHICA_SHELL_WRITE_DELIVERY: "on" };
-/** Bytes of every anchored file the shell cases give real content: about a source file's size */
-const FILE_BYTES = 4096;
-
-/**
- * A shell call around a command that names no file, timed at Pre and Post: with a cold cache (every watched file hashed, reported with
- * its bytes), with a warm one (the 1-second bar at 10,000 records), and with every watched file changed by the call.
- */
-async function shellRows(f: Fixture, timeouts: Record<string, number>): Promise<Row[]> {
-  const paths = await deliverablePaths(f.db.reader, f.projectId);
-  for (const rel of paths) {
-    fs.mkdirSync(path.join(f.repo, path.dirname(rel)), { recursive: true });
-    fs.writeFileSync(path.join(f.repo, rel), `// ${rel}\n`.padEnd(FILE_BYTES, "x"));
-  }
-  const last = `src/mod${f.units - 1}/a.ts`;
-  const cache = path.join(home, ".sphica", "shell-state", "cache");
-  const trial = path.join(home, ".sphica", "shell-state", "trial.jsonl");
-  const lineOf = (id: string) =>
-    (fs.existsSync(trial) ? fs.readFileSync(trial, "utf8").split("\n").filter(Boolean) : [])
-      .map(
-        (l) =>
-          JSON.parse(l) as {
-            call?: string;
-            changed?: string[];
-            unknown?: string[];
-            delivered?: string[];
-            error?: string;
-          },
-      )
-      .find((l) => l.call === id);
-  const limitPre = timeouts.PreToolUse ?? 5000;
-  const limitPost = timeouts.PostToolUse ?? 5000;
-  let n = 0;
-  const once = async (write: () => void) => {
-    // Unique across fixtures: they share one home and so one trial log
-    const id = `toolu_scale_${f.name.replace(/\W/g, "_")}_${++n}`;
-    const base = {
-      session_id: `${f.name}-shell-${n}`.replace(/[^\w-]/g, "_"),
-      cwd: f.repo,
-      tool_name: "Bash",
-      tool_input: { command: "node tools/gen.mjs" },
-      tool_use_id: id,
-    };
-    const pre = await call({ ...base, hook_event_name: "PreToolUse" }, f, limitPre, SHELL_ON);
-    write();
-    const post = await call({ ...base, hook_event_name: "PostToolUse" }, f, limitPost, SHELL_ON);
-    return { pre, post, line: lineOf(id) };
-  };
-  const problemsOf = (r: Awaited<ReturnType<typeof once>>, expect: string | null) => {
-    const out: string[] = [];
-    for (const c of [r.pre, r.post]) if (c.problem) out.push(c.problem);
-    if (r.pre.text) out.push("Pre delivered for a command that names no file");
-    if (!r.line) out.push("no trial line");
-    if (r.line?.error) out.push(`Post failed: ${r.line.error}`);
-    if (expect && !r.post.text.includes(expect)) out.push(`missing ${expect}`);
-    return out;
-  };
-  const touch = (rel: string) => () => fs.appendFileSync(path.join(f.repo, rel), "y");
-  const rows: Row[] = [];
-  const row = (name: string, pre: number[], post: number[], problems: string[]) => {
-    for (const [what, times] of [
-      ["Pre", pre],
-      ["Post", post],
-    ] as const) {
-      const sorted = [...times].sort((a, b) => a - b);
-      rows.push({
-        fixture: f.name,
-        case: `shell call ${what}, ${name}`,
-        median: Math.round(sorted[Math.floor(sorted.length / 2)] ?? 0),
-        max: Math.round(sorted.at(-1) ?? 0),
-        problems: [...new Set(problems)],
-      });
-    }
-  };
-
-  fs.rmSync(cache, { recursive: true, force: true });
-  // What Pre hashed is what its cache holds once it returns: files past the deadline are left out
-  let hashed = 0;
-  const cold = await once(() => {
-    for (const n of fs.existsSync(cache) ? fs.readdirSync(cache) : [])
-      hashed += Object.keys(JSON.parse(fs.readFileSync(path.join(cache, n), "utf8"))).length;
-    touch(last)();
-  });
-  const mb = (n: number) => ((n * FILE_BYTES) / 1024 / 1024).toFixed(0);
-  const lastUnknown = cold.line?.unknown?.includes(last) ?? false;
-  row(
-    `cold cache, ${hashed} of ${paths.length} files hashed at Pre (${mb(hashed)} of ${mb(paths.length)} MB), unknown ${cold.line?.unknown?.length ?? "?"}`,
-    [cold.pre.ms],
-    [cold.post.ms],
-    // Only a changed file left unknown by the deadline may go without its record; the hook must still answer in time
-    problemsOf(cold, lastUnknown ? null : (f.keys.last ?? "")),
-  );
-
-  const warm = { pre: [] as number[], post: [] as number[], problems: [] as string[] };
-  for (let r = 0; r < RUNS; r++) {
-    const got = await once(touch(last));
-    warm.pre.push(got.pre.ms);
-    warm.post.push(got.post.ms);
-    warm.problems.push(...problemsOf(got, f.keys.last ?? ""));
-    if (f.units === 10_000)
-      for (const [what, c] of [
-        ["Pre", got.pre],
-        ["Post", got.post],
-      ] as const)
-        if (c.ms > BAR_MS) warm.problems.push(`${what} over the ${BAR_MS} ms bar`);
-  }
-  row("warm cache, one file changed", warm.pre, warm.post, warm.problems);
-
-  const all = await once(() => {
-    for (const rel of paths) fs.appendFileSync(path.join(f.repo, rel), "z");
-  });
-  const told = (all.line?.changed?.length ?? 0) + (all.line?.unknown?.length ?? 0);
-  row(
-    `every watched file changed (${all.line?.changed?.length ?? "?"} changed, ${all.line?.unknown?.length ?? "?"} unknown)`,
-    [all.pre.ms],
-    [all.post.ms],
-    [
-      ...problemsOf(all, null),
-      ...(told === paths.length ? [] : [`${told} of ${paths.length} paths told`]),
-      // Records sit on every changed file, so a Post that compared but brought none failed after the comparison
-      ...((all.line?.changed?.length ?? 0) && !all.line?.delivered?.length
-        ? ["no record brought for the changed files"]
-        : []),
-    ],
-  );
-  return rows;
-}
-
 type Drain = { queued: number; ms: number; sent: number; left: number; rows: number; listings: number };
 
 /** Capture's send of a queue of k messages left by an outage, in this process with its own SPHICA_HOME */
@@ -845,7 +716,6 @@ for (const [name, n, kind] of fixtures) {
   const f = await build(name, n, kind);
   try {
     rows.push(...(await measure(f, timeouts)));
-    rows.push(...(await shellRows(f, timeouts)));
   } finally {
     await f.db.done();
     fs.rmSync(f.repo, { recursive: true, force: true });

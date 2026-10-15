@@ -8,7 +8,6 @@ What Sphica intends to do, and not do, over the next twelve months. It is a dire
 
 - Keep saved records right: checks that catch a record whose code location, evidence, or state has gone stale ([#209](https://github.com/iroha924/sphica/issues/209)).
 - Show records better: how delivered records are presented, ordered, and attributed ([#206](https://github.com/iroha924/sphica/issues/206)), and showing them again after a subagent compacts ([#244](https://github.com/iroha924/sphica/issues/244)).
-- Decide on delivery after shell commands: it is an option that is off by default, and stays or goes by how the trial measures ([#219](https://github.com/iroha924/sphica/issues/219)).
 - Find the record a reworded request conflicts with ([#260](https://github.com/iroha924/sphica/issues/260)).
 - Move the MCP servers to version 2 of the SDK once it is ready upstream ([#279](https://github.com/iroha924/sphica/issues/279)).
 

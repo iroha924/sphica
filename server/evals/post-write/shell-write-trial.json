@@ -1,0 +1,709 @@
+{
+  "note": "shell_write_delivery trial for #219, measured 2026-10-15 from the owner's trial log and Claude Code transcripts, read only. Labels by Claude and Codex independently; a disagreement is unknown, which the bar counts as noise. The verdict follows the bar fixed before the trial: noise (unknown included) at most 1/3 of the sample, and at most 10 post-shell injections per conversation at the 90th percentile.",
+  "window": {
+    "start": "2026-10-12T04:11:00.000Z",
+    "first_log_row": "2026-10-12T04:11:33.810Z",
+    "cut": "2026-10-15T07:04:29.000Z",
+    "cut_reason": "0.6.59 shipped deliveries before shell calls (command anchors); counts after its install would mix them in"
+  },
+  "inputs": {
+    "trial_log": {
+      "file": "~/.sphica/shell-state/trial.jsonl",
+      "sha256": "ac1f1681ae6182a7f7f820a9730cbfeffa8230dba2ba4dc0d6b9ac8f2f2d1198",
+      "rows_in_window": 3111,
+      "events": {
+        "post_shell": 2976,
+        "snapshot_missing": 135
+      },
+      "rows_without_session": 0
+    },
+    "transcripts": [
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/20394fc9-a502-41e0-9768-719e31a6d1df.jsonl",
+        "sha256": "2459a6ed0354ea28759748d51788121f5ed82ba3b534b524e0464d3d84401c99"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/20394fc9-a502-41e0-9768-719e31a6d1df/subagents/agent-aec2f8ed478ce8185.jsonl",
+        "sha256": "4383cf9a809317e6d43b34cce7ee182b2559137e7029e50ae0447d9f7a3596cf"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/4a0aae45-19e3-4c6f-ba3f-c848c69fe97d.jsonl",
+        "sha256": "d3baafa3bdaf95f8d6e1281d84bb632568e0289458fe0ea1d080242622d462b8"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/4a0aae45-19e3-4c6f-ba3f-c848c69fe97d/subagents/agent-a6f91f287a617f910.jsonl",
+        "sha256": "f067a08c19bf9afe525ddb9ca6b48a72f03cd8cbf8fceec2b118b1464f4aefbd"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/4a0aae45-19e3-4c6f-ba3f-c848c69fe97d/subagents/agent-a7262abd54675ffc6.jsonl",
+        "sha256": "94c6997362b3255eb9083a4bd5383580110f2941399e914f75172f4229ad55de"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/9df4eb61-d4cb-4bc1-92dc-c6a2b96bee83.jsonl",
+        "sha256": "622d26ae64d6d45ecbdbd5a48733bf121fda77f27b0a992d56f6286968743118"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/b0a5e96c-75bb-4261-b2e6-9cd864b1db9b.jsonl",
+        "sha256": "b3737d99de87f970b344e650e88f19d3485d23bf403cc80a4896ececed91bbf5"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/c275d21c-803b-4066-aaf3-9f29b72f2fbd.jsonl",
+        "sha256": "cc163c9c47d0511e5d8e10e46629e4b88bec9931018d09984d09ddb8f31af332"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/d77d025c-bb0c-4bde-98ce-83bcafd8d024.jsonl",
+        "sha256": "68a37e7e6572d3fa9b41f25403c0d1946e46241a206b7e2a8ac1165db68031d4"
+      },
+      {
+        "file": "~/.claude/projects/-Users-shunichi-Projects-sphica/ddaa270f-07bd-4d5a-85d0-43e9e78db0f9.jsonl",
+        "sha256": "f6e20d9c86c93b6201c0eb2b4dd8ae1b44a14b54f09689a97a8bef9b12787714"
+      }
+    ]
+  },
+  "population": {
+    "definition": "PostToolUse hook attachments in Claude Code transcripts whose additionalContext carries the fixed post-shell lead ('files whose content changed between before and after this call'), one per tool_use_id",
+    "size": 53,
+    "reconciled_with": "trial-log rows with event post_shell and a non-empty delivered list, both ways by host:tool_use_id",
+    "log_rows_with_deliveries": 53,
+    "only_in_transcripts": 0,
+    "only_in_log": 0,
+    "post_shell_rows_delivering_nothing": 2923,
+    "hosts": {
+      "claude-code": 53,
+      "codex": 0
+    },
+    "codex_note": "the trial log has no Codex rows, so Codex is not checked"
+  },
+  "sampling": {
+    "method": "population ordered by time then tool_use_id, shuffled with mulberry32, first 40",
+    "seed": 20261015,
+    "size": 40
+  },
+  "labels": {
+    "useful": "the call wrote content the agent composed into the file, and every record in the injection relates to that file's change",
+    "noise": "anything else: git, a formatter, metadata, another process's change, or any record unrelated to the change",
+    "unknown": "mixed or undecided, or the two labellers disagree; counted as noise"
+  },
+  "sample": [
+    {
+      "n": 1,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_01GVEmcATYfcNcpdD8qzbqiE",
+      "at": "2026-10-13T00:46:34.511Z",
+      "changed": [".claude-plugin/marketplace.json", "plugin/.claude-plugin/plugin.json"],
+      "delivered": ["trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump"],
+      "claude": "useful",
+      "codex": "useful",
+      "settled": "useful"
+    },
+    {
+      "n": 2,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_01WzHe1PZstg3FDH2M47B4oq",
+      "at": "2026-10-12T12:22:07.757Z",
+      "changed": ["server/src/deliver.ts"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/confirm-before-override",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/compact-clear-window",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/lock-then-plan",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/owner-held-by-owner-only"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 3,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_01XV74xbvrVvZzBkJuPDBah1",
+      "at": "2026-10-13T00:45:25.405Z",
+      "changed": ["server/src/deliver.ts", "server/test/deliver.test.ts"],
+      "delivered": [
+        "trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/fix-concurrent-budget-tests",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/owner-held-by-owner-only",
+        "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/h2-userconfig-plan",
+        "trace:77f97b60-5970-412b-a043-1b4ac23ea65a/m1-plan",
+        "trace:8c8dba6b-9f75-4ccb-b27f-661f99549b19/post-shell-ask-keep-or-undo"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 4,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_019UHHeEkXAwsfcbBZLyF61K",
+      "at": "2026-10-14T14:00:43.544Z",
+      "changed": ["server/src/db-write.ts"],
+      "delivered": ["trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/ingest-no-owner-identity"],
+      "claude": "useful",
+      "codex": "noise",
+      "settled": "unknown"
+    },
+    {
+      "n": 5,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_01P6hgP7L54Tc8eGGZCoh995",
+      "at": "2026-10-13T03:53:06.259Z",
+      "changed": ["server/src/mcp-record.ts", "server/src/review-bridge.ts"],
+      "delivered": [
+        "trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/search-fixes-plan",
+        "trace:9f76d32d-a125-4979-bab4-c153c3f1d780/record-server-meta-first"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 6,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01Qyg972tAi1XrGxRP7aJuN9",
+      "at": "2026-10-14T14:00:15.673Z",
+      "changed": ["db/schema.sql"],
+      "delivered": [
+        "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/custom-fields-plan",
+        "trace:bc419495-37de-4ca8-90f6-7914ad52c991/declined-edge-findings",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/per-agent-delivery-count",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/prune-view-no-cascade",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/decline-huge-session-prune"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 7,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01RLiKXuh6AtSVKEaCezxJLz",
+      "at": "2026-10-13T10:31:23.579Z",
+      "changed": ["server/evals/cloud/collect.ts", "server/evals/cloud/report.ts"],
+      "delivered": ["trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/measure-variance-now"],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 8,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01J5q5u1dNzEJJKiRtPGYCpm",
+      "at": "2026-10-15T05:43:27.366Z",
+      "changed": ["server/src/read.ts", "server/src/record.ts"],
+      "delivered": [
+        "trace:71af7849-6d0f-4c6e-8f8e-f3373c573739/f5-plan",
+        "trace:71af7849-6d0f-4c6e-8f8e-f3373c573739/decline-csi-partial"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 9,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01CYnE8jAyLdbFbn8qGMBYpN",
+      "at": "2026-10-13T09:18:32.006Z",
+      "changed": ["server/src/mcp.ts", "server/src/search.ts"],
+      "delivered": ["trace:2b12445e-90b6-46e0-9382-7efc7bd9b9e0/read-workspace-order"],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 10,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01AerWP7fgy8u8UWhQc4F5jn",
+      "at": "2026-10-15T00:44:44.943Z",
+      "changed": ["server/src/deliver.ts", "server/test/deliver.test.ts"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/claude-bash-delivery",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/confirm-before-override",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/per-agent-delivery-count",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/compact-clear-window"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 11,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_011x6hmyzPYmxzf8kEw2nco5",
+      "at": "2026-10-12T12:21:57.341Z",
+      "changed": ["server/src/capture.ts", "server/src/deliver.ts"],
+      "delivered": [
+        "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/resend-observation-calls",
+        "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/calls-failure-rule",
+        "trace:77f97b60-5970-412b-a043-1b4ac23ea65a/m1-plan",
+        "trace:8c8dba6b-9f75-4ccb-b27f-661f99549b19/post-shell-ask-keep-or-undo",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/close-244"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 12,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_01Wv8dEQxPVVjo49AAX2gdbw",
+      "at": "2026-10-12T13:13:26.176Z",
+      "changed": ["README.ja.md", "README.md"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/readme-current-only",
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/bundle-readme-into-f6",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/readme-friendly-contributing",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/install-steps-stay"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 13,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_019CcsnHy75BBDYtfLXMQrRF",
+      "at": "2026-10-15T03:17:25.359Z",
+      "changed": ["README.ja.md", "README.md"],
+      "delivered": [
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/bundle-readme-into-f6",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/readme-friendly-contributing",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/install-steps-stay",
+        "trace:c275d21c-803b-4066-aaf3-9f29b72f2fbd/readme-header-centered",
+        "trace:c275d21c-803b-4066-aaf3-9f29b72f2fbd/readme-trim-scope"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 14,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_015hwKrTHirPEGusTWM64jQn",
+      "at": "2026-10-14T14:01:37.299Z",
+      "changed": [".claude-plugin/marketplace.json", "plugin/.claude-plugin/plugin.json"],
+      "delivered": ["trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump"],
+      "claude": "useful",
+      "codex": "useful",
+      "settled": "useful"
+    },
+    {
+      "n": 15,
+      "session": "c275d21c-803b-4066-aaf3-9f29b72f2fbd",
+      "tool_use_id": "toolu_01JVUNWA2b46LxMTCNkUmSxZ",
+      "at": "2026-10-13T15:17:06.814Z",
+      "changed": ["CLAUDE.md", "CONTRIBUTING.md"],
+      "delivered": [
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/fork-prs-owner-merges",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/no-dco-signoff",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/plans-claude-md-line"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 16,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01KezzL76GgZtjJHbvCT3NLC",
+      "at": "2026-10-15T05:00:11.043Z",
+      "changed": ["db/schema.sql", "server/src/record.ts"],
+      "delivered": [
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/per-agent-delivery-count",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/delivery-retention-90d",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/prune-view-no-cascade",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/decline-huge-session-prune",
+        "trace:88e10cd3-817e-41df-a3f4-d53a44e7b83d/e1-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 17,
+      "session": "d77d025c-bb0c-4bde-98ce-83bcafd8d024",
+      "tool_use_id": "toolu_01FSAkuQqZAYjG3abJUaaCYM",
+      "at": "2026-10-14T07:26:26.364Z",
+      "changed": [
+        ".claude-plugin/marketplace.json",
+        "plugin/.claude-plugin/plugin.json",
+        "server/src/cli.ts",
+        "server/src/forget.ts"
+      ],
+      "delivered": [
+        "trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/bind-owner-in-init",
+        "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump",
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/doctor-no-projects-lookup",
+        "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/h2-userconfig-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 18,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01KTet1qm2TrppjrGhgG4WH6",
+      "at": "2026-10-14T14:11:21.932Z",
+      "changed": ["server/src/record.ts"],
+      "delivered": [
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/quoted-words-never-adopt",
+        "trace:efe4aac4-ff36-407f-9656-54b38c0220c8/commit-not-maintainer-evidence",
+        "trace:fddc1eb4-e29e-4fc4-8b2a-6a2886f0c0ec/held-refusal-after-judge",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/record-upkeep-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 19,
+      "session": "9df4eb61-d4cb-4bc1-92dc-c6a2b96bee83",
+      "tool_use_id": "toolu_01G1tKFJGvcEp8ZBpjgzcbGf",
+      "at": "2026-10-14T00:16:18.071Z",
+      "changed": [".claude-plugin/marketplace.json", "plugin/.claude-plugin/plugin.json"],
+      "delivered": [
+        "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump",
+        "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/h2-userconfig-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 20,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01AU6Z4zqBdP5Eme3sZ5KoWi",
+      "at": "2026-10-13T10:29:29.393Z",
+      "changed": ["README.ja.md", "README.md"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/readme-current-only",
+        "trace:dea5e6cc-0ebb-495f-94a3-21511a3772e2/claude-code-min-2-1-139",
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/bundle-readme-into-f6",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/readme-friendly-contributing",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/install-steps-stay"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 21,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_01ETxeF7DEpu14PHRbzXTT9v",
+      "at": "2026-10-13T01:07:43.320Z",
+      "changed": ["server/src/capture.ts", "server/src/deliver.ts"],
+      "delivered": [
+        "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/sdk-entrypoint-not-owner",
+        "trace:9f76d32d-a125-4979-bab4-c153c3f1d780/turn-start-per-file",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/claude-turn-hook",
+        "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/resend-observation-calls",
+        "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/calls-failure-rule"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 22,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_0145o1nFrpZnwsEQkoi59wUC",
+      "at": "2026-10-13T10:13:15.752Z",
+      "changed": ["server/src/mcp.ts", "server/src/search.ts"],
+      "delivered": [
+        "trace:94acb49d-9824-47b0-b4e1-9f77420f4af6/asked-session-arg",
+        "trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/search-fixes-plan",
+        "trace:08a87497-a499-4bc8-adcd-828de621cbfa/tie-breaks-rejected",
+        "trace:2b12445e-90b6-46e0-9382-7efc7bd9b9e0/read-workspace-order",
+        "trace:2b12445e-90b6-46e0-9382-7efc7bd9b9e0/read-instructions-512"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 23,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01AtxDf5utyvg1AuNJCDwnu9",
+      "at": "2026-10-14T14:33:33.235Z",
+      "changed": ["server/src/deliver.ts"],
+      "delivered": [
+        "trace:1506deee-17f8-407f-bf41-ec2f985cb891/revive-rejected-option",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/claude-bash-delivery",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/confirm-before-override",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/compact-clear-window"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 24,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01HrX12stDGnxR3TfUnYQfHB",
+      "at": "2026-10-14T14:09:18.702Z",
+      "changed": ["server/src/record.ts"],
+      "delivered": [
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/quoted-words-never-adopt",
+        "trace:efe4aac4-ff36-407f-9656-54b38c0220c8/commit-not-maintainer-evidence",
+        "trace:fddc1eb4-e29e-4fc4-8b2a-6a2886f0c0ec/held-refusal-after-judge",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/record-upkeep-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 25,
+      "session": "9df4eb61-d4cb-4bc1-92dc-c6a2b96bee83",
+      "tool_use_id": "toolu_01YbFSub19HCdVQE4bczkbCM",
+      "at": "2026-10-14T00:14:38.267Z",
+      "changed": ["server/src/db-write.ts"],
+      "delivered": ["trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/ingest-no-owner-identity"],
+      "claude": "useful",
+      "codex": "noise",
+      "settled": "unknown"
+    },
+    {
+      "n": 26,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01SfQashJs3g3jxw1ofY8evb",
+      "at": "2026-10-14T16:45:06.636Z",
+      "changed": ["README.ja.md", "README.md"],
+      "delivered": [
+        "trace:01a0e6a3-3adf-7fd3-82ea-12b091edb16b/readme-badge-explanations",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/readme-current-only",
+        "trace:dea5e6cc-0ebb-495f-94a3-21511a3772e2/claude-code-min-2-1-139"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 27,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01ViYSHZojVuKg6qw7goc6nv",
+      "at": "2026-10-13T10:31:30.776Z",
+      "changed": ["server/evals/cloud/collect.ts", "server/evals/cloud/report.ts"],
+      "delivered": [
+        "trace:094a20bb-ac97-49cf-a0f6-dc455e6ef499/exclude-ungiven-gold",
+        "trace:094a20bb-ac97-49cf-a0f6-dc455e6ef499/remove-out-option",
+        "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/measure-variance-now"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 28,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_01Na6KXGdr9cLcTgNTFGmPuR",
+      "at": "2026-10-12T12:23:06.886Z",
+      "changed": ["server/src/deliver.ts", "server/test/deliver.test.ts"],
+      "delivered": [
+        "trace:1506deee-17f8-407f-bf41-ec2f985cb891/similar-question-on-request",
+        "trace:1506deee-17f8-407f-bf41-ec2f985cb891/revive-rejected-option",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/claude-bash-delivery"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 29,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_018NBVYrbUt18QosJx3dsjNr",
+      "at": "2026-10-12T12:48:51.623Z",
+      "changed": ["plugin/skills/trace/SKILL.md", "scripts/check-ai-config.mjs"],
+      "delivered": [
+        "trace:7cd9d482-a207-4e55-bd43-fa93e33dfc99/agent-approval-norm-only",
+        "trace:c26c6849-61ee-40a5-90ac-aec92acebda4/allowed-tools-read",
+        "trace:dea5e6cc-0ebb-495f-94a3-21511a3772e2/exec-form-gated",
+        "trace:9f76d32d-a125-4979-bab4-c153c3f1d780/sync-capture-hooks",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/record-upkeep-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 30,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_018wkjexYySTu9Uxrh38d7xK",
+      "at": "2026-10-12T12:22:46.349Z",
+      "changed": ["server/test/deliver.test.ts"],
+      "delivered": ["trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/fix-concurrent-budget-tests"],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 31,
+      "session": "9df4eb61-d4cb-4bc1-92dc-c6a2b96bee83",
+      "tool_use_id": "toolu_01PTUcjdQrcCP7sM8nDqQiry",
+      "at": "2026-10-14T00:24:06.593Z",
+      "changed": ["server/src/reconcile.ts", "server/src/record.ts"],
+      "delivered": [
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/replacement-intent-effect",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/quoted-words-never-adopt",
+        "trace:efe4aac4-ff36-407f-9656-54b38c0220c8/commit-not-maintainer-evidence",
+        "trace:fddc1eb4-e29e-4fc4-8b2a-6a2886f0c0ec/held-refusal-after-judge",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/record-upkeep-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 32,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01PfeNisyJpSVvVDwUx6x3CD",
+      "at": "2026-10-13T10:35:43.250Z",
+      "changed": [".claude/skills/eval-loop/SKILL.md"],
+      "delivered": ["trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/eval-local-no-cap"],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 33,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01W5VDx9ftASrMES9xo6cXPC",
+      "at": "2026-10-13T08:55:35.068Z",
+      "changed": ["server/src/search.ts"],
+      "delivered": [
+        "trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/search-fixes-plan",
+        "trace:08a87497-a499-4bc8-adcd-828de621cbfa/tie-breaks-rejected"
+      ],
+      "claude": "noise",
+      "codex": "useful",
+      "settled": "unknown"
+    },
+    {
+      "n": 34,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01Y3nHiDEWAUdxV7uMq3p9oY",
+      "at": "2026-10-14T16:44:56.483Z",
+      "changed": ["README.ja.md", "README.md"],
+      "delivered": [
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/bundle-readme-into-f6",
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/readme-friendly-contributing",
+        "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/install-steps-stay",
+        "trace:c275d21c-803b-4066-aaf3-9f29b72f2fbd/readme-header-centered",
+        "trace:c275d21c-803b-4066-aaf3-9f29b72f2fbd/readme-trim-scope"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 35,
+      "session": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d",
+      "tool_use_id": "toolu_01Sfe4CCUJhEdobHLozDuua2",
+      "at": "2026-10-13T08:57:44.051Z",
+      "changed": [".claude-plugin/marketplace.json", "plugin/.claude-plugin/plugin.json"],
+      "delivered": ["trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump"],
+      "claude": "useful",
+      "codex": "useful",
+      "settled": "useful"
+    },
+    {
+      "n": 36,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_011ABoazSL1MCPZSdC16GUBD",
+      "at": "2026-10-13T01:07:30.359Z",
+      "changed": ["server/src/deliver.ts"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/confirm-before-override",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/per-agent-delivery-count",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/compact-clear-window",
+        "trace:20818a01-d0eb-4a17-a082-2658190d7e46/lock-then-plan",
+        "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/delivery-retention-90d"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 37,
+      "session": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b",
+      "tool_use_id": "toolu_01ALFRbn3dKYNrPpfSfiUFXg",
+      "at": "2026-10-13T01:33:48.003Z",
+      "changed": ["server/src/deliver.ts"],
+      "delivered": [
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/claude-bash-delivery",
+        "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 38,
+      "session": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9",
+      "tool_use_id": "toolu_01Dsi8Tnqt4eFdncSBZEU9rQ",
+      "at": "2026-10-12T11:56:15.989Z",
+      "changed": [".claude-plugin/marketplace.json", "plugin/.claude-plugin/plugin.json"],
+      "delivered": [
+        "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump",
+        "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/h2-userconfig-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 39,
+      "session": "d77d025c-bb0c-4bde-98ce-83bcafd8d024",
+      "tool_use_id": "toolu_01Rk9nRS7JNezNTXDWtM8EHv",
+      "at": "2026-10-14T07:26:18.417Z",
+      "changed": ["server/src/extract.ts", "server/src/trace.ts"],
+      "delivered": [
+        "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/cut-message-counts-looked",
+        "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/pending-14-days",
+        "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/harvest-run-source",
+        "trace:88e10cd3-817e-41df-a3f4-d53a44e7b83d/keep-warning-merge"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    },
+    {
+      "n": 40,
+      "session": "20394fc9-a502-41e0-9768-719e31a6d1df",
+      "tool_use_id": "toolu_01PMHT97f5njB6sucuBKHT6J",
+      "at": "2026-10-15T03:16:09.921Z",
+      "changed": ["server/src/delivery-view.ts", "server/src/record.ts"],
+      "delivered": [
+        "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/custom-fields-plan",
+        "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/value-rule-edge-declined",
+        "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+        "trace:5973501a-084b-4653-9fd3-eb02ba130309/o1-plan"
+      ],
+      "claude": "noise",
+      "codex": "noise",
+      "settled": "noise"
+    }
+  ],
+  "result": {
+    "useful": 3,
+    "noise": 37,
+    "noise_rate": 0.925,
+    "noise_wilson_95": [0.801, 0.974],
+    "bar_noise": "at most 1/3",
+    "labellers_agreed": 37,
+    "conversations": 47,
+    "conversation_key": "host:session:agent from trial-log rows that carry a session (zero-delivery conversations included)",
+    "per_conversation": [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 1, 1, 2, 2, 3, 4, 7, 8, 8, 17
+    ],
+    "p90": 4,
+    "p90_method": "nearest rank, the ceil(0.9 n)-th smallest",
+    "max": 17,
+    "bar_p90": "at most 10"
+  },
+  "verdict": "not adopted"
+}

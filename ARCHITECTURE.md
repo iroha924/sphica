@@ -11,7 +11,7 @@ Everything ships as one npm package. The Claude Code and Codex plugins point at 
 | Program | Started by | What it does |
 |---|---|---|
 | `capture.js` | The host's hooks, at session start, each prompt, each edit made with the host's edit tools, and each turn's end. In Claude Code also before a call to the record server; in Codex the record server notes the call itself | Records the owner's prompts, the agent's last reply of a turn, and the paths of changed files |
-| `deliver.js` | The host's hooks, at session start and when a subagent starts, at each prompt, before a file is read or edited, and before and after a shell command | Finds the records that apply and hands them to the agent as context |
+| `deliver.js` | The host's hooks, at session start and when a subagent starts, at each prompt, before a file is read or edited, and before a shell command | Finds the records that apply and hands them to the agent as context |
 | `mcp.js` | The host, as an MCP server | The read server: status, search, read, overview, export, fields, and the review tools |
 | `mcp-record.js` | The host, as an MCP server | The record server: the only way records are written, and the only way sources are removed |
 | `cli.js` | The user, as `sphica` | `init`, `doctor`, and `uninstall` |
@@ -25,7 +25,7 @@ Nothing listens on a port. The MCP servers talk to the host over standard input 
 - **The database** is one SQLite file, `~/.sphica/sphica.db`. `db/schema.sql` is its only definition; there is no ORM schema beside it. A generation number guards the record model and a revision number guards changes within it, and each revision ships with a migration that tests compare against a fresh database.
 - **The queue** is `~/.sphica/spool`: capture writes messages there first, so recording a message does not wait on the database, and the entries are written to the database afterwards. The one thing capture writes to the database directly is a note that a record tool was called.
 - **Search** is SQLite's FTS5 with Sphica's own word splitting, so Japanese and English text are both found.
-- **Other files** under `~/.sphica`: copies of the whole database made before each migration (`backups/`), the working tree baselines capture compares against (`worktree/`), Sphica's own git directory (`git/`), and, when delivery after shell commands is on, content hashes and its log (`shell-state/`).
+- **Other files** under `~/.sphica`: copies of the whole database made before each migration (`backups/`), the working tree baselines capture compares against (`worktree/`), and Sphica's own git directory (`git/`).
 
 Each machine has its own database, and Sphica sends nothing anywhere itself. The records it hands to the host become part of the host's context.
 
