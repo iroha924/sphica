@@ -4047,6 +4047,172 @@
       ]
     },
     {
+      "id": "injection-29",
+      "layer": "injection",
+      "lang": "en",
+      "summary": "In Claude Code, the first Bash call that runs a dead end's command is stopped with the dead end; the same call run again goes through, and a command that only shares words is left alone",
+      "given": [{ "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            { "event": "pre_read", "command": "npm run thumbs" },
+            { "event": "pre_read", "command": "npm run thumbs --worker=false" },
+            { "event": "pre_read", "command": "cd app && npm run thumbs --worker" },
+            { "event": "pre_read", "command": "cd app && npm run thumbs --worker" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            { "empty": true, "stopped": false },
+            { "empty": true, "stopped": false },
+            { "contains": ["trace:s-en-worker/offscreen", "Sphica stopped this call once"], "stopped": true },
+            { "empty": true, "stopped": false }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-30",
+      "layer": "injection",
+      "lang": "en",
+      "summary": "In Codex, a shell call that runs a dead end's command is stopped once, as in Claude Code",
+      "given": [{ "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            { "event": "pre_read", "command": "npm run thumbs --worker", "host": "codex" },
+            { "event": "pre_read", "command": "npm run thumbs --worker", "host": "codex" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            { "contains": ["trace:s-en-worker/offscreen", "Sphica stopped this call once"], "stopped": true },
+            { "empty": true, "stopped": false }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-31",
+      "layer": "injection",
+      "lang": "en",
+      "summary": "A PowerShell call (Claude Code on Windows without Git Bash) that runs a dead end's command is stopped once too, and a quoted mention is not",
+      "given": [{ "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "pre_read",
+              "command": "Write-Output 'npm run thumbs --worker'",
+              "tool": "PowerShell"
+            },
+            { "event": "pre_read", "command": "npm run thumbs --worker", "tool": "PowerShell" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            { "empty": true, "stopped": false },
+            { "contains": ["trace:s-en-worker/offscreen"], "stopped": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-32",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A call that runs a dead end's command and names an anchored file is stopped once with both records, and a read of the file afterwards repeats neither",
+      "given": [{ "case": "capture-01" }, { "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            { "event": "pre_read", "command": "npm run thumbs --worker src/db.ts" },
+            { "event": "pre_read", "path": "src/db.ts" },
+            { "event": "pre_read", "command": "npm run thumbs --worker src/db.ts" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": [
+                "trace:s-en-worker/offscreen",
+                "trace:s-ja-storage/storage",
+                "Sphica stopped this call once",
+                "which this command names"
+              ],
+              "stopped": true
+            },
+            { "empty": true, "stopped": false },
+            { "empty": true, "stopped": false }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-33",
+      "layer": "injection",
+      "lang": "en",
+      "summary": "After compaction the dead end's command is stopped again; a resume keeps the earlier stop",
+      "given": [{ "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            { "event": "session_start", "source": "startup" },
+            { "event": "pre_read", "command": "npm run thumbs --worker" },
+            { "event": "session_start", "source": "resume" },
+            { "event": "pre_read", "command": "npm run thumbs --worker" },
+            { "event": "session_start", "source": "compact" },
+            { "event": "pre_read", "command": "npm run thumbs --worker" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            { "lacks": ["trace:s-en-worker/offscreen"], "stopped": false },
+            { "contains": ["trace:s-en-worker/offscreen"], "stopped": true },
+            { "empty": true, "stopped": false },
+            { "empty": true, "stopped": false },
+            { "lacks": ["trace:s-en-worker/offscreen"], "stopped": false },
+            { "contains": ["trace:s-en-worker/offscreen"], "stopped": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-34",
+      "layer": "injection",
+      "lang": "en",
+      "summary": "A subagent's call is stopped apart from the main conversation: each conversation is stopped once",
+      "given": [{ "trace_en_worker_command": true }],
+      "when": {
+        "inject": {
+          "sequence": [
+            { "event": "pre_read", "command": "npm run thumbs --worker" },
+            { "event": "pre_read", "command": "npm run thumbs --worker", "agent_id": "a-explore-1" },
+            { "event": "pre_read", "command": "npm run thumbs --worker", "agent_id": "a-explore-1" }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            { "contains": ["trace:s-en-worker/offscreen"], "stopped": true },
+            { "contains": ["trace:s-en-worker/offscreen"], "stopped": true },
+            { "empty": true, "stopped": false }
+          ]
+        }
+      ]
+    },
+    {
       "id": "asked-01",
       "layer": "asked",
       "lang": "ja>ja",
@@ -7509,6 +7675,30 @@
                 }
               ],
               "aliases": ["サムネイル", "別スレッド", "ワーカー", "画像の縮小", "thumbnail", "worker"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_worker_command": {
+      "capture": "s-en-worker",
+      "trace": {
+        "session": "s-en-worker",
+        "record": {
+          "units": [
+            {
+              "key": "offscreen",
+              "kind": "dead_end",
+              "text": "Generating thumbnails in a Web Worker with OffscreenCanvas failed: Safari 16 lacks OffscreenCanvas",
+              "evidence": [
+                {
+                  "source": "session:s-en-worker#1.assistant",
+                  "quote": "Safari 16 lacks it, so thumbnails failed there.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["サムネイル", "別スレッド", "ワーカー", "画像の縮小", "thumbnail", "worker"],
+              "commands": ["npm run thumbs --worker"]
             }
           ]
         }

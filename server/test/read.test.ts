@@ -17,6 +17,7 @@ import { plain } from "../src/panel.ts";
 import { readRefs, readUnit, shownStart } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { READ_BUDGET } from "../src/reply-budget.ts";
+import { searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 import { tmpEnv } from "./temp-dir.ts";
@@ -514,6 +515,38 @@ test("read shows retired anchors with the words that retired them, a move's new 
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("read shows a dead end's commands apart from its code, and search finds it by a command's words", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "vitest --watch は CI で終わらなかった。" });
+    await save(db, p, null, {
+      units: [
+        {
+          key: "watch",
+          kind: "dead_end",
+          text: "テストを watch で流すと終わらない",
+          evidence: [{ source: `s${m}`, quote: "vitest --watch は CI で終わらなかった。", role: "states" }],
+          commands: ["vitest run --watch", "pnpm test --watch"],
+        },
+      ],
+    });
+    const out = (await readUnit(db.reader, p, "trace:ext-s1/watch", null)) ?? "";
+    assert.match(
+      out,
+      /\nCommands \(the first call in a conversation that runs one[^\n]*unless the conversation has already seen it or been stopped 3 times\):\n {2}- vitest run --watch\n {2}- pnpm test --watch\n/,
+    );
+    assert.doesNotMatch(out, /Code \(checked/);
+    const found = await searchUnits(db.reader, p, { question: "pnpm", limit: 10 });
+    assert.deepEqual(
+      found.hits.map((h) => h.key),
+      ["trace:ext-s1/watch"],
+    );
+  } finally {
+    await db.done();
   }
 });
 

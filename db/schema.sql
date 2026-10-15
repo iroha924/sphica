@@ -766,6 +766,33 @@ when exists (select 1 from unit_anchor where id = old.anchor_id) and exists (sel
   select raise(abort, 'a retirement reason goes only with its anchor or its source');
 end;
 
+-- A command a dead end is about, as typed: delivery stops the first call of a conversation that runs it, matching whole words per line.
+-- Words are split by single spaces, so a command needs a program and at least one more word; quotes would never match a call's words
+create table unit_command (
+  id integer primary key autoincrement not null,
+  unit_id integer not null references unit (id) on delete cascade,
+  command text not null check (instr(cast(command as blob), x'00') = 0 and length(command) between 3 and 200 and command = trim(command)
+    and command glob '* *'
+    and command not glob '*  *' and command not glob '-*' and command not glob '*[''"`]*' and command not glob '*[;|&]*'
+    and command not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
+  run_id integer not null references extraction_run (id),
+  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
+) strict;
+create unique index unit_command_once on unit_command (unit_id, command);
+create index unit_command_run on unit_command (run_id);
+create trigger unit_command_check before insert on unit_command begin
+  select raise(abort, 'only a dead end is anchored to a command')
+  where not exists (select 1 from unit where id = new.unit_id and kind = 'dead_end');
+  select raise(abort, 'command and unit belong to different projects')
+  where (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
+end;
+create trigger unit_command_frozen before update on unit_command begin
+  select raise(abort, 'a command anchor is never changed');
+end;
+create trigger unit_command_no_delete before delete on unit_command when exists (select 1 from unit where id = old.unit_id) begin
+  select raise(abort, 'a command anchor goes only with its record');
+end;
+
 -- What an active unit must have, in one place: missing says what it lacks, and is null when it lacks nothing. Activating reads it, and so
 -- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
 -- Evidence on an option supports the option, never the unit.
@@ -1091,13 +1118,14 @@ end;
 create trigger unit_rev_retirement_d after delete on unit_anchor_retirement begin
   update unit set revision = revision + 1 where id = (select unit_id from unit_anchor where id = old.anchor_id);
 end;
+create trigger unit_rev_command_i after insert on unit_command begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_alias_i after insert on unit_alias begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_field_i after insert on unit_field begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_field_d after delete on unit_field when exists (select 1 from unit where id = old.unit_id) begin
   update unit set revision = revision + 1 where id = old.unit_id;
 end;
 
--- Unit search text: body (text, reason, scope, revisit condition, options and their reconsider conditions, field names and values), identifiers (live anchors), and the newest matching alias set.
+-- Unit search text: body (text, reason, scope, revisit condition, options and their reconsider conditions, field names and values), identifiers (live anchors and command anchors), and the newest matching alias set.
 -- search.ts weighs body and identifiers above aliases. Lifecycle is not indexed; queries filter it.
 create view unit_search_text as
 select u.id,
@@ -1109,7 +1137,9 @@ select u.id,
       from (select d.name, v.value from unit_field v join field_def d on d.id = v.field_def_id where v.unit_id = u.id order by v.id) f), ''))
     as body,
   sphica_terms(coalesce((select group_concat(a.path || ' ' || coalesce(a.symbol, ''), char(10))
-    from (select path, symbol from unit_anchor where unit_id = u.id and retired_at is null order by id) a), '')) as ident,
+    from (select path, symbol from unit_anchor where unit_id = u.id and retired_at is null order by id) a), '') || char(10)
+    || coalesce((select group_concat(c.command, char(10)) from (select command from unit_command where unit_id = u.id order by id) c), ''))
+    as ident,
   sphica_terms(coalesce((select group_concat(j.value, ' ')
     from json_each((select terms from unit_alias where unit_id = u.id and content_hash = u.content_hash order by id desc limit 1)) j), ''))
     as alias
@@ -1137,6 +1167,10 @@ end;
 create trigger unit_fts_anchor_d after delete on unit_anchor when exists (select 1 from unit where id = old.unit_id) begin
   delete from unit_fts where rowid = old.unit_id;
   insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text where id = old.unit_id;
+end;
+create trigger unit_fts_command_i after insert on unit_command begin
+  delete from unit_fts where rowid = new.unit_id;
+  insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text where id = new.unit_id;
 end;
 create trigger unit_fts_alias_i after insert on unit_alias begin
   delete from unit_fts where rowid = new.unit_id;
@@ -1301,4 +1335,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 13;
+pragma user_version = 14;

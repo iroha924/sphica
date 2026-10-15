@@ -23,7 +23,11 @@ import {
   leadFor,
   namable,
   namedRecords,
+  RAN,
   recordLines,
+  respond,
+  runsCommand,
+  STOP,
   traceSkill,
 } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
@@ -3505,6 +3509,283 @@ test("a shell command names an anchored path in each form it may be written, and
       "cat src/db",
     ])
       assert.equal(await named(command), false, command);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a command anchor matches only its whole words in a row on one line, reading no shell syntax", () => {
+  const anchor = "pnpm test --watch";
+  for (const command of [
+    "pnpm test --watch",
+    "cd server && pnpm test --watch",
+    "pnpm  test\t--watch --reporter dot",
+    "npm ci\npnpm test --watch",
+    "npm ci\r\npnpm test --watch",
+    // Known false matches: an unquoted mention, and the middle of a quoted one
+    "echo pnpm test --watch",
+    "echo 'note pnpm test --watch now'",
+    // An operator at a word's end closes the command, as PowerShell 5.1 chains with ; and a space
+    "pnpm test --watch; Get-ChildItem",
+    "npm ci && pnpm test --watch&",
+    "npm ci; pnpm test --watch | tee log",
+  ])
+    assert.equal(runsCommand(command, anchor), true, command);
+  for (const command of [
+    "pnpm test",
+    "pnpm test --watch=false",
+    "pnpm test --watchAll",
+    "pnpm testing --watch",
+    "pnpm\ntest --watch",
+    "echo 'pnpm test --watch'",
+    '"pnpm" test --watch',
+    "pnpm test --watch=false;",
+    // Operators join separate commands, never one command's words
+    "pnpm;test --watch",
+    "pnpm|test --watch",
+    "pnpm&&test --watch",
+    "pnpm test|--watch",
+    "pnpm; test --watch",
+    'curl "https://example.test/?q=x&pnpm test --watch&v=1"',
+    // A known miss: an operator with no space on either side
+    "npm ci;pnpm test --watch",
+    "",
+  ])
+    assert.equal(runsCommand(command, anchor), false, command);
+  // An operator inside a word is part of it, so an anchor holding one still matches itself
+  assert.equal(runsCommand("curl https://x.test/?a=1&b=2 -o out", "curl https://x.test/?a=1&b=2"), true);
+});
+
+/** Dead ends about `npm run thumbs --worker`, n of them, each quoting one message */
+async function deadEnds(db: TempDb, p: number, n: number, command = "npm run thumbs --worker") {
+  const m = message(db, p, { id: `dead-${command}`, text: "The worker build of thumbs failed on Safari." });
+  await save(db, p, {
+    units: Array.from({ length: n }, (_, i) => ({
+      key: `${command.replaceAll(" ", "-").replaceAll("--", "")}-${i}`,
+      kind: "dead_end",
+      text: `Thumbnails in a worker fail on Safari (${i})`,
+      evidence: [{ source: `s${m}`, quote: "The worker build of thumbs failed on Safari.", role: "states" }],
+      commands: [command],
+    })),
+  });
+}
+
+const shellCall = (db: TempDb, repo: string, session: string, command: string, agent?: string) =>
+  respond(
+    {
+      hook_event_name: "PreToolUse",
+      session_id: session,
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command },
+      ...(agent ? { agent_id: agent } : {}),
+    },
+    "claude-code",
+    db.file,
+  );
+const stopText = (r: string | { stop: string }) => (typeof r === "string" ? null : r.stop);
+
+test("a stop shows at most a delivery's records, and the same call run again is never stopped for those left out", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    await deadEnds(db, p, 6);
+    const first = await shellCall(db, repo, "c1", "npm run thumbs --worker");
+    assert.match(stopText(first) ?? "", new RegExp(STOP.slice(0, 40)));
+    assert.equal((stopText(first)?.match(/trace:ext-s1\//g) ?? []).length, 5);
+    assert.match(stopText(first) ?? "", /1 more record applies here/);
+    const again = await shellCall(db, repo, "c1", "npm run thumbs --worker");
+    assert.equal(typeof again, "string", "the call run again goes through");
+    assert.match(String(again), new RegExp(RAN.slice(0, 40)));
+    assert.equal((String(again).match(/trace:ext-s1\//g) ?? []).length, 1);
+    assert.equal(await shellCall(db, repo, "c1", "npm run thumbs --worker"), "");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a conversation is stopped at most three times; later dead ends are shown within what the read budget leaves", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep the store a Map." });
+    await save(db, p, {
+      units: Array.from({ length: 7 }, (_, i) =>
+        decided(`map-${i}`, m, "Keep the store a Map.", {
+          anchors: [{ path: `src/f${i}.ts`, role: "applies_to" }],
+        }),
+      ),
+    });
+    for (const c of ["a1 b", "a2 b", "a3 b", "a4 b", "a5 b"]) await deadEnds(db, p, 1, c);
+    for (const c of ["a1 b", "a2 b", "a3 b"]) assert.ok(stopText(await shellCall(db, repo, "c2", c)), c);
+    // Seven reads use seven of the eight units the read budget gives a conversation
+    for (let i = 0; i < 7; i++)
+      assert.match(String(await shellCall(db, repo, "c2", `cat src/f${i}.ts`)), /map-/);
+    const fourth = await shellCall(db, repo, "c2", "a4 b");
+    assert.equal(typeof fourth, "string", "past three stops nothing is stopped");
+    assert.match(String(fourth), /trace:ext-s1\/a4-b-0/);
+    const fifth = await shellCall(db, repo, "c2", "a5 b");
+    assert.equal(typeof fifth, "string");
+    assert.doesNotMatch(String(fifth), /a5-b-0/, "the read budget is spent");
+    const read = db.owner
+      .prepare(
+        "select count(*) as n from delivery_unit x join delivery d on d.id = x.delivery_id join session s on s.id = d.session_id where s.external_id = 'c2' and d.event = 'pre_read' and (d.reason is null or d.reason <> 'command')",
+      )
+      .get() as { n: number };
+    assert.equal(Number(read.n), 8);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a stop that cannot be logged is not made: the dead end is shown as context, with no word of a stop", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    await deadEnds(db, p, 1);
+    db.owner.exec("begin immediate");
+    let held: string | { stop: string };
+    try {
+      held = await shellCall(db, repo, "c3", "npm run thumbs --worker");
+    } finally {
+      db.owner.exec("rollback");
+    }
+    assert.equal(typeof held, "string");
+    assert.match(String(held), new RegExp(RAN.slice(0, 40)));
+    assert.doesNotMatch(String(held), /stopped/);
+    // Nothing was logged, so the next call is still stopped once
+    assert.ok(stopText(await shellCall(db, repo, "c3", "npm run thumbs --worker")));
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("calls at the same time stop a conversation once, and a dead end that is not deliverable stops nothing", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    await deadEnds(db, p, 1);
+    const both = await Promise.all([
+      shellCall(db, repo, "c4", "npm run thumbs --worker"),
+      shellCall(db, repo, "c4", "npm run thumbs --worker"),
+    ]);
+    assert.equal(both.filter((r) => typeof r !== "string").length, 1, JSON.stringify(both));
+    // A quoted, unsupported record stays a candidate (quarantined) and never reaches a hook
+    const m = message(db, p, { id: "m-q", text: "Something else entirely." });
+    await save(db, p, {
+      units: [
+        {
+          key: "quarantined",
+          kind: "dead_end",
+          text: "Running lint --fix broke the lockfile",
+          evidence: [{ source: `s${m}`, quote: "a quote that is not there", role: "states" }],
+          commands: ["npm run lint --fix"],
+        },
+      ],
+    });
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select u.lifecycle, u.extraction from unit u join unit_command c on c.unit_id = u.id where c.command = 'npm run lint --fix'",
+        )
+        .all()
+        .map((r) => ({ ...r })),
+      [{ lifecycle: "candidate", extraction: "quarantined" }],
+    );
+    assert.equal(await shellCall(db, repo, "c5", "npm run lint --fix"), "");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a dead end withdrawn while the call waits for the write lock is not in the stop", async (t) => {
+  const db = tempDb();
+  const repo = checkout();
+  t.after(async () => {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const p = project(db);
+  await deadEnds(db, p, 2);
+  const ready = path.join(repo, "holder-ready");
+  // The holder takes the write lock, says so, and withdraws the first dead end and commits 150 ms later, while the call waits on the
+  // lock it matched the dead ends before. The script is fixed text; the paths and the key come in as arguments
+  const holder = spawn(process.execPath, [
+    "-e",
+    'const {DatabaseSync}=require("node:sqlite");const fs=require("fs");const [file,ready,key]=process.argv.slice(1);const d=new DatabaseSync(file);d.exec("begin immediate");fs.writeFileSync(ready,"");setTimeout(()=>{d.prepare("insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, \'active\', \'withdrawn\', strftime(\'%Y-%m-%dT%H:%M:%fZ\'), \'withdrawn meanwhile\', (select run_id from unit_state where run_id is not null order by id desc limit 1) from unit where key = ?").run(key);d.exec("commit");d.close();},150);',
+    db.file,
+    ready,
+    "trace:ext-s1/npm-run-thumbs-worker-0",
+  ]);
+  const exited = new Promise((resolve) => holder.on("exit", resolve));
+  t.after(async () => {
+    holder.kill();
+    await exited;
+  });
+  const until = Date.now() + 10_000;
+  while (!fs.existsSync(ready)) {
+    assert.ok(Date.now() < until, "the holder never took the lock");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const r = await shellCall(db, repo, "c7", "npm run thumbs --worker");
+  await exited;
+  assert.equal(
+    db.owner.prepare("select lifecycle from unit where key = 'trace:ext-s1/npm-run-thumbs-worker-0'").get()
+      ?.lifecycle,
+    "withdrawn",
+  );
+  const text = stopText(r) ?? String(r);
+  assert.match(text, /trace:ext-s1\/npm-run-thumbs-worker-1/, text);
+  // A stop is made only under the lock, so after the withdrawal committed. A busy machine may miss the lock instead and answer with
+  // context from before the commit, which may still show the dead end
+  if (stopText(r)) assert.doesNotMatch(text, /npm-run-thumbs-worker-0/);
+});
+
+test("dead ends shown without a stop spend the read budget's characters as they were shown, never past it", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m-long", text: "The long build failed." });
+    const long = (key: string, command: string) => ({
+      key,
+      kind: "dead_end",
+      text: `${key}: ${"the build with this flag fails on every runner we tried ".repeat(6)}`,
+      why: "the runner image lacks the native toolchain the flag needs, ".repeat(4),
+      evidence: [{ source: `s${m}`, quote: "The long build failed.", role: "states" }],
+      commands: [command],
+    });
+    await save(db, p, {
+      units: [
+        ...["s1", "s2", "s3"].map((k) => long(k, `stop${k} run`)),
+        ...Array.from({ length: 8 }, (_, i) => long(`c${i}`, `ctx${i} run`)),
+      ],
+    });
+    for (const k of ["s1", "s2", "s3"])
+      assert.ok(stopText(await shellCall(db, repo, "c6", `stop${k} run`)), k);
+    for (let i = 0; i < 8; i++)
+      assert.equal(typeof (await shellCall(db, repo, "c6", `ctx${i} run`)), "string");
+    const rows = db.owner
+      .prepare(
+        // A delivery that carried only the omission note spends nothing
+        "select d.chars from delivery d join session s on s.id = d.session_id where s.external_id = 'c6' and d.reason = 'command_context' and exists (select 1 from delivery_unit x where x.delivery_id = d.id)",
+      )
+      .all()
+      .map((r) => Number(r.chars) - RAN.length - 1);
+    assert.ok(rows.length >= 2, `${rows.length} context deliveries`);
+    assert.ok(
+      rows.reduce((a, b) => a + b, 0) <= 3000,
+      `records shown as context took ${rows.reduce((a, b) => a + b, 0)} characters`,
+    );
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

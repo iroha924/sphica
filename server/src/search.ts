@@ -501,7 +501,7 @@ type UnitRow = {
 
 /**
  * Runs the term check on one page of candidates, adding the hits; returns how many were weaker. With `asOf`, a candidate is judged by the
- * anchors and alias set it had at that time (options and field values are written with the record and never added later).
+ * anchors and alias set it had at that time (options, commands, and field values are written with the record and never added later).
  */
 async function judgeUnits(
   db: Reads,
@@ -511,7 +511,7 @@ async function judgeUnits(
   asOf?: string,
 ): Promise<number> {
   const ids = rows.map((r) => r.id);
-  const [options, anchors, aliases, fields] = ids.length
+  const [options, anchors, aliases, fields, commands] = ids.length
     ? await Promise.all([
         db
           .selectFrom("unit_option")
@@ -544,8 +544,10 @@ async function judgeUnits(
           .select(["f.unit_id", "d.name", "f.value"])
           .where("f.unit_id", "in", ids)
           .execute(),
+        // Written with the record and never retired, like options
+        db.selectFrom("unit_command").select(["unit_id", "command"]).where("unit_id", "in", ids).execute(),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
 
   let weaker = 0;
   for (const r of rows) {
@@ -564,6 +566,7 @@ async function judgeUnits(
           r.revisit_when,
           ...opts.flatMap((o) => [o.text, o.why, o.reconsider_when]),
           ...anch.flatMap((a) => [a.path, a.symbol]),
+          ...commands.filter((c) => c.unit_id === r.id).map((c) => c.command),
           ...fields.filter((f) => f.unit_id === r.id).flatMap((f) => [f.name, f.value]),
         ]
           .filter(Boolean)

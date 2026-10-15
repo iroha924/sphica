@@ -34,7 +34,7 @@ import {
   symbolMissing,
 } from "./repo-facts.ts";
 import { instructionFile } from "./rule-files.ts";
-import { head, sha256 } from "./text.ts";
+import { head, mask, placeholderRanges, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
 const FIELD_NAME = /^[a-z][a-z0-9_]{0,39}$/;
@@ -99,6 +99,7 @@ const Unit = z
       )
       .max(20)
       .default([]),
+    commands: z.array(z.string()).max(5).default([]),
     aliases: z.array(z.string()).max(12).default([]),
     supersedes: z.string().min(1).optional(),
     conflicts: z.array(z.string().min(1)).max(5).default([]),
@@ -187,6 +188,7 @@ type Planned = {
   }[];
   adoption: OwnWords<"owner_statement" | "explicit" | "agent">[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
+  commands: string[];
   aliases: string[];
   supersedes: number | null;
   conflicts: number[];
@@ -215,6 +217,28 @@ export type Checked = {
 
 /** The byte span of a quote that holds words, or null: a quote of only white space cites nothing */
 const cited = (body: string, quote: string) => (quote.trim() ? locate(body, quote) : null);
+
+/**
+ * Why a dead end's command anchor cannot be kept, or null. Delivery matches it word for word, so it needs a program and one more word;
+ * a quote would never match a call's words, and a secret would be stored and searched. The reason never repeats the command.
+ */
+function commandProblem(command: string): string | null {
+  const words = command.split(" ");
+  if ([...command].length < 3 || [...command].length > 200) return "must be 3 to 200 characters";
+  if (words.length < 2) return "needs the program and at least one more word";
+  if (words[0]?.startsWith("-")) return "must start with the program, not an option";
+  if (/['"`]/.test(command)) return "must not contain quotes";
+  // A shell ends a command at such an operator even inside a word, so an anchor holding one names two commands
+  if (/[;|&]/.test(command)) return "must be one command, with no ; | &";
+  // The same range the schema's CHECK refuses, so a command check passes is never refused mid-save
+  const control = (ch: string) =>
+    ch.charCodeAt(0) <= 0x1f || (ch.charCodeAt(0) >= 0x7f && ch.charCodeAt(0) <= 0x9f);
+  if (inline(command) !== command || [...command].some(control))
+    return "must not contain control or invisible characters";
+  if (mask(command) !== command || placeholderRanges(command).length)
+    return "holds text Sphica masks as a secret";
+  return null;
+}
 
 /**
  * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
@@ -631,6 +655,24 @@ export async function checkRecord(
       anchors.splice(anchors.indexOf(x), 1);
     }
 
+    const commands: string[] = [];
+    if (u.commands.length && u.kind !== "dead_end")
+      problems.push(`${key}: commands go only on a dead end; left out`);
+    else
+      for (const [i, c] of u.commands.entries()) {
+        // Every space delivery splits words on is collapsed except line breaks and other controls, which stay (at the ends too) for the
+        // check to refuse
+        const command = c
+          .split(/[^\S\n\v\f\r]+/)
+          .filter(Boolean)
+          .join(" ");
+        const wrong = commandProblem(command);
+        if (wrong) problems.push(`${key}: command ${i + 1} ${wrong}; left out`);
+        else if (commands.includes(command))
+          problems.push(`${key}: command ${i + 1} appears twice; left out`);
+        else commands.push(command);
+      }
+
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
     // Characters as SQLite counts them; a word read would show changed (control or invisible characters) would not match its index
     const bad = aliases.filter((a) => !a || [...a].length > 40 || inline(a) !== a);
@@ -725,6 +767,7 @@ export async function checkRecord(
       options,
       adoption,
       anchors,
+      commands,
       aliases: aliases.filter((a) => !bad.includes(a)),
       supersedes,
       conflicts,
@@ -1295,6 +1338,11 @@ export async function saveRecord(
         })
         .execute();
     }
+    for (const command of p.commands)
+      await trx
+        .insertInto("unit_command")
+        .values({ unit_id: id, command, run_id: runId, added_at: now })
+        .execute();
     // Values are sealed with the unit, before its first state
     for (const f of p.fields) {
       const field = fieldIds.get(f.name);

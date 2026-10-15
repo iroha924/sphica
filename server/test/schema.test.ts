@@ -415,7 +415,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 13);
+  assert.equal(one("pragma user_version").user_version, 14);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1801,6 +1801,58 @@ test("a harvest run keeps only sources of its own project, and only a harvest ru
     /only a harvest run keeps sources, from its own project/,
   );
   assert.equal(one("select count(*) as n from harvest_run_source").n, 1);
+});
+
+test("a command anchor is a dead end's, in its project, two or more plain words, never changed, and goes only with its record", () => {
+  const u = unit({ key: "u1", kind: "dead_end" });
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const command = (text: string, v: Values = {}) =>
+    insert(db, "unit_command", { unit_id: u, command: text, run_id: runId, added_at: now, ...v });
+  refuses(
+    () =>
+      insert(db, "unit_command", {
+        unit_id: unit({ key: "d1", kind: "decision" }),
+        command: "pnpm test --watch",
+        run_id: runId,
+        added_at: now,
+      }),
+    /only a dead end is anchored to a command/,
+  );
+  refuses(() => command("pnpm test --watch", { run_id: run(db, other) }), /different projects/);
+  for (const bad of [
+    "pnpm",
+    " pnpm test",
+    "pnpm test ",
+    "pnpm  test",
+    "--watch pnpm",
+    "echo 'x' y",
+    'echo "x" y',
+    "echo `x` y",
+    "pnpm\ttest",
+    "npm ci;pnpm test",
+    "npm test|tail",
+    "node build.mjs&",
+    `pnpm ${"x".repeat(200)}`,
+    // SQLite's length() and glob stop at NUL, so only the bytes see what follows it
+    `pnpm test\u0000\n"${"x".repeat(250)}`,
+  ])
+    refuses(() => command(bad), /constraint failed/);
+  refuses(() => command("pnpm test", { added_at: "2026-09-27" }), /constraint failed/);
+  const before = Number(one("select revision from unit where id = ?", u).revision);
+  const id = command("pnpm test --watch");
+  assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 1);
+  assert.deepEqual(
+    db.owner
+      .prepare("select rowid from unit_fts where unit_fts match ?")
+      .all('ident:"watch"')
+      .map((r) => Number(r.rowid)),
+    [u],
+  );
+  refuses(() => command("pnpm test --watch"), /UNIQUE constraint failed/);
+  refuses(() => sql("update unit_command set command = 'pnpm test' where id = ?", id), /never changed/);
+  refuses(() => sql("delete from unit_command where id = ?", id), /goes only with its record/);
+  sql("delete from unit where id = ?", u);
+  assert.equal(one("select count(*) as n from unit_command").n, 0);
 });
 
 test("a retirement reason quotes the owner, in the anchor's project, on a retired anchor, and goes only with its anchor or its source", () => {

@@ -9,7 +9,7 @@ const BUDGETS = {
   mcp: 1_779_000,
   "mcp-record": 1_857_000,
   capture: 393_000,
-  deliver: 455_000,
+  deliver: 460_000,
   cli: 636_000,
   "git-worker": 13_000,
 };

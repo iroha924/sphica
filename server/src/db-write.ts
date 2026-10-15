@@ -166,6 +166,7 @@ const INGEST_INSERTS = new Set([
   "unit_replacement",
   "unit_anchor",
   "unit_anchor_retirement",
+  "unit_command",
   "unit_alias",
   "field_def",
   "unit_field",
@@ -224,15 +225,23 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
       "field_d",
       "retirement_i",
       "retirement_d",
+      "command_i",
     ].map((t) => [`unit_rev_${t}`, ["update unit"]]),
   ),
   unit_fts_ai: ["insert unit_fts"],
   unit_fts_ad: ["delete unit_fts"],
   ...Object.fromEntries(
-    ["option_i", "anchor_i", "anchor_u", "anchor_d", "alias_i", "alias_d", "field_i", "field_d"].map((t) => [
-      `unit_fts_${t}`,
-      ["delete unit_fts", "insert unit_fts"],
-    ]),
+    [
+      "option_i",
+      "anchor_i",
+      "anchor_u",
+      "anchor_d",
+      "command_i",
+      "alias_i",
+      "alias_d",
+      "field_i",
+      "field_d",
+    ].map((t) => [`unit_fts_${t}`, ["delete unit_fts", "insert unit_fts"]]),
   ),
 };
 

@@ -18,7 +18,7 @@ import { flush, observeRecordCall, onHook } from "../../src/capture.ts";
 import { inTransaction, openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
-import { deliver } from "../../src/deliver.ts";
+import { respond } from "../../src/deliver.ts";
 import { deliveryOverview } from "../../src/delivery-view.ts";
 import { exportDecisions, exportPath } from "../../src/export.ts";
 import {
@@ -75,6 +75,8 @@ type Inject = {
   host?: Host;
   agent_id?: string;
   command?: string;
+  /** The shell tool a command runs in: Bash unless the call names PowerShell (Claude Code on Windows without Git Bash) */
+  tool?: string;
   entrypoint?: string;
   session?: string;
 };
@@ -192,6 +194,9 @@ export async function createDriver(world: World): Promise<Driver> {
     ).id;
   /** What the delivery hooks returned for the last inject step, one entry per call. */
   let delivered: string[] = [];
+  /** Whether each call of the last inject step was stopped (its reason is in delivered) rather than given context */
+  let stopped: boolean[] = [];
+  let lastStopped = false;
   let injectSession = 0;
   /**
    * Calls the delivery hook the way the host would (Claude Code unless the call names Codex), in a fresh session each time a case injects.
@@ -205,7 +210,7 @@ export async function createDriver(world: World): Promise<Driver> {
       cwd: repo,
       ...(i.agent_id ? { agent_id: i.agent_id, agent_type: "Explore" } : {}),
       ...(i.event === "pre_read" && i.command !== undefined
-        ? { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: i.command } }
+        ? { hook_event_name: "PreToolUse", tool_name: i.tool ?? "Bash", tool_input: { command: i.command } }
         : i.event === "pre_edit" || i.event === "pre_read"
           ? {
               hook_event_name: "PreToolUse",
@@ -221,7 +226,9 @@ export async function createDriver(world: World): Promise<Driver> {
     const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
     if (i.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = i.entrypoint;
     try {
-      return await deliver(input, i.host ?? "claude-code", file);
+      const r = await respond(input, i.host ?? "claude-code", file);
+      lastStopped = typeof r !== "string";
+      return typeof r === "string" ? r : r.stop;
     } finally {
       if (entrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
       else process.env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
@@ -847,12 +854,14 @@ export async function createDriver(world: World): Promise<Driver> {
         const i = step.inject as Inject & { repeat?: number; sequence?: Inject[] };
         // A repeat stays in one session: the second call shows what the same session sees again
         delivered = [];
+        stopped = [];
         const repeat = i.repeat ?? 1;
         injectSession++;
         const fixed = injectSession;
         for (const call of i.sequence ?? Array.from({ length: repeat }, () => i)) {
           injectSession = fixed - 1;
           delivered.push(await inject(call));
+          stopped.push(lastStopped);
         }
         return;
       }
@@ -1490,9 +1499,15 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       // One expectation per call of a sequence, in order
       if (Array.isArray(e.each_context)) {
-        const each = e.each_context as { contains?: string[]; lacks?: string[]; empty?: true }[];
+        const each = e.each_context as {
+          contains?: string[];
+          lacks?: string[];
+          empty?: true;
+          stopped?: boolean;
+        }[];
         assert.equal(delivered.length, each.length, "one expectation per call");
         each.forEach((want, n) => {
+          if (want.stopped !== undefined) assert.equal(stopped[n], want.stopped, `call ${n + 1} stopped`);
           if (want.empty) assert.equal(delivered[n], "", `call ${n + 1} delivered\n${delivered[n]}`);
           for (const w of want.contains ?? [])
             assert.ok(delivered[n]?.includes(w), `call ${n + 1} lacks "${w}"\n${delivered[n]}`);

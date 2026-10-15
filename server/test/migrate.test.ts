@@ -30,6 +30,7 @@ const REV9 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV10 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev10.sql"), "utf8");
 const REV11 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev11.sql"), "utf8");
 const REV12 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev12.sql"), "utf8");
+const REV13 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev13.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -172,6 +173,7 @@ for (const [from, schema] of [
   [10, REV10],
   [11, REV11],
   [12, REV12],
+  [13, REV13],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -264,6 +266,7 @@ for (const [from, schema] of [
   [10, REV10],
   [11, REV11],
   [12, REV12],
+  [13, REV13],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
