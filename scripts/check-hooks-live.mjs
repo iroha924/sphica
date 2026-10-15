@@ -307,27 +307,16 @@ await withTempDir(async (dir) => {
   if (/wait(s)? to be traced/.test(fire("SessionStart", { source: "compact" }, "smoke-2", interactive)))
     fail("the automatic trace notice came twice in one session");
 
-  // ---- After a shell call that rewrites src/a.ts without naming it, its decision arrives only with the plugin option on ----
+  // ---- Nothing runs after a shell call in either host ----
   {
-    const on = { CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY: "true" };
-    let n = 0;
-    const shellCall = (session, post, extra) => {
-      const call = {
-        tool_name: "Bash",
-        tool_input: { command: "node gen.mjs" },
-        tool_use_id: `toolu_shell_${++n}`,
-      };
-      fire("PreToolUse", call, session, extra);
-      fs.writeFileSync(path.join(repo, "src", "a.ts"), `export const store = new Map(); // ${n}\n`);
-      return fire(post, call, session, extra);
-    };
-    if (/\/map /.test(shellCall("smoke-off", "PostToolUse", {})))
-      fail("a shell write delivered a decision with the option off");
-    for (const post of ["PostToolUse", "PostToolUseFailure"]) {
-      const out = shellCall(`smoke-${post}`, post, on);
-      if (!/\/map /.test(out) || !/files whose content changed/.test(out))
-        fail(`${post} after a shell call that rewrote src/a.ts got no decision`, out);
-    }
+    const shellPost = (hooks, events, tools) =>
+      events.some((event) =>
+        (hooks[event] ?? []).some((g) => tools.some((t) => !g.matcher || new RegExp(g.matcher).test(t))),
+      );
+    if (shellPost(manifest, ["PostToolUse", "PostToolUseFailure"], ["Bash", "PowerShell"]))
+      fail("hooks.json runs a hook after a shell call");
+    const codex = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "codex.json"), "utf8")).hooks;
+    if (shellPost(codex, ["PostToolUse"], ["Bash"])) fail("codex.json runs a hook after a shell call");
   }
 
   // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
@@ -537,5 +526,5 @@ if (failures.length) {
   process.exitCode = 1;
 } else
   console.log(
-    `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, delivery after a shell write, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
+    `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
   );

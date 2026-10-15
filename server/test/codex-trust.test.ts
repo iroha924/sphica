@@ -68,10 +68,10 @@ test("only Windows sees a different definition of the hooks 0.6.30 had after the
   const byKey = (json: string, p: NodeJS.Platform) =>
     new Map(hooksOf(hookTrust(json, ID, REL, p, new Map())).map((h) => [h.key, h.hash]));
   const old = byKey(OLD, "darwin");
-  // Hooks added since keep the old ones' keys: a new group goes after the existing ones
+  // The shipped hooks are the old ones, so a hook trusted then is still trusted
   assert.deepEqual(
     [...byKey(SHIPPED, "darwin").keys()].filter((k) => !old.has(k)),
-    [`${ID}:${REL}:post_tool_use:1:0`],
+    [],
   );
   for (const p of ["darwin", "linux"] as const) {
     const after = byKey(SHIPPED, p);
