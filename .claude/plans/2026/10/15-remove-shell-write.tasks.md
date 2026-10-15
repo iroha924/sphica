@@ -49,13 +49,14 @@ base: main
 
 利用者向けの説明から試用が消え、試用の結果がリポジトリに残る
 
-- [ ] T03: README.md・README.ja.md・ARCHITECTURE.md から試用の記述を外す
+- [x] T03: README.md・README.ja.md・ARCHITECTURE.md から試用の記述を外す
   - 種別: 削除
   - 計画: S4
   - 依存: T02（設定が残っているうちに説明を消すと、説明と動きが食い違う）
   - 変更: `README.md`, `README.ja.md`, `ARCHITECTURE.md`
   - 完了条件: `bun run verify` → 終了コード 0。`git grep -n -i -E "shell_write|SHELL_WRITE|shell-state|after a shell command|before and after a shell|シェルのコマンドの直後" -- README.md README.ja.md ARCHITECTURE.md` → 何も出ない
   - コミット: `docs: drop the shell_write_delivery trial from the READMEs`
+  - 結果: `bun run verify` → exit 0。`git grep -n -i -E "shell_write|SHELL_WRITE|shell-state|after a shell command|before and after a shell|シェルのコマンドの直後" -- README.md README.ja.md ARCHITECTURE.md` → 0 件（exit 1）。英日の 35・124・138 行目を消し、128・141・148 行目と ARCHITECTURE の 14・28 行目は試用の句だけを消した
 
 - [ ] T04: 試用の記録 shell-write-trial.json を足す
   - 種別: 追加
@@ -68,3 +69,4 @@ base: main
 ## 記録
 - 2026-10-15 / T03 / review-shipping（T01 の前）が、README.md・README.ja.md の 128 行目（Codex の後の配信）と ARCHITECTURE.md:14（deliver.js が shell の前後で動く）も古くなると指摘した。完了条件の検索はこの 3 行に当たらなかった / T03 の完了条件の検索語を、前の値 `shell_write|SHELL_WRITE|shell-state` から `shell_write|SHELL_WRITE|shell-state|after a shell command|before and after a shell|シェルのコマンドの直後` に変えた（変更欄のファイルは同じ）
 - 2026-10-15 / T01 のレビュー / Codex（369825d0）は指摘 0 件。見ていないのは verify と Windows で、verify は手元で exit 0、Windows は CI で確かめる / 対応なし
+- 2026-10-15 / T02 のレビュー / Codex（79c764e2）は指摘 0 件。見ていない verify・全テスト・退行テストの red は手元で確かめた / 対応なし
