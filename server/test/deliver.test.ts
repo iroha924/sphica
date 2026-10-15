@@ -15,11 +15,11 @@ import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import {
   AUTO_TRACE,
-  anchoredRules,
   CONFIRM,
   codexInteractive,
   deliver,
   deliverableIds,
+  deliverablePaths,
   leadFor,
   namable,
   namedRecords,
@@ -2726,12 +2726,18 @@ test("decided by an AI: the evaluation's gold lines carry the mark and the AI wo
   }
 });
 
-test("after a shell call, the records on files whose content it changed come once per conversation, behind the option", async () => {
+test("nothing is delivered or kept after a shell call, even with the old trial option still on", async () => {
   const db = tempDb();
   const repo = checkout();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  const saved = { home: process.env.SPHICA_HOME, on: process.env.SPHICA_SHELL_WRITE_DELIVERY };
+  const saved = {
+    home: process.env.SPHICA_HOME,
+    env: process.env.SPHICA_SHELL_WRITE_DELIVERY,
+    option: process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY,
+  };
   process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY = "true";
   try {
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
@@ -2744,405 +2750,86 @@ test("after a shell call, the records on files whose content it changed come onc
     });
     fs.mkdirSync(path.join(repo, "src"));
     fs.writeFileSync(path.join(repo, "src/dates.ts"), "export const a = 1;\n");
-    let n = 0;
-    const call = async (
-      write: (() => void) | null,
-      o: {
-        session?: string;
-        agent?: string;
-        post?: string;
-        host?: "claude-code" | "codex";
-        pre?: boolean;
-      } = {},
-    ) => {
-      const id = `toolu_${++n}`;
+    for (const [n, post] of ["PostToolUse", "PostToolUseFailure"].entries()) {
       const base = {
-        session_id: o.session ?? "sess",
+        session_id: "sess",
         cwd: repo,
         tool_name: "Bash",
         tool_input: { command: "python3 tools/gen.py" },
-        tool_use_id: id,
-        ...(o.agent ? { agent_id: o.agent } : {}),
+        tool_use_id: `toolu_${n}`,
       };
-      if (o.pre !== false)
-        await deliver({ ...base, hook_event_name: "PreToolUse" }, o.host ?? "claude-code", db.file);
-      write?.();
-      return deliver({ ...base, hook_event_name: o.post ?? "PostToolUse" }, o.host ?? "claude-code", db.file);
-    };
-    const touch = (text: string) => () => fs.writeFileSync(path.join(repo, "src/dates.ts"), text);
-    const trial = () =>
-      fs
-        .readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
-
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    assert.equal(await call(touch("export const a = 2;\n")), "", "off by default");
-    assert.equal(fs.existsSync(path.join(home, "shell-state", "calls")), false, "off takes no snapshot");
-
-    process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY = "true";
-    process.env.SPHICA_SHELL_WRITE_DELIVERY = "off";
-    assert.equal(
-      await call(touch("export const a = 20;\n"), { session: "opt" }),
-      "",
-      "the environment's off wins",
-    );
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    assert.match(
-      await call(touch("export const a = 21;\n"), { session: "opt" }),
-      /trace:ext-s1\/utc/,
-      "the plugin option alone turns it on",
-    );
-    delete process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY;
-
-    process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-    assert.equal(await call(null), "", "a call that changes nothing delivers nothing");
-    const first = await call(touch("export const a = 3;\n"));
-    assert.match(first, /src\/dates\.ts, files whose content changed between before and after this call/);
-    assert.match(first, /trace:ext-s1\/utc/);
-    const row = db.owner
-      .prepare("select event, reason from delivery where reason = 'shell_write' order by id desc limit 1")
-      .get();
-    assert.deepEqual(
-      { ...row },
-      { event: "pre_edit", reason: "shell_write" },
-      "logged as an edit, so it spends no read budget",
-    );
-    assert.equal(
-      await call(touch("export const a = 4;\n")),
-      "",
-      "a record already shown to the conversation is not repeated",
-    );
-    assert.match(
-      await call(touch("export const a = 5;\n"), { agent: "sub1" }),
-      /trace:ext-s1\/utc/,
-      "a subagent is its own conversation",
-    );
-    assert.match(
-      await call(touch("export const a = 6;\n"), { session: "other", post: "PostToolUseFailure" }),
-      /trace:ext-s1\/utc/,
-      "a failed command that wrote before failing still counts",
-    );
-    await deliver(
-      { session_id: "sess", cwd: repo, hook_event_name: "SessionStart", source: "compact" },
-      "claude-code",
-      db.file,
-    );
-    assert.match(
-      await call(touch("export const a = 7;\n")),
-      /trace:ext-s1\/utc/,
-      "after a compaction it counts again",
-    );
-    assert.match(
-      await call(touch("export const a = 8;\n"), { session: "codex-s", host: "codex" }),
-      /trace:ext-s1\/utc/,
-      "Codex's Bash calls the same way",
-    );
-    assert.equal(
-      await call(touch("export const a = 9;\n"), { session: "nopre", pre: false }),
-      "",
-      "no snapshot, no delivery",
-    );
-    // While another connection holds the write lock, the delivery still answers, unlogged
-    db.owner.exec("begin immediate");
-    try {
-      assert.match(await call(touch("export const a = 10;\n"), { session: "locked" }), /trace:ext-s1\/utc/);
-    } finally {
-      db.owner.exec("rollback");
+      assert.equal(await deliver({ ...base, hook_event_name: "PreToolUse" }, "claude-code", db.file), "");
+      fs.writeFileSync(path.join(repo, "src/dates.ts"), `export const a = ${n + 2};\n`);
+      assert.equal(await deliver({ ...base, hook_event_name: post }, "claude-code", db.file), "", post);
     }
-    const lines = trial();
-    assert.deepEqual(
-      lines.map((l) => [
-        l.event,
-        l.session,
-        (l.delivered as string[] | undefined)?.length ?? null,
-        l.logged ?? null,
-      ]),
-      [
-        ["post_shell", "opt", 1, true],
-        ["post_shell", "sess", 0, null],
-        ["post_shell", "sess", 1, true],
-        ["post_shell", "sess", 0, null],
-        ["post_shell", "sess", 1, true],
-        ["post_shell", "other", 1, true],
-        ["post_shell", "sess", 1, true],
-        ["post_shell", "codex-s", 1, true],
-        ["snapshot_missing", "nopre", null, null],
-        ["post_shell", "locked", 1, false],
-      ],
-      "one line per call, delivered or not, with whether the delivery log was written",
-    );
+    assert.equal(fs.existsSync(path.join(home, "shell-state")), false, "no snapshot or log is kept");
   } finally {
-    if (saved.home === undefined) delete process.env.SPHICA_HOME;
-    else process.env.SPHICA_HOME = saved.home;
-    if (saved.on === undefined) delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    else process.env.SPHICA_SHELL_WRITE_DELIVERY = saved.on;
+    for (const [k, v] of [
+      ["SPHICA_HOME", saved.home],
+      ["SPHICA_SHELL_WRITE_DELIVERY", saved.env],
+      ["CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY", saved.option],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     await db.done();
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("a shell call's Post still compares when the cache cannot be saved, and reports a snapshot past its life", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  process.env.SPHICA_HOME = home;
-  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
-    await save(db, p, {
-      units: [
-        decided("utc", m, "Store every timestamp in UTC.", {
-          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
-        }),
-      ],
-    });
-    fs.mkdirSync(path.join(repo, "src"));
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
-    const base = (id: string, session: string) => ({
-      session_id: session,
-      cwd: repo,
-      tool_name: "Bash",
-      tool_input: { command: "python3 gen.py" },
-      tool_use_id: id,
-    });
-    const trial = () =>
-      fs
-        .readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
-    // The cache's directory is a file: saving the cache fails, the comparison does not
-    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
-    fs.writeFileSync(path.join(home, "shell-state", "cache"), "not a directory");
-    await deliver({ ...base("t1", "nocache"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
-    assert.match(
-      await deliver({ ...base("t1", "nocache"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
-      /trace:ext-s1\/utc/,
-    );
-    assert.equal(trial().find((l) => l.call === "t1")?.event, "post_shell", "the call has its trial line");
-    fs.rmSync(path.join(home, "shell-state", "cache"));
-    // A snapshot older than its life, with no other Pre to prune it, is reported expired at its own Post
-    await deliver({ ...base("t2", "old"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
-    const calls = path.join(home, "shell-state", "calls");
-    for (const n of fs.readdirSync(calls)) {
-      const file = path.join(calls, n);
-      const snap = JSON.parse(fs.readFileSync(file, "utf8"));
-      fs.writeFileSync(
-        file,
-        JSON.stringify({ ...snap, at: new Date(Date.now() - 8 * 86_400_000).toISOString() }),
-      );
-    }
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "c\n");
-    assert.equal(
-      await deliver({ ...base("t2", "old"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
-      "",
-    );
-    assert.equal(trial().find((l) => l.call === "t2")?.event, "snapshot_expired");
-  } finally {
-    delete process.env.SPHICA_HOME;
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    await db.done();
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("a shell call is compared for the project it started in, asks keep or undo, and caps its trial log", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  process.env.SPHICA_HOME = home;
-  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
-    await save(db, p, {
-      units: [
-        decided("utc", m, "Store every timestamp in UTC.", {
-          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
-        }),
-      ],
-    });
-    fs.mkdirSync(path.join(repo, "src"));
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
-    // A trial log at its cap moves aside before the next line
-    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
-    fs.writeFileSync(path.join(home, "shell-state", "trial.jsonl"), "x".repeat(10 * 1024 * 1024));
-    // An archive another call made earlier is kept, never replaced
-    fs.writeFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "older\n");
-    const input = {
-      session_id: "s",
-      cwd: repo,
-      tool_name: "Bash",
-      tool_input: { command: "node tools/gen.cjs" },
-      tool_use_id: "t1",
-    };
-    await deliver({ ...input, hook_event_name: "PreToolUse" }, "claude-code", db.file);
-    // The call rewrites the file and points the checkout at another repository
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
-    execFileSync("git", ["-C", repo, "remote", "set-url", "origin", "https://github.com/o/other.git"], {
-      stdio: "ignore",
-    });
-    const out = await deliver({ ...input, hook_event_name: "PostToolUse" }, "claude-code", db.file);
-    assert.match(out, /trace:ext-s1\/utc/, "the records of the project the call started in");
-    assert.match(out, /ask whether to keep or undo it/);
-    assert.doesNotMatch(out, /do not make that change yet/, "the change is already made");
-    const archives = fs
-      .readdirSync(path.join(home, "shell-state"))
-      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n));
-    assert.equal(archives.length, 2, "the full log moved aside under its own name");
-    assert.equal(fs.readFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "utf8"), "older\n");
-    assert.ok(
-      archives.some((n) => fs.statSync(path.join(home, "shell-state", n)).size === 10 * 1024 * 1024),
-      "with all it held",
-    );
-    assert.ok(fs.statSync(path.join(home, "shell-state", "trial.jsonl")).size < 4096, "a fresh log");
-  } finally {
-    delete process.env.SPHICA_HOME;
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    await db.done();
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("a Codex shell command that only looks like a patch is still compared after it runs", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  process.env.SPHICA_HOME = home;
-  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
-    await save(db, p, {
-      units: [
-        decided("utc", m, "Store every timestamp in UTC.", {
-          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
-        }),
-      ],
-    });
-    fs.mkdirSync(path.join(repo, "src"));
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
-    const input = {
-      session_id: "codex-s",
-      cwd: repo,
-      tool_name: "Bash",
-      // A patch marker in a heredoc, then a generator that names no file
-      tool_input: { command: "cat <<'EOF'\n*** Begin Patch\nEOF\nnode tools/gen.cjs" },
-      tool_use_id: "t1",
-    };
-    await deliver({ ...input, hook_event_name: "PreToolUse" }, "codex", db.file);
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
-    assert.match(
-      await deliver({ ...input, hook_event_name: "PostToolUse" }, "codex", db.file),
-      /trace:ext-s1\/utc/,
-    );
-  } finally {
-    delete process.env.SPHICA_HOME;
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    await db.done();
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("a shell call's Post whose project cannot be told still leaves its trial line", async () => {
-  const db = tempDb();
-  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-deliver-")));
-  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  process.env.SPHICA_HOME = home;
-  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-  try {
-    // A checkout with no origin is looked up in the local project map, which cannot be read here
-    fs.mkdirSync(path.join(home, "projects.json"));
-    const input = {
-      session_id: "s",
-      cwd: repo,
-      tool_name: "Bash",
-      tool_input: { command: "true" },
-      tool_use_id: "t1",
-      hook_event_name: "PostToolUse",
-    };
-    assert.equal(await deliver(input, "claude-code", db.file), "");
-    const line = JSON.parse(fs.readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8").trim());
-    assert.equal(line.call, "t1");
-    assert.match(String(line.error), /EISDIR|illegal operation/);
-  } finally {
-    delete process.env.SPHICA_HOME;
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    await db.done();
-    fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(repo, { recursive: true, force: true });
-  }
-});
-
-test("the records on more changed paths than SQLite takes variables are still found", async () => {
-  const db = tempDb();
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
-    await save(db, p, {
-      units: [
-        decided("utc", m, "Store every timestamp in UTC.", {
-          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
-        }),
-      ],
-    });
-    const rels = [...Array.from({ length: 40_000 }, (_, i) => `gen/f${i}.ts`), "src/dates.ts"];
-    const id = db.owner.prepare("select id from unit where key = 'trace:ext-s1/utc'").get()?.id;
-    assert.deepEqual(await anchoredRules(db.reader, p, rels), [Number(id)]);
-  } finally {
-    await db.done();
-  }
-});
-
-test("two shell calls that change one file at once log the record once", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
-  process.env.SPHICA_HOME = home;
-  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
-    await save(db, p, {
-      units: [
-        decided("utc", m, "Store every timestamp in UTC.", {
-          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
-        }),
-      ],
-    });
-    fs.mkdirSync(path.join(repo, "src"));
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
-    const base = (id: string) => ({
-      session_id: "sess",
-      cwd: repo,
-      tool_name: "Bash",
-      tool_input: { command: "python3 gen.py" },
-      tool_use_id: id,
-    });
-    await deliver({ ...base("t1"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
-    await deliver({ ...base("t2"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
-    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
-    await Promise.all(
-      ["t1", "t2"].map((id) =>
-        deliver({ ...base(id), hook_event_name: "PostToolUse" }, "claude-code", db.file),
-      ),
-    );
-    const logged = db.owner
-      .prepare(
-        "select count(*) as n from delivery d join delivery_unit x on x.delivery_id = d.id where d.reason = 'shell_write' and d.outcome = 'emitted'",
-      )
-      .get();
-    assert.equal(Number(logged?.n), 1, "the logged deliveries carry the record once");
-  } finally {
-    delete process.env.SPHICA_HOME;
-    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
-    await db.done();
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the paths a shell command may name are the applies_to paths of deliverable decisions and constraints", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep utc. Dates are tricky." });
+    const t: Target = {
+      projectId: p,
+      origin: "trace",
+      prefix: "trace:ext-s1/",
+      sessionId: "s1",
+      root: null,
+      sources: null,
+    };
+    await inTransaction(db.ingest, async (trx) => {
+      const run = await openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: "d",
+      });
+      const record = {
+        units: [
+          {
+            key: "utc",
+            kind: "constraint",
+            stance: "do",
+            text: "Keep utc.",
+            evidence: [{ source: `s${m}`, quote: "Keep utc.", role: "states" }],
+            adoption: [{ source: `s${m}`, quote: "Keep utc." }],
+            anchors: [
+              { path: "src/dates.ts", role: "applies_to" },
+              { path: "src/dates.ts", symbol: "toStored", role: "applies_to" },
+            ],
+          },
+          {
+            key: "tricky",
+            kind: "finding",
+            text: "Dates are tricky.",
+            evidence: [{ source: `s${m}`, quote: "Dates are tricky.", role: "states" }],
+            anchors: [{ path: "src/finding.ts", role: "applies_to" }],
+          },
+        ],
+      };
+      return saveRecord(trx, t, run, await checkRecord(trx, t, record), []);
+    });
+    assert.deepEqual(
+      await deliverablePaths(db.reader, p),
+      ["src/dates.ts"],
+      "once each, and never a finding's",
+    );
+  } finally {
+    await db.done();
   }
 });
 

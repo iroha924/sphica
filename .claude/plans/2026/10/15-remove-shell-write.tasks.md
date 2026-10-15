@@ -35,13 +35,15 @@ base: main
 
 後の配信のコード・設定・控え・試用のログが無くなり、古い定義から呼ばれても何も返さない
 
-- [ ] T02: deliver.ts と shell-state.ts から後の配信のコードと設定を外し、deliverablePaths のテストを移し、退行テストと古い呼び出しの検査を足す
+- [x] T02: deliver.ts と shell-state.ts から後の配信のコードと設定を外し、deliverablePaths のテストを移し、退行テストと古い呼び出しの検査を足す
   - 種別: 削除
   - 計画: S2, S3
   - 依存: T01（登録が残ったまま後の配信を外すと、check-hooks-live の後の配信の検査が落ちる）
   - 変更: `server/src/deliver.ts`, `server/src/shell-state.ts`, `server/test/shell-state.test.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`, `scripts/check-hooks-live.mjs`, `server/evals/scale/run.ts`, `plugin/.claude-plugin/plugin.json`
   - 完了条件: `bun run verify` → 終了コード 0。`bun run test` → 全件 pass。退行テストは、後の配信のコードを戻すと落ちる
   - コミット: `chore(deliver): remove delivery after shell calls and its trial option`
+  - 結果: `bun run verify` → exit 0（acceptance 148 pass / 0 fail、hooks:live 通過）。`bun run test` → 1300 pass / 0 fail（書式の直しの前に流した。直したのは check-hooks-live.mjs の折り返しだけ）
+  - 結果: `node --test --test-name-pattern="nothing is delivered or kept after a shell call" test/deliver.test.ts` → T01 のコード（369825d0、後の配信のコードが残る）の worktree では、PostToolUse が後の配信を返して落ちた。`node scripts/check-hooks-live.mjs <T01 の bundle>` → 「PostToolUse after a shell call answered」と「shell-state が残った」の 2 件で落ちた
 
 ## P3: 文書と試用の記録
 
@@ -65,3 +67,4 @@ base: main
 
 ## 記録
 - 2026-10-15 / T03 / review-shipping（T01 の前）が、README.md・README.ja.md の 128 行目（Codex の後の配信）と ARCHITECTURE.md:14（deliver.js が shell の前後で動く）も古くなると指摘した。完了条件の検索はこの 3 行に当たらなかった / T03 の完了条件の検索語を、前の値 `shell_write|SHELL_WRITE|shell-state` から `shell_write|SHELL_WRITE|shell-state|after a shell command|before and after a shell|シェルのコマンドの直後` に変えた（変更欄のファイルは同じ）
+- 2026-10-15 / T01 のレビュー / Codex（369825d0）は指摘 0 件。見ていないのは verify と Windows で、verify は手元で exit 0、Windows は CI で確かめる / 対応なし

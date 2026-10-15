@@ -25,17 +25,7 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { codexReviewCall, localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
-import {
-  compare,
-  loadCache,
-  pruneSnapshots,
-  saveCache,
-  snapshotKey,
-  takeSnapshot,
-  takeStates,
-  writeSnapshot,
-} from "./shell-state.ts";
-import { RevisionMismatch, sphicaHome } from "./sqlite.ts";
+import { RevisionMismatch } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason } from "./text.ts";
 import { pendingSessions } from "./trace.ts";
@@ -47,9 +37,6 @@ type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
  */
 export const CONFIRM =
   "If, after checking a record below against the current code and its full text (Sphica's read), what you were asked to do is a change it rejected or rules out, do not make that change yet: tell the user which record and reason it conflicts with, and ask whether to go ahead.";
-/** The request after a shell call, when the change is already made: keep or undo is the user's call, not the agent's */
-const AFTER_CHANGE =
-  "If, after checking a record below against the current code and its full text (Sphica's read), what this call changed is a change it rejected or rules out, tell the user which record and reason it conflicts with, and ask whether to keep or undo it.";
 /** The same request for the evaluation's gold slot, which is given the record text but no Sphica tools. */
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
@@ -155,7 +142,7 @@ const deliverable = (db: Reads, projectId: number, asOf?: string) =>
       ),
     );
 
-/** The applies_to paths of the decisions and constraints deliverable now: what a shell command may name, and what its snapshot watches */
+/** The applies_to paths of the decisions and constraints deliverable now: what a shell command may name */
 export async function deliverablePaths(db: Reads, projectId: number): Promise<string[]> {
   const rows = await deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
@@ -325,21 +312,6 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .groupBy("u.id")
     .orderBy("u.id", "desc");
 
-/** The deliverable decisions and constraints anchored to any of the paths, newest first */
-export async function anchoredRules(db: Reads, projectId: number, rels: string[]): Promise<number[]> {
-  // Every anchor read once and matched here: one call can change more paths than SQLite takes variables, and a query per batch of
-  // paths re-evaluates deliverability each time (16 s for 20,000 paths at 10,000 records against 21 ms for this)
-  const wanted = new Set(rels);
-  const anchors = await deliverable(db, projectId)
-    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
-    .where("a.role", "=", "applies_to")
-    .where("a.retired_at", "is", null)
-    .where("u.kind", "in", ["decision", "constraint"])
-    .select(["u.id", "a.path"])
-    .execute();
-  return [...new Set(anchors.filter((a) => wanted.has(a.path)).map((a) => a.id))].sort((a, b) => b - a);
-}
-
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
 const named = (rels: string[]) =>
   rels.length <= 3
@@ -416,60 +388,6 @@ async function sinceRestart(db: Reads, session: string, agent: string | null) {
     .select(["x.unit_id", "d.event", "d.reason"])
     .execute();
   return { since, sent };
-}
-
-/**
- * After a shell call: the decisions and constraints anchored to the files whose content the call changed that this conversation has not
- * been shown since its context last restarted, within an edit's limits. It spends no read budget: a write is not a read.
- */
-async function afterShellWrite(
-  db: Reads,
-  projectId: number,
-  rels: string[],
-  session: string,
-  agent: string | null,
-): Promise<Plan> {
-  const { sent } = await sinceRestart(db, session, agent);
-  const seen = new Set(sent.map((r) => r.unit_id));
-  const ids = (await anchoredRules(db, projectId, rels)).filter((id) => !seen.has(id));
-  const top = ids.slice(0, LIMITS.pre_edit.units);
-  const shown = top.length
-    ? await db
-        .selectFrom("unit as u")
-        .where("u.id", "in", top)
-        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
-        .orderBy("u.id", "desc")
-        .execute()
-    : [];
-  const why = await reasons(
-    db,
-    shown.map((u) => u.id),
-  );
-  const ai = await aiDecided(
-    db,
-    shown.map((u) => u.id),
-  );
-  const f = fitMarked(
-    shown.map((u) =>
-      why.has(u.id)
-        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
-        : line(u, "", ai.has(u.id)),
-    ),
-    // The edit's room for records: the limit's room for the request is CONFIRM's, so it is traded for this request's own length
-    LIMITS.pre_edit.chars - ASK + AFTER_CHANGE.length + 1,
-    `Active decisions applying to ${named(rels)}, files whose content changed between before and after this call (current code relevance unverified). ${AFTER_CHANGE} ${NOTE}:`,
-    ai,
-    shown.map((u) => u.id),
-  );
-  const omitted = ids.length - shown.length + f.omitted;
-  return {
-    ...noted(f.text, f.lead, [leftOut(omitted)]),
-    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
-    eligible: ids.length,
-    omitted,
-    path: head(rels.join(" "), 500),
-    reason: SHELL_WRITE,
-  };
 }
 
 /** The reason a shell call's stop is logged with: it spends no read budget, and its records are never stopped for again */
@@ -924,63 +842,8 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
-/** The reason a delivery after a shell call is logged with, under the edit event */
-const SHELL_WRITE = "shell_write";
-/** How long a shell call's snapshot may take before the rest of its files are left unknown, inside the host's 5 seconds */
-const SNAPSHOT_MS = 3500;
 /** How long after a Codex hook starts its review may go on reading the change, inside the 5 seconds Codex gives a tool hook */
 const REVIEW_MS = 3500;
-const SHELL_WRITE_ON = new Set(["on", "1", "true", "yes"]);
-/** Bytes of the trial log before it moves aside: about 30,000 calls, more than a week of heavy use */
-const TRIAL_CAP = 10 * 1024 * 1024;
-
-/**
- * Whether records are delivered after shell calls: SPHICA_SHELL_WRITE_DELIVERY turns it on or off for both hosts, and otherwise the
- * plugin's shell_write_delivery setting (Claude Code) does; off when neither says on.
- */
-function shellWriteDelivery(): boolean {
-  const env = (process.env.SPHICA_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase();
-  if (AUTO_TRACE_OFF.has(env)) return false;
-  if (SHELL_WRITE_ON.has(env)) return true;
-  return SHELL_WRITE_ON.has(
-    (process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase(),
-  );
-}
-
-/** One line per shell call to the trial log, delivered or not, so the trial can count what the delivery log may miss */
-function trialLog(line: Record<string, unknown>): void {
-  try {
-    const file = path.join(sphicaHome(), "shell-state", "trial.jsonl");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) >= TRIAL_CAP)
-      rotateTrial(path.dirname(file), file);
-    fs.appendFileSync(file, `${JSON.stringify({ at: iso(Date.now()), ...line })}\n`);
-  } catch {
-    // The trial log never stops delivery
-  }
-}
-
-/**
- * Moves a full trial log aside under a name of its own, so two calls past the cap at once each keep what they moved and neither replaces an
- * archive; archives past twice the cap, oldest first, are removed. A rotation that fails leaves the line to be appended all the same.
- */
-function rotateTrial(dir: string, file: string): void {
-  try {
-    fs.renameSync(file, path.join(dir, `trial.${Date.now()}.${process.pid}.jsonl`));
-    const archives = fs
-      .readdirSync(dir)
-      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n))
-      .sort((a, b) => Number(b.split(".")[1]) - Number(a.split(".")[1]));
-    let kept = 0;
-    for (const n of archives) {
-      kept += fs.statSync(path.join(dir, n), { throwIfNoEntry: false })?.size ?? 0;
-      if (kept > 2 * TRIAL_CAP) fs.rmSync(path.join(dir, n), { force: true });
-    }
-  } catch {
-    // Another call moved or removed it first
-  }
-}
-
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
 const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
 
@@ -1359,100 +1222,6 @@ async function beforeShell(
   return [run.text, path?.text].filter(Boolean).join("\n\n");
 }
 
-/** Takes a shell call's snapshot of every watched file before it runs; snapshots past their life are removed and logged as expired */
-async function snapshotCall(
-  db: Reads,
-  projectId: number,
-  place: { root: string; key: string },
-  host: Host,
-  input: HookInput,
-  who: string | null,
-  started: number,
-): Promise<void> {
-  const paths = await deliverablePaths(db, projectId);
-  const cache = loadCache(place.root);
-  const states = takeStates(place.root, paths, cache, started + SNAPSHOT_MS);
-  saveCache(place.root, cache, paths);
-  const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
-  if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
-  const key = snapshotKey(host, String(input.session_id), who, String(input.tool_use_id));
-  writeSnapshot({ v: 1, key, at: iso(started), root: place.root, project: place.key, paths: states });
-}
-
-/**
- * After a shell call (PostToolUse, and PostToolUseFailure in Claude Code: a failed command may have written before it failed): the
- * records on the watched files whose content changed since its snapshot. Never says Sphica is unavailable: shell calls are frequent.
- */
-async function afterShell(
-  input: HookInput,
-  host: Host,
-  agent: string | null,
-  file: string,
-  started: number,
-): Promise<string> {
-  if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
-  const base = { host, session: input.session_id, agent, call: input.tool_use_id };
-  let line: Record<string, unknown> = { ...base, event: "post_shell" };
-  let db: ReadonlyKysely<DB> | null = null;
-  try {
-    // The snapshot holds the root and project of Pre, so a call that changes either is still compared for what it was run in
-    const before = takeSnapshot(snapshotKey(host, input.session_id, agent, input.tool_use_id));
-    if (before === "expired" || !before) {
-      // Outside a project no Pre took one, and every shell call there would fill the trial log
-      if (!before && !identify(input.cwd ?? process.cwd())) return "";
-      trialLog({ ...base, event: before ? "snapshot_expired" : "snapshot_missing" });
-      return "";
-    }
-    const cache = loadCache(before.root);
-    for (const [rel, st] of Object.entries(before.paths))
-      if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
-    const after = takeStates(before.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
-    saveCache(before.root, cache, Object.keys(before.paths));
-    const { changed, unknown } = compare(before.paths, after);
-    line = { ...line, paths: Object.keys(before.paths).length, changed, unknown };
-    if (!changed.length) {
-      trialLog({ ...line, delivered: [] });
-      return "";
-    }
-    if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
-    db = openReader(file);
-    const pid = await projectId(db, before.project);
-    if (pid === null) throw new Error("the project is not registered");
-    const reader = db;
-    const entry: Entry = {
-      projectId: pid,
-      host,
-      external: input.session_id,
-      agent,
-      event: "pre_edit",
-      branch: branchOf(before.root),
-    };
-    let logged = false;
-    const plan = await lockedPlan(
-      file,
-      entry,
-      () => afterShellWrite(reader, pid, changed, sessionId(pid, host, input.session_id as string), agent),
-      (p) => Boolean(p.text),
-      (w) => {
-        logged = w;
-      },
-    );
-    const keys = plan.units.length
-      ? (await reader.selectFrom("unit").select("key").where("id", "in", plan.units).execute()).map(
-          (u) => u.key,
-        )
-      : [];
-    // Whether the delivery log has the delivery; nothing to deliver has nothing to log
-    trialLog({ ...line, delivered: keys, logged: plan.text ? logged : null });
-    return plan.text;
-  } catch (e) {
-    trialLog({ ...line, delivered: [], error: head(reason(e), 200) });
-    return "";
-  } finally {
-    await db?.destroy().catch(() => {});
-  }
-}
-
 /** The additional context for one hook call, or "" for nothing; a stopped call's reason when it is stopped (respond tells which). */
 export async function deliver(
   input: ReviewInput & { source?: string },
@@ -1478,16 +1247,16 @@ export async function respond(
   // A log that does not say leaves the call with the main conversation
   const thread = host === "codex" && !agentOf(input) ? codexThread(input) : null;
   const who = agentOf(input) ?? childThread(input, thread);
-  if (host !== "codex") return deliverOne(input, host, file, started, who, reviewCall(input));
+  if (host !== "codex") return deliverOne(input, host, file, who, reviewCall(input));
   // Codex has no event of its own for a review, so a review's decisions are added to what the same call delivers anyway
   const call = codexReviewCall(input, thread, input.hook_event_name === "PreToolUse" ? ownReview() : []);
   // The event's own delivery runs first and the review stops early: a review that reads a large change slowly must not take the
   // event's delivery with it when the host ends the hook
-  if (!call) return deliverOne(input, host, file, started, who, null);
+  if (!call) return deliverOne(input, host, file, who, null);
   // The repository is looked at once for both: finding it starts git, which the review has no time to do again
   const place = identify(input.cwd ?? process.cwd());
-  const rest = await deliverOne(input, host, file, started, who, null, { place });
-  const review = await deliverOne(input, host, file, started, who, call, {
+  const rest = await deliverOne(input, host, file, who, null, { place });
+  const review = await deliverOne(input, host, file, who, call, {
     place,
     reviewUntil: started + REVIEW_MS,
   });
@@ -1505,22 +1274,11 @@ async function deliverOne(
   input: ReviewInput & { source?: string },
   host: Host,
   file: string,
-  started: number,
   who: string | null,
   call: { name: string; args: string } | null,
   known: { place?: ReturnType<typeof identify>; reviewUntil?: number } = {},
 ): Promise<string | Stop> {
   const name = input.hook_event_name;
-  // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
-  if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
-    return afterShell(input, host, who, file, started);
-  // A review is not about the call's own command: its snapshot and the files it names belong to the event's own delivery
-  const snap =
-    !call &&
-    name === "PreToolUse" &&
-    SHELL_TOOLS.has(input.tool_name ?? "") &&
-    Boolean(input.tool_use_id) &&
-    shellWriteDelivery();
   const event: Event | null = call
     ? "review"
     : name === "SessionStart" || name === "SubagentStart"
@@ -1560,7 +1318,6 @@ async function deliverOne(
   if (
     onPath &&
     !shell &&
-    !snap &&
     (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
   )
     return "";
@@ -1570,26 +1327,13 @@ async function deliverOne(
     .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
     .filter((r) => r && !leaves(r))
     .map((r) => r.split(path.sep).join("/"));
-  if (onPath && !shell && !snap && !rels.length) return "";
+  if (onPath && !shell && !rels.length) return "";
   let db: ReadonlyKysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
-    if (snap)
-      await snapshotCall(db, pid, place, host, input, who, started).catch((e) =>
-        trialLog({
-          host,
-          session: input.session_id,
-          agent: who,
-          call: input.tool_use_id,
-          event: "snapshot_failed",
-          error: head(reason(e), 200),
-        }),
-      );
-    // A patch run through the shell that names no file had only its snapshot to take
-    if (onPath && !shell && !rels.length) return "";
     let ran: number[] = [];
     if (shell) {
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);

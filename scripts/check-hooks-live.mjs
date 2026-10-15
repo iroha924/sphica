@@ -317,6 +317,35 @@ await withTempDir(async (dir) => {
       fail("hooks.json runs a hook after a shell call");
     const codex = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "codex.json"), "utf8")).hooks;
     if (shellPost(codex, ["PostToolUse"], ["Bash"])) fail("codex.json runs a hook after a shell call");
+    // A host still holding an older hooks.json may call the new bundle after a shell call: with the old trial option on, it answers
+    // nothing and keeps nothing
+    const old = {
+      ...env,
+      CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY: "true",
+      SPHICA_SHELL_WRITE_DELIVERY: "on",
+    };
+    for (const [n, post] of ["PostToolUse", "PostToolUseFailure"].entries()) {
+      const call = {
+        tool_name: "Bash",
+        tool_input: { command: "node gen.mjs" },
+        tool_use_id: `toolu_stale_${n}`,
+      };
+      const run = (event) =>
+        spawnSync(process.execPath, [path.join(pkg, "dist", "deliver.js")], {
+          cwd: repo,
+          env: old,
+          input: JSON.stringify({ hook_event_name: event, session_id: "smoke-stale", cwd: repo, ...call }),
+          encoding: "utf8",
+          timeout: TIMEOUT_MS,
+        });
+      run("PreToolUse");
+      fs.writeFileSync(path.join(repo, "src", "a.ts"), `export const store = new Map(); // ${n}\n`);
+      const r = run(post);
+      if (r.error || r.status !== 0 || r.stdout.trim())
+        fail(`${post} after a shell call answered`, r.error?.message ?? `${r.stdout}${r.stderr}`);
+    }
+    if (fs.existsSync(path.join(home, ".sphica", "shell-state")))
+      fail("a shell call left shell-state in the Sphica home");
   }
 
   // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
