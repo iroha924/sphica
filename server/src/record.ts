@@ -660,10 +660,11 @@ export async function checkRecord(
       problems.push(`${key}: commands go only on a dead end; left out`);
     else
       for (const [i, c] of u.commands.entries()) {
-        // Every space delivery splits words on is collapsed except line breaks and other controls, which stay for the check to refuse
+        // Every space delivery splits words on is collapsed except line breaks and other controls, which stay (at the ends too) for the
+        // check to refuse
         const command = c
-          .trim()
           .split(/[^\S\n\v\f\r]+/)
+          .filter(Boolean)
           .join(" ");
         const wrong = commandProblem(command);
         if (wrong) problems.push(`${key}: command ${i + 1} ${wrong}; left out`);

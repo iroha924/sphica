@@ -125,7 +125,7 @@ The `"..."` stands for the other language's words: in this example, `"データ�
 
 A field value that breaks these rules refuses the whole save, like a `reconsider_quote` not found: fix it or leave the field out.
 
-When check or save refuses `answers` as an unknown key, a `work` list as not an object, or a work item whose key is already there for leaving
+When check or save refuses `answers` or `commands` as an unknown key, a `work` list as not an object, or a work item whose key is already there for leaving
 out a field, the record server is older than this Skill. Do not drop them and save without: ask the owner to reload it (`/reload-plugins` in Claude Code; reopen Codex), then
 begin again, read context, and save.
 

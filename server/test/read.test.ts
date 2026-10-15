@@ -537,7 +537,7 @@ test("read shows a dead end's commands apart from its code, and search finds it 
     const out = (await readUnit(db.reader, p, "trace:ext-s1/watch", null)) ?? "";
     assert.match(
       out,
-      /\nCommands \(a call that runs one[^\n]*\n {2}- vitest run --watch\n {2}- pnpm test --watch\n/,
+      /\nCommands \(the first call in a conversation that runs one[^\n]*unless the conversation has already seen it or been stopped 3 times\):\n {2}- vitest run --watch\n {2}- pnpm test --watch\n/,
     );
     assert.doesNotMatch(out, /Code \(checked/);
     const found = await searchUnits(db.reader, p, { question: "pnpm", limit: 10 });

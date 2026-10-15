@@ -236,6 +236,20 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
             ],
           },
           {
+            key: "edges",
+            kind: "dead_end",
+            text: "テストを watch で流すと子プロセスが残って落ちる",
+            evidence: [
+              {
+                source: `s${m}`,
+                quote: "pnpm test --watch はテストの子プロセスが残って落ちた。",
+                role: "states",
+              },
+            ],
+            // A control at either end is refused too, not trimmed away
+            commands: ["\vpnpm test --watch", "pnpm test --watch\n", "\fpnpm test --x"],
+          },
+          {
             key: "not-dead-end",
             kind: "finding",
             text: "テストを watch で流すと子プロセスが残って落ちる",
@@ -266,6 +280,9 @@ test("a dead end keeps the commands it is about, spaces collapsed, and any other
       /joined: command 1 must not contain control or invisible characters; left out/,
       /joined: command 2 must not contain control or invisible characters; left out/,
       /joined: command 5 must not contain control or invisible characters; left out/,
+      /edges: command 1 must not contain control or invisible characters; left out/,
+      /edges: command 2 must not contain control or invisible characters; left out/,
+      /edges: command 3 must not contain control or invisible characters; left out/,
       /joined: command 3 must be one command, with no ; \| &; left out/,
       /joined: command 4 must be one command, with no ; \| &; left out/,
       /not-dead-end: commands go only on a dead end; left out/,

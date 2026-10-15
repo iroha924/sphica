@@ -336,7 +336,7 @@ async function describe(
   }
   if (commands.length) {
     out.push(
-      "Commands (a call that runs one, word for word on one line, is stopped once per conversation and shown this dead end):",
+      "Commands (the first call in a conversation that runs one, word for word on one line, is stopped with this dead end as the reason, unless the conversation has already seen it or been stopped 3 times):",
     );
     for (const c of commands) out.push(`  - ${inline(c.command)}`);
   }
