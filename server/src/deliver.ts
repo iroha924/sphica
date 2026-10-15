@@ -613,10 +613,9 @@ async function commandsRun(db: Reads, projectId: number, command: string): Promi
 }
 
 /**
- * Before a shell call: the dead ends it runs that this conversation has not been shown since its context last restarted. The call is
- * stopped when none of them was in an earlier stop of the conversation (so running a stopped call again always goes through) and fewer
- * than STOPS stops were made; otherwise they are shown within the read budget, which `before` (the path delivery of the same call) has
- * already spent from. With `stop` false nothing is stopped: a stop that could not be logged could be repeated forever.
+ * Before a shell call: the dead ends it runs not shown since the context last restarted. It stops the call when none was in an earlier
+ * stop (so a call run again goes through) and fewer than STOPS were made, else shows them within the read budget `before` spent from.
+ * With `stop` false nothing is stopped: a stop that could not be logged could be repeated forever.
  */
 async function beforeCommand(
   db: Reads,
@@ -766,8 +765,8 @@ function commandsOf(line: string): string[][] {
 
 /**
  * Whether a shell command runs a dead end's command anchor: its words, each whole and in a row, in one command of one line. No other
- * shell syntax is read, so a word keeps any quote around it (a quoted mention never matches) while an unquoted mention
- * (`echo pnpm test --watch`) does.
+ * shell syntax is read: a word keeps any quote around it, so a quote that starts or ends at the anchor never matches, while an unquoted
+ * mention (`echo pnpm test --watch`) and the middle of a quote (`echo 'note pnpm test --watch now'`) do.
  */
 export function runsCommand(command: string, anchor: string): boolean {
   return holds(commandWords(command), anchor);
@@ -1313,10 +1312,9 @@ async function lockedPlan(
 type Stop = { stop: string };
 
 /**
- * Before a shell call that runs a dead end's command: the paths it names and the dead ends it runs, planned and logged together under the
- * write lock, so the second sees what the first showed. The dead ends are matched again there, as one withdrawn while the call waited for
- * the lock must not stop it. The call is stopped only when that log was committed; otherwise both are answered as context, with no word of
- * a stop.
+ * Before a shell call that runs a dead end's command: its named paths and dead ends, planned and logged together under the write lock.
+ * The dead ends are matched again there, as one withdrawn while the call waited must not stop it. The call is stopped only when that log
+ * was committed; otherwise both are answered as context, with no word of a stop.
  */
 async function beforeShell(
   file: string,
