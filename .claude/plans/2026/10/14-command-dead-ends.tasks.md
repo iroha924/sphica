@@ -183,13 +183,14 @@ dead_end にコマンドの anchor を付けて保存・検索・表示できる
 
 実機で deny の理由が届くかを確かめ、届かないホストは知らせるだけに戻して README に書く。
 
-- [ ] T09: 両ホストの実機の確認と README
+- [x] T09: 両ホストの実機の確認と README
   - 種別: 変更
   - 計画: S10, S11
   - 依存: T06（確かめる配信が要る）
-  - 変更: `README.md`, `server/src/deliver.ts`
+  - 変更: `README.md`, `README.ja.md`
   - 完了条件: `bun run verify` → 0 で終わり、README に deny の振る舞いと（あれば）ホストの差が書いてある
   - コミット: `docs(readme): describe stopping a call that repeats a recorded dead end (T09)`
+  - 結果: `bun run verify` → exit 0（acceptance pass 148 / fail 0）。実機では 1 回目は止まり、理由がモデルに届き、2 回目は `built (fast)` で走った。Claude Code `claude -p` の default・auto・bypassPermissions、`codex exec`、対話の Codex（持ち主が流した。delivery の id 5 が reason `command`）の 5 つすべて。届かないホストが無いので `server/src/deliver.ts` の context への戻しは要らず、変更欄から外した（README.ja.md を足した）。ホストの差は README に書かない
 
 ## 記録
 2026-10-14 / T01 / plan の unit_command に retired_at と「live な一意」を書いたが、退役の経路を作らず update も禁じるので列は常に NULL になる / retired_at を置かず、一意は (unit_id, command) にした。退役を足すときに migration で列を足す
