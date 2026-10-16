@@ -161,8 +161,19 @@ base: main
   - コミット: `test(eval): relabel the entries the fixed sheet changed and reclassify u386 (T13)`
   - 結果: red: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 直す前は {"F":23,"I":11,"U":9,"R":3} "not adopted"。直した後 `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → {"F":20,"I":11,"U":7,"R":2} "not adopted"。JSON の sample から作ったラベルで `node server/evals/delivery/sample.ts --decide` → 同じ値と verdict。変わった 19 項目を 2 者が別々にラベルし直し（Codex が 37・76 を useful から irrelevant に、Claude は変更なし）、前のラベルは first に残した。訂正のコメント https://github.com/iroha924/sphica/issues/346#issuecomment-6211346726 を note に入れた
 
+- [x] T15: タスクの通知とサブエージェントの報告の行で、origin の無い行の判定を決めない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T14（直す対象の判定）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → origin の無い依頼と AI の返事のあいだにタスクの通知があると、依頼が notice になるテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。判定を決めるのは、AI の返事か、origin が human か無い user の行（meta を除く）だけ
+  - コミット: `fix(eval): let only the model or the owner settle an unmarked line (T15)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は依頼が notice になり落ちた（actual notice fix search ranking）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 21 件 pass。`bun run check` → 0
+
 ## 記録
 
+- 2026-10-16 / T15 / 2 回目の全差分の Codex のレビューで P2 が 2 件。F1（通知の行が origin の無い依頼の判定を決める、再現あり）は採る。F2（u223 を finished-plan に）は断る: 本文の主語は「公開していないバージョンを上げたままの PR」という続く決まりで、#261 → #271 は括弧の中の例。分類の決まりの「issue を例に挙げていても続く決まりなら standing」に当たる。分け直しても verdict は not adopted（(22,11,9,2)）/ 修正タスク T15 を足した
 - 2026-10-16 / T14 / T12 の後に作り直したシートで、サブエージェントの最初の依頼（直後が Skill を差し込む isMeta の行）が notice になり 7 項目で依頼が消えた。T11・T12 の Codex のレビューは、timestamp の無い行を判定の前に飛ばす件（P2、再現あり）を出した。どちらも採る。古いシートで始めた付け直しは止めた / 修正タスク T14 を T13 の前に足し、T13 の依存に T14 を足した（前: T11, T12、新: T11, T12, T14）
 - 2026-10-16 / T11, T12, T13 / 全差分の Codex のレビューで P2 が 3 件（30 行で切ると最後の返答が消える、u386 は続く条件なので standing、origin の無い host の行が依頼になる）。どれも採る。u386 を直しても判定は not adopted のまま（(20,10,8,2)）/ 修正タスク T11〜T13 を足した。T08〜T10 は個別のレビューを頼まず、この全差分のレビューで見てもらった
 - 2026-10-16 / T10 / 直したシートで、セッションの開始の配信など 7 項目は最初の依頼より前に届くので、依頼が無く配信の後も空になり、ラベルの材料が無かった / 修正タスク T10 を足し、T05 の依存に T10 を足した（前: T03, T04, T07, T08, T09、新: T03, T04, T07, T08, T09, T10）

@@ -207,14 +207,16 @@ export function readTimeline(file: string, host: string): Entry[] {
       continue;
     }
     if (!isObject(d)) continue;
-    // The model answers only a prompt, not a local command's output or an interruption marker; a meta line (a Skill's text) sits between
-    // a prompt and its answer, and a line without a time still counts
-    if (
-      host !== "codex" &&
-      (d.type === "user" || d.type === "assistant") &&
-      d.isMeta !== true &&
-      d.isCompactSummary !== true
-    ) {
+    // The model answers only a prompt, not a local command's output or an interruption marker. A meta line (a Skill's text) or a notice
+    // can sit between a prompt and its answer, so neither settles it; a line without a time still does
+    const origin = isObject(d.origin) ? d.origin.kind : undefined;
+    const settles =
+      d.type === "assistant" ||
+      (d.type === "user" &&
+        d.isMeta !== true &&
+        d.isCompactSummary !== true &&
+        (origin === undefined || origin === "human"));
+    if (host !== "codex" && settles) {
       for (const i of waiting) (out[i] as Entry).kind = d.type === "assistant" ? "prompt" : "notice";
       waiting = [];
     }

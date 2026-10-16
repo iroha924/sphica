@@ -849,3 +849,39 @@ test("an unmarked line is judged by the next message line, skipping meta lines b
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a task notice between an unmarked request and its answer does not settle the request", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-timeline-"));
+  try {
+    const at = (s: number) => `2026-10-10T00:00:0${s}.000Z`;
+    fs.writeFileSync(
+      path.join(dir, "c.jsonl"),
+      jsonl([
+        { type: "user", timestamp: at(0), message: { content: "fix search ranking" } },
+        {
+          type: "user",
+          timestamp: at(1),
+          origin: { kind: "task-notification" },
+          message: { content: "<task-notification>done</task-notification>" },
+        },
+        {
+          type: "assistant",
+          timestamp: at(2),
+          message: { content: [{ type: "text", text: "I will fix search ranking" }] },
+        },
+      ]),
+    );
+    const t = readTimeline(path.join(dir, "c.jsonl"), "claude-code");
+    assert.deepEqual(
+      t.map((e) => `${e.kind} ${e.text}`),
+      [
+        "prompt fix search ranking",
+        "notice <task-notification>done</task-notification>",
+        "reply I will fix search ranking",
+      ],
+    );
+    assert.equal(around(t, "2026-10-10T00:00:01.500Z").prompt?.text, "fix search ranking");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
