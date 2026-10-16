@@ -189,9 +189,9 @@ jobs:
           set -euo pipefail
           node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/eval-claude.test.ts test/review-eval.test.ts | tee evals.tap
           grep -qx "# fail 0" evals.tap
-          # A file with no tests still counts as one pass, so each file must show its macOS test passing
-          grep -qE "^ok [0-9]+ - collect keeps the hidden test.s completion, compliance, and poison parts apart" evals.tap
-          grep -qE "^ok [0-9]+ - M2 judges a run.s final patch" evals.tap
+          # A file with no tests still counts as one pass, so each file must show its macOS test passing: whole names, so `# SKIP` or `# TODO` do not match
+          grep -qE "^ok [0-9]+ - collect keeps the hidden test.s completion, compliance, and poison parts apart, and a part with a forged line is unknown$" evals.tap
+          grep -qE "^ok [0-9]+ - M2 judges a run.s final patch: a forbidden import that stays is a violation, the exception is not, and the hidden test decides completion$" evals.tap
       # Sphica runs git outside the agent's sandbox: config, attributes, and hooks the agent writes must run nothing, here as on Linux
       - name: Git config the agent writes runs nothing
         working-directory: server

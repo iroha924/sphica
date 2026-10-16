@@ -128,6 +128,16 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - コミット: `ci(macos): run the Darwin-only evaluation tests (T06)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-reporter=tap test/eval-claude.test.ts test/review-eval.test.ts` → `# pass 76`, `# fail 0`, 35 s; the two greps for the named macOS tests each match 1 line; `actionlint` → exit 0; `bun run pairs` → exit 0
 
+- [x] T17: match the macOS test names whole, so a skipped or todo test does not pass the step
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（the step it fixes）
+  - 変更: `.github/workflows/check.yml`
+  - red: `grep -qE "^ok [0-9]+ - M2 judges a run.s final patch" skip.tap` → exit 0 on a TAP line ending `# TODO` (and the collect pattern on `# SKIP`; Codex review of T06)
+  - 完了条件: `grep -cE "<whole-name pattern>$" skip.tap` → 0 for both, and 1 each on the real run's evals.tap; `actionlint` → exit 0
+  - コミット: `ci(macos): match the evaluation test names whole (T17)`
+  - 結果: red: both old patterns matched the SKIP/TODO lines; after: `grep -cE` → skip.tap 0 and 0, evals.tap 1 and 1; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
+
 ## P4: main への push で PR の run を繰り返さない
 
 merge 後の main への push は、push 専用の検査だけ流して重い job を省き、根拠が揃わなければ全部流す。
@@ -200,3 +210,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T14 / Codex re-review of 2d60d047: 1 finding [P2] reproduced: a trailing comma or escaped scalar in the matrix passes / fixed in the added T15; further findings that rely on YAML spellings the reader does not decode are declined (a repository writer's own CI file, not shipped, not a security boundary; third round on the same rule)
 - 2026-10-16 / T05 / Codex review of a1db2de3: 1 finding [P3] reproduced: a ref holding a tab passed the parser and ran check (Git never writes one; no way around verify for main) / fixed in the added T16
 - 2026-10-16 / T07, T09 / 変更 of T07 adds `scripts/lib/same-tree.d.mts` and `knip.json`, T09 adds `knip.json` / knip reports the script unused until check.yml runs it, so T07 lists it as an entry and T09 removes that entry
+- 2026-10-16 / T06 / Codex review of 8cf0b21e: 1 finding [P2] reproduced: the name greps accept `# SKIP` / `# TODO` lines / fixed in the added T17 (the older git steps' greps share the pattern; left as they are, outside this plan)
