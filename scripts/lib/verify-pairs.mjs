@@ -155,9 +155,9 @@ export function verifyProblems({ pkg, check, release, lychee }) {
   const gate = job(check, "check");
   if (!gate) problems.push("check.yml has no check job");
   else {
-    const judge = steps(gate).find((s) => s.includes("        run: node scripts/check-parts.mjs part"));
+    const judge = steps(gate).find((s) => s.includes("        run: node scripts/check-parts.mjs part macos"));
     if (
-      !gate.includes("    needs: [same-tree, part]") ||
+      !gate.includes("    needs: [same-tree, part, macos]") ||
       !gate.includes("    if: always()") ||
       !judge ||
       conditional(judge) ||
@@ -165,7 +165,7 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       !judge.includes("          EVENT: ${{ github.event_name }}")
     )
       problems.push(
-        "check.yml check job does not run always after same-tree and part and check, by event, that every part succeeded",
+        "check.yml check job does not run always after same-tree, part, and macos and check, by event, that each succeeded",
       );
     // Each required check stands for every Node line, so the part job must run on the same lines
     const lines = matrixOf(gate, "node");

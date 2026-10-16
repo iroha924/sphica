@@ -150,3 +150,4 @@ S6. Skip the push run that repeats the PR's run (check.yml):
 なし
 
 ## 変更履歴
+- 2026-10-16 / the gate jobs also need and judge `macos` (Node 24.15 and 26), skipped only on a tested push like the parts / the full-diff review found a macOS failure did not block the required checks, which weighs more once pre-push no longer runs the suite on macOS for work branches / the owner chose this option (Go given in the conversation)

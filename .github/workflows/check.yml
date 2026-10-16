@@ -157,9 +157,9 @@ jobs:
           node ../scripts/check-tarball.mjs "$tgz"
 
   # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
-  # skipped, so this runs always and fails unless every part (on both lines) succeeded.
+  # skipped, so this runs always and fails unless every part (on both lines) and both macos jobs succeeded.
   check:
-    needs: [same-tree, part]
+    needs: [same-tree, part, macos]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -180,7 +180,7 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
-        run: node scripts/check-parts.mjs part
+        run: node scripts/check-parts.mjs part macos
 
   # The evaluation's hidden tests run the agent's code inside macOS's sandbox-exec, which exists nowhere else. This job tries every way out of
   # that sandbox for real, and runs the poisoned tasks' hidden tests through it, so a weaker profile fails here and not in an evaluation.

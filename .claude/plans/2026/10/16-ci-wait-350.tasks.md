@@ -199,6 +199,15 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `fix(ci): treat same-second runs as unordered in same-tree (T20)`
   - 結果: red: → pass 0, fail 1; after: `node --test server/test/same-tree.test.ts` → pass 9, fail 0; `bun run typecheck`, `bun run pairs` → exit 0
 
+- [x] T21: make the gate wait for macos and judge it like a part
+  - 種別: 変更
+  - 計画: S6
+  - 依存: T09（the gate it extends）
+  - 変更: `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `server/test/check-parts.test.ts`
+  - 完了条件: `node --test server/test/verify-pairs.test.ts server/test/check-parts.test.ts` → all pass, including a gate without macos failing; `bun run pairs` → exit 0; `actionlint` → exit 0
+  - コミット: `ci: block the required checks on a macOS failure (T21)`
+  - 結果: `node --test server/test/verify-pairs.test.ts server/test/check-parts.test.ts` → pass 19, fail 0; `bun run pairs` → exit 0; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
+
 ## P5: 並列数の試し
 
 同じコードと seed で並列数 3 と 4 を比べ、効いたときだけ 4 を残す。
@@ -254,3 +263,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T12 / under concurrency 4, attempt 2 of run 38860130253 failed a lock-time test on Node 24.15 (224.8 ms against 200 ms); not seen at concurrency 3 / not a reason by itself (the 10% rule decided), recorded as a sign that 4 workers on 4 vCPUs crowd timing tests
 - 2026-10-16 / T20 / GitHub's Codex on PR #351 (head b774d2fa): 3 threads [P2]: run_attempt used across runs (fixed in T20); a ref-qualified run path (declined: this repository's pull_request runs report `.github/workflows/check.yml` with no ref in 5 of 5 samples, and a mismatch only runs everything); CONTRIBUTING.md's pre-push line (fixed in T19)
 - 2026-10-16 / final / Codex full-diff review (high): 1 finding [P1]: the gate does not wait for macos, so a macOS failure does not block the required checks (same on main; heavier now that Darwin tests moved there) / asked of the owner with review-shipping's macOS finding
+- 2026-10-16 / T21 / the owner chose to put macos in the gate (scope added to S6; the plan's 変更履歴 records it); the full suite on macOS was not added

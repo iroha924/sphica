@@ -127,7 +127,7 @@ test("a part left out of the matrix, a condition on the verify step, or a matrix
 test("a check job that can be skipped or does not look at the parts fails", () => {
   fails(edit("check", "    if: always()\n", ""), /check job does not run always/);
   fails(
-    edit("check", "run: node scripts/check-parts.mjs part", "run: true"),
+    edit("check", "run: node scripts/check-parts.mjs part macos", "run: true"),
     /check job does not run always/,
   );
 });
@@ -295,8 +295,18 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
     fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("== 'true'", "!= 'false'")}`), want);
     fails(edit("check", at, `$1    needs: same-tree\n    if: always()\n`), want);
   }
-  const gate = /check job does not run always after same-tree and part and check, by event/;
-  fails(edit("check", "    needs: [same-tree, part]\n", "    needs: part\n"), gate);
+  const gate = /check job does not run always after same-tree, part, and macos and check, by event/;
+  fails(edit("check", "    needs: [same-tree, part, macos]\n", "    needs: part\n"), gate);
+  // A macOS failure must block the required checks too
+  fails(edit("check", "    needs: [same-tree, part, macos]\n", "    needs: [same-tree, part]\n"), gate);
+  fails(
+    edit(
+      "check",
+      "run: node scripts/check-parts.mjs part macos\n",
+      "run: node scripts/check-parts.mjs part\n",
+    ),
+    gate,
+  );
   // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
   fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
 });

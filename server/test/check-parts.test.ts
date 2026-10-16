@@ -118,3 +118,31 @@ test("the script exits 1 on a failed part, unreadable NEEDS, or no EVENT, and 0 
   assert.equal(noEvent.status, 1);
   assert.match(noEvent.stderr, /neither push nor pull_request/);
 });
+
+test("macos is judged like a part: it must succeed on a pull request and may be skipped only on a tested push", () => {
+  const jobs = ["part", "macos"];
+  assert.deepEqual(
+    partProblems(
+      { "same-tree": PR_DETECTOR, part: { result: "success" }, macos: { result: "failure" } },
+      jobs,
+      "pull_request",
+    ),
+    ["macos ended failure"],
+  );
+  assert.deepEqual(
+    partProblems({ "same-tree": PR_DETECTOR, part: { result: "success" } }, jobs, "pull_request"),
+    ["macos is not in needs"],
+  );
+  assert.deepEqual(
+    partProblems(
+      {
+        "same-tree": pushDetector("success", "true"),
+        part: { result: "skipped" },
+        macos: { result: "skipped" },
+      },
+      jobs,
+      "push",
+    ),
+    [],
+  );
+});
