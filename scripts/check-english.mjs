@@ -42,6 +42,7 @@ const ENGLISH = [
   "server/test/acceptance-cases.test.ts",
   "server/evals/acceptance/load.ts",
   "server/evals/acceptance/run.ts",
+  "server/evals/acceptance/cases-run.ts",
   "server/evals/acceptance/driver.ts",
 ];
 

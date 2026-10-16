@@ -23,6 +23,7 @@
         "evals/cloud/fixture.ts",
         "evals/cloud/fire.ts",
         "evals/cloud/report.ts",
+        "evals/acceptance/shard-*.ts",
         "evals/asked/run.ts",
         "evals/order/run.ts",
         "evals/retrieval/run.ts",
