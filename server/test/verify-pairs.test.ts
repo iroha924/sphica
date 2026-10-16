@@ -64,19 +64,19 @@ test("a check verify runs but no part runs, or one run twice or outside verify, 
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run acceptance";
+      s["ci:unit"] = "bun run unit && bun run acceptance";
     }),
     /more than one ci:<part> script runs acceptance/,
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run notices";
+      s["ci:unit"] = "bun run unit && bun run notices";
     }),
     /runs notices, which verify does not/,
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach; true";
+      s["ci:unit"] = "bun run unit; true";
     }),
     /ci:unit is not a chain/,
   );
@@ -194,7 +194,7 @@ test("a part job on fewer Node lines than the required checks, or a judge step t
 
 test("a part that runs a check verify runs after the bundle, without bundling first, fails", () => {
   for (const [part, check] of [
-    ["unit", "sql:reach"],
+    ["unit", "unit"],
     ["acceptance", "acceptance"],
     ["static", "sql:live"],
   ] as const) {
@@ -207,8 +207,8 @@ test("a part that runs a check verify runs after the bundle, without bundling fi
   }
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run bundle";
+      s["ci:unit"] = "bun run unit && bun run bundle";
     }),
-    /ci:unit runs sql:reach without running bundle before it/,
+    /ci:unit runs unit without running bundle before it/,
   );
 });

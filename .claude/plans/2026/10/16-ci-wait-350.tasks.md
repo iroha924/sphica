@@ -46,13 +46,15 @@ Windows job が約 2 分縮み、hidden runner の検査が Node 24.15 と 26 �
 
 Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の verify は今どおり集計する。
 
-- [ ] T03: add the `unit` entry with full and tests-only modes, run by verify and ci:unit
+- [x] T03: add the `unit` entry with full and tests-only modes, run by verify and ci:unit
   - 種別: 変更
   - 計画: S2
   - 依存: なし
-  - 変更: `scripts/check-sql-reach.mjs`, `scripts/run-unit.mjs`, `package.json`, `server/test/run-unit.test.ts`, `.claude/rules/verification.md`
+  - 変更: `scripts/check-sql-reach.mjs`, `scripts/run-unit.mjs`, `package.json`, `server/test/run-unit.test.ts`, `server/test/verify-pairs.test.ts`
   - 完了条件: `node --test server/test/run-unit.test.ts` → all pass (success, child failure, leftover, tests-only flags and cleared NODE_V8_COVERAGE, kept TEST_ORDER, unknown mode, missing reach in full mode); `bun run unit` → `SQL: tests ran N / N sites`
   - コミット: `ci: run the unit tests through one entry with a tests-only mode (T03)`
+  - 結果: `node --test server/test/run-unit.test.ts server/test/verify-pairs.test.ts server/test/test-run.test.ts` → pass 20, fail 0 (the first run failed tests-only's cleared NODE_V8_COVERAGE; fixed, see 記録)
+  - 結果: `caffeinate -i bun run unit` → exit 0, `SQL: tests ran 266 / 266 sites against a real SQLite database`, 97 s; `SPHICA_UNIT_MODE=tests-only bun run unit` → exit 0, `SQL reach was not counted`, 78 s; `bun run pairs` → exit 0
 
 - [ ] T04: set tests-only on the Node 24.15 unit part and require that line in verify-pairs
   - 種別: 変更
@@ -142,3 +144,6 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 
 - 2026-10-16 / T01 / 完了条件 was "`bun run hooks:live` → exit 0 on macOS, the sh line still lists \"without node\"; the Windows job's log on this branch's CI lists \"without node\" for cmd.exe only" and is now the macOS part only / the Windows log can only be seen after a push, after the commit that checks the task; it is observed under the plan's A5
 - 2026-10-16 / T01 / Codex review of 03a0e6de: 0 findings (it could not run hooks:live in its read-only sandbox; run here, exit 0) / nothing to fix
+- 2026-10-16 / T02 / Codex review of a8f35cac: 0 findings (sandbox runs not executed in its read-only sandbox; run here on both Node lines) / nothing to fix
+- 2026-10-16 / T03 / 変更 was `…, server/test/run-unit.test.ts, .claude/rules/verification.md` and is now `…, server/test/run-unit.test.ts, server/test/verify-pairs.test.ts` / verify-pairs tests named sql:reach as ci:unit's check; verification.md never says verify runs sql:reach by name, so it stays
+- 2026-10-16 / T03 / Node copies NODE_V8_COVERAGE from process.env into a child's environment that lacks it, so deleting it from the child's copy was not enough (the new test caught it) / tests-only deletes it from process.env
