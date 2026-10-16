@@ -87,7 +87,7 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - 完了条件: `node --test server/test/pre-push.test.ts` → all pass (main, work branch, HEAD~1 source, new ref, tag, deleting main, mixed, malformed line, commit-message failure first); `printf 'refs/heads/x <oid> refs/heads/x <zero oid>\n' | node scripts/pre-push.mjs` → runs check, not verify
   - コミット: `ci(hooks): run verify before a push to main and check before other pushes (T05)`
   - 結果: `node --test server/test/pre-push.test.ts` → pass 4, fail 0; `bun run typecheck` → exit 0
-  - 結果: `node scripts/pre-push.mjs` with this branch's line on stdin (`refs/heads/ci/ci-wait-350 <HEAD> … <zero oid>`) → exit 0, `commit messages: 6 checked`, `pre-push: bun run check` (the real check ran; the first try failed in knip, fixed, see 記録)
+  - 結果: `node scripts/pre-push.mjs < <this branch's pre-push line>` → exit 0, `commit messages: 6 checked`, `pre-push: bun run check` (the real check ran; the first try failed in knip, fixed, see 記録)
 
 - [ ] T06: run the Darwin branches of eval-claude and review-eval in the macos job
   - 種別: 変更
