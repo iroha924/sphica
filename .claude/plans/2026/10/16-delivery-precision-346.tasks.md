@@ -63,13 +63,14 @@ base: main
 
 持ち主の DB の直近 7 日から 80 組を抜き取ってラベルを付け、判定と防げた例を #346 に出す。
 
-- [ ] T04: 持ち主の DB から母集団を保存し、80 組を抜き取ってシートを作る
+- [x] T04: 持ち主の DB から母集団を保存し、80 組を抜き取ってシートを作る
   - 種別: 追加
   - 計画: S2
   - 依存: T02（抜き取りとシートが要る）
   - 変更: `server/evals/delivery/population-2026-10-16.json`
   - 完了条件: `node server/evals/delivery/sample.ts --sample --population server/evals/delivery/population-2026-10-16.json --seed 20261016 --size 80 --out <scratchpad>/drawn.json` → 2 回流して同じ 80 組が同じ順に出る。`--sheet` でシートを scratchpad に書き、コミットしない
   - コミット: `test(eval): pin the 2026-10-09..16 delivery population (T04)`
+  - 結果: `node server/evals/delivery/sample.ts --db ~/.sphica/sphica.db --project git:github.com/iroha924/sphica --from 2026-10-09T00:00:00Z --to 2026-10-16T00:00:00Z --population server/evals/delivery/population-2026-10-16.json` → 3093 pairs pinned、もう一度流して 3093 pairs, the same。`--sample ... --seed 20261016 --size 80` を 2 回 → 標準出力と JSON が `cmp` で一致。`--sheet` → 80 件、うち 18 件（Codex の 16 セッション）は no transcript found
 
 - [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
   - 種別: 追加
@@ -81,5 +82,6 @@ base: main
 
 ## 記録
 
+- 2026-10-16 / T04 / 抜き取った 80 組のうち 18 組は Codex の 16 セッションで、~/.codex/sessions と archived_sessions のどこにもその id のログが無い（ephemeral の codex exec と推測、未確認） / 計画どおり除かずに「記録なし」で残し、件数を結果に書く
 - 2026-10-16 / T04 / 完了条件のコマンドに `--out` が無かった（`--sample` は書き出し先が要る）。前: `--size 80` まで、新: `--out <scratchpad>/drawn.json` を足し、シートは `--sheet` で書く / 欄を直した
 - 2026-10-16 / T06 / T01 の Codex のレビューで P2 が 2 件（窓の時刻を文字列のまま比べる、一意でない名前でプロジェクトを選ぶ）。どちらも再現できる指摘として採る / 修正タスク T06 を T02 の前に足した
