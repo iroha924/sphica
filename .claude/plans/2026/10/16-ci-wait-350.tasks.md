@@ -183,20 +183,21 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 
 同じコードと seed で並列数 3 と 4 を比べ、効いたときだけ 4 を残す。
 
-- [ ] T10: pin test concurrency 3 and a fixed seed for the trial
+- [x] T10: pin test concurrency 3 and a fixed seed for the trial
   - 種別: 変更
   - 計画: S3
   - 依存: T04（the unit parts must already run in their new modes）, T09（the trial measures the final workflow）
   - 変更: `.github/workflows/check.yml`
-  - 完了条件: `gh run view <run> --json jobs` → both unit part steps' times recorded for the run and one rerun of the part jobs
+  - 完了条件: `rg -n "test-concurrency=3" .github/workflows/check.yml` → the unit step's TEST_ORDER pins 3 on both lines and seed 350 on Node 26
   - コミット: `ci: pin test concurrency 3 and a fixed seed for the trial (T10)`
+  - 結果: `rg -n "test-concurrency=3" .github/workflows/check.yml` → one TEST_ORDER line with `--test-concurrency=3 --test-randomize --test-random-seed=350` on 26 and `--test-concurrency=3` otherwise; `actionlint` → exit 0
 
 - [ ] T11: try test concurrency 4 with the same seed
   - 種別: 変更
   - 計画: S3
   - 依存: T10（the baseline it is compared against）
   - 変更: `.github/workflows/check.yml`
-  - 完了条件: `gh run view <run> --json jobs` → both unit part steps' times recorded for the run and one rerun of the part jobs
+  - 完了条件: `rg -n "test-concurrency=4" .github/workflows/check.yml` → the unit step's TEST_ORDER pins 4 on both lines and the same seed 350 on Node 26
   - コミット: `ci: try test concurrency 4 (T11)`
 
 - [ ] T12: keep or drop concurrency 4 by the 10% rule and restore the seed
@@ -204,7 +205,7 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - 計画: S3
   - 依存: T11（the measurements the rule reads）
   - 変更: `.github/workflows/check.yml`
-  - 完了条件: `rg -n "test-concurrency|test-random-seed" .github/workflows/check.yml` → the seed comes from `github.run_number`, and `--test-concurrency=4` is present only if both lines' medians dropped by 10% or more
+  - 完了条件: `rg -n "test-concurrency|test-random-seed" .github/workflows/check.yml` → the seed comes from `github.run_number`, and `--test-concurrency=4` is present only if both lines' medians dropped by 10% or more; the four runs' unit step times are in this task's result
   - コミット: `ci: settle the test concurrency and restore the per-run seed (T12)`
 
 ## 記録
@@ -224,3 +225,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T07, T09 / 変更 of T07 adds `scripts/lib/same-tree.d.mts` and `knip.json`, T09 adds `knip.json` / knip reports the script unused until check.yml runs it, so T07 lists it as an entry and T09 removes that entry
 - 2026-10-16 / T06 / Codex review of 8cf0b21e: 1 finding [P2] reproduced: the name greps accept `# SKIP` / `# TODO` lines / fixed in the added T17 (the older git steps' greps share the pattern; left as they are, outside this plan)
 - 2026-10-16 / T07 / Codex review of a204edc5 (high): 4 findings reproduced: [P1] the filter matched as text anywhere; [P2] another workflow's run counted; [P2] a malformed token was printed through fetch's error; [P2] an unreadable start time on an unchosen run passed / all fixed in the added T18; verify-pairs now reads the trigger with the same function
+- 2026-10-16 / T10, T11 / 完了条件 was "both unit part steps' times recorded for the run and one rerun" and is now the pinned flags in check.yml / the times exist only after the push that follows the commit; T12 records all four runs' times before it decides
