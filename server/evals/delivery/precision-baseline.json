@@ -1,5 +1,5 @@
 {
-  "note": "Delivery precision baseline for #346 step 1, measured 2026-10-16 from the owner's database (read only) and Claude Code and Codex transcripts. Labels by Claude and Codex independently; a disagreement is unknown. The bar was fixed in the plan before labelling. Reported on #346: https://github.com/iroha924/sphica/issues/346#issuecomment-6211102236",
+  "note": "Delivery precision baseline for #346 step 1, measured 2026-10-16 from the owner's database (read only) and Claude Code and Codex transcripts. Labels by Claude and Codex independently; a disagreement is unknown. The bar was fixed in the plan before labelling. Reported on #346: https://github.com/iroha924/sphica/issues/346#issuecomment-6211102236; corrected after the full-diff review: https://github.com/iroha924/sphica/issues/346#issuecomment-6211346726",
   "window": {
     "from": "2026-10-09T00:00:00.000Z",
     "to": "2026-10-16T00:00:00.000Z"
@@ -225,10 +225,6 @@
         "work": "E1 of #209, PR #297",
         "done_at": "2026-10-07T07:37:54Z"
       },
-      "386": {
-        "work": "task T09 of E1, PR #297",
-        "done_at": "2026-10-07T07:37:54Z"
-      },
       "290": {
         "work": "F5, #263 and #267",
         "done_at": "2026-10-05T23:44:52Z"
@@ -311,12 +307,18 @@
       "at": "2026-10-13T00:45:25.400Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "post-shell delivery wording delivered while writing Codex own-thread capture in deliver.ts",
+      "claude_reason": "post-shell delivery wording delivered while writing Codex own-thread capture in deliver.ts; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was extracting Codex thread detection, not changing post-shell confirmation wording.",
+      "codex_reason": "The work changes Codex thread identification and capture, not the post-shell confirmation wording.",
       "settled": "irrelevant",
       "class": "open-plan",
-      "class_reason": "plan for #219 shell_write_delivery trial, done 2026-10-15T17:00:08Z, delivered 2026-10-13T00:45:25.400Z"
+      "class_reason": "plan for #219 shell_write_delivery trial, done 2026-10-15T17:00:08Z, delivered 2026-10-13T00:45:25.400Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was extracting Codex thread detection, not changing post-shell confirmation wording.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 3,
@@ -463,12 +465,18 @@
       "at": "2026-10-13T04:00:17.899Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "wanted features stay open delivered to a Codex code review of a branch",
+      "claude_reason": "wanted features stay open delivered to a Codex code review of a branch; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was reviewing capture and review delivery, not closing feature issues or selecting backlog work.",
+      "codex_reason": "The agent reviews capture and review delivery; it is not closing feature issues or choosing future work.",
       "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was reviewing capture and review delivery, not closing feature issues or selecting backlog work.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 11,
@@ -501,12 +509,18 @@
       "at": "2026-10-10T13:10:28.131Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "Codex review loop for PRs delivered to a prose-review subagent",
+      "claude_reason": "Codex review loop for PRs delivered to a prose-review subagent; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "This subagent was reviewing prose and returning findings, not pushing a PR or requesting GitHub reviews.",
+      "codex_reason": "The prose reviewer is checking documentation, with no responsibility for pushing or requesting PR reviews.",
       "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "This subagent was reviewing prose and returning findings, not pushing a PR or requesting GitHub reviews.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 13,
@@ -558,12 +572,18 @@
       "at": "2026-10-13T06:34:00.527Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "F5 plan (review batches, finished) delivered while editing parseDiff for #336",
+      "claude_reason": "F5 plan (review batches, finished) delivered while editing parseDiff for #336; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was fixing deleted-file diff parsing, not review batching, selection receipts, or read pagination.",
+      "codex_reason": "The change fixes deleted-file hunk parsing, not review batching, selection receipts, or read pagination.",
       "settled": "irrelevant",
       "class": "finished-plan",
-      "class_reason": "plan for F5, #263 and #267, done 2026-10-05T23:44:52Z, delivered 2026-10-13T06:34:00.527Z"
+      "class_reason": "plan for F5, #263 and #267, done 2026-10-05T23:44:52Z, delivered 2026-10-13T06:34:00.527Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was fixing deleted-file diff parsing, not review batching, selection receipts, or read pagination.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 16,
@@ -596,12 +616,18 @@
       "at": "2026-10-09T00:35:45.595Z",
       "transcript": "found",
       "claude": "useful",
-      "claude_reason": "reply in Japanese, delivered to the owner's working session; the session went on to mix English replies",
+      "claude_reason": "reply in Japanese, delivered to the owner's working session; the session went on to mix English replies; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "useful",
-      "codex_reason": "The agent was reporting progress to the owner, so the Japanese-language requirement directly applied.",
+      "codex_reason": "The Japanese-language requirement directly applies to the agent's progress reports and final replies to the owner.",
       "settled": "useful",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "useful",
+        "codex": "useful",
+        "codex_reason": "The agent was reporting progress to the owner, so the Japanese-language requirement directly applied.",
+        "settled": "useful"
+      }
     },
     {
       "n": 18,
@@ -672,12 +698,18 @@
       "at": "2026-10-11T20:04:13.682Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "quoted words never adopt, delivered while adding the answers field to record.ts; the edit reuses adoption as it is",
+      "claude_reason": "quoted words never adopt, delivered while adding the answers field to record.ts; the edit reuses adoption as it is; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "useful",
-      "codex_reason": "Closing questions relies on an answer's adoption authority; quoted text must not acquire that authority.",
+      "codex_reason": "Closing questions through an owner's adopted answer must preserve the rule that quoted words cannot establish adoption.",
       "settled": "unknown",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "useful",
+        "codex_reason": "Closing questions relies on an answer's adoption authority; quoted text must not acquire that authority.",
+        "settled": "unknown"
+      }
     },
     {
       "n": 22,
@@ -710,12 +742,18 @@
       "at": "2026-10-14T07:57:58.489Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "no README push during a release run, delivered to a shipping review of the revision recheck branch",
+      "claude_reason": "no README push during a release run, delivered to a shipping review of the revision recheck branch; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The subagent was reviewing transaction revision checks, not pushing README changes during a release.",
+      "codex_reason": "The agent reviews transaction enforcement in shipped artifacts; it is not pushing README changes during a release.",
       "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The subagent was reviewing transaction revision checks, not pushing README changes during a release.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 24,
@@ -767,12 +805,18 @@
       "at": "2026-10-12T12:04:39.393Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "search fixes plan (finished) delivered while editing caller detection in mcp-record.ts",
+      "claude_reason": "search fixes plan (finished) delivered while editing caller detection in mcp-record.ts; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was implementing caller identification and automatic-trace gating, not search behavior or MCP input-schema strictness.",
+      "codex_reason": "The work changes caller identification and automatic-trace authorization, not search behavior or MCP input schemas.",
       "settled": "irrelevant",
       "class": "finished-plan",
-      "class_reason": "plan for #204 search fixes, done 2026-10-02T17:16:42Z, delivered 2026-10-12T12:04:39.393Z"
+      "class_reason": "plan for #204 search fixes, done 2026-10-02T17:16:42Z, delivered 2026-10-12T12:04:39.393Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was implementing caller identification and automatic-trace gating, not search behavior or MCP input-schema strictness.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 27,
@@ -862,12 +906,18 @@
       "at": "2026-10-12T01:23:42.833Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "declined capture revision numbering, delivered on a resume prompt during the answers and work-item fixes",
+      "claude_reason": "declined capture revision numbering, delivered on a resume prompt during the answers and work-item fixes; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was implementing work updates and question-closing reports, not capture source revision numbering.",
+      "codex_reason": "The resumed work concerns question closure and work-status updates, not capture message revisions.",
       "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was implementing work updates and question-closing reports, not capture source revision numbering.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 32,
@@ -919,12 +969,18 @@
       "at": "2026-10-14T14:55:54.044Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "post-shell delivery wording delivered to a shipping review of the #218 task reading deliver.ts",
+      "claude_reason": "post-shell delivery wording delivered to a shipping review of the #218 task reading deliver.ts; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The review concerned pre-command denial output, not post-shell keep-or-undo wording.",
+      "codex_reason": "The review concerns command blocking before execution, not keep-or-undo wording after shell changes.",
       "settled": "irrelevant",
       "class": "open-plan",
-      "class_reason": "plan for #219 shell_write_delivery trial, done 2026-10-15T17:00:08Z, delivered 2026-10-14T14:55:54.044Z"
+      "class_reason": "plan for #219 shell_write_delivery trial, done 2026-10-15T17:00:08Z, delivered 2026-10-14T14:55:54.044Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The review concerned pre-command denial output, not post-shell keep-or-undo wording.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 35,
@@ -942,8 +998,8 @@
       "codex": "unknown",
       "codex_reason": "No transcript found; the module list alone does not establish whether warning merging was involved.",
       "settled": "unknown",
-      "class": "finished-plan",
-      "class_reason": "plan for task T09 of E1, PR #297, done 2026-10-07T07:37:54Z, delivered 2026-10-11T13:42:36.743Z"
+      "class": "standing",
+      "class_reason": "a lasting condition: keep the merged save-reply warnings even without the warning trial (it names E1 task T09, but the text keeps a behaviour); reclassified after the full-diff review"
     },
     {
       "n": 36,
@@ -976,12 +1032,18 @@
       "at": "2026-10-13T06:14:47.944Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "M1 plan (finished) delivered while reading review.ts for #336",
-      "codex": "useful",
-      "codex_reason": "The parser-fix plan includes before-and-after delivery benchmarks, for which the established fresh-process measurement method and threshold are relevant.",
-      "settled": "unknown",
+      "claude_reason": "M1 plan (finished) delivered while reading review.ts for #336; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
+      "codex": "irrelevant",
+      "codex_reason": "The record sets the scope of an earlier performance optimization; the current task fixes a diff-parser correctness defect.",
+      "settled": "irrelevant",
       "class": "finished-plan",
-      "class_reason": "plan for M1 #270, done 2026-10-07T00:30:14Z, delivered 2026-10-13T06:14:47.944Z"
+      "class_reason": "plan for M1 #270, done 2026-10-07T00:30:14Z, delivered 2026-10-13T06:14:47.944Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "useful",
+        "codex_reason": "The parser-fix plan includes before-and-after delivery benchmarks, for which the established fresh-process measurement method and threshold are relevant.",
+        "settled": "unknown"
+      }
     },
     {
       "n": 38,
@@ -1071,12 +1133,18 @@
       "at": "2026-10-13T01:11:22.172Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "W8 lock-wait and drain fixes delivered while adding the own-thread check to capture.ts; the edit leaves draining as it is",
+      "claude_reason": "W8 lock-wait and drain fixes delivered while adding the own-thread check to capture.ts; the edit leaves draining as it is; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was restricting Codex capture to its own thread, not changing spool-drain locking or batch guarantees.",
+      "codex_reason": "The agent changes capture's thread-ownership gate, not drain lock retries or minimum batch sending.",
       "settled": "irrelevant",
       "class": "finished-plan",
-      "class_reason": "plan for W8 #188, done 2026-09-28T20:42:14Z, delivered 2026-10-13T01:11:22.172Z"
+      "class_reason": "plan for W8 #188, done 2026-09-28T20:42:14Z, delivered 2026-10-13T01:11:22.172Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was restricting Codex capture to its own thread, not changing spool-drain locking or batch guarantees.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 43,
@@ -1242,12 +1310,18 @@
       "at": "2026-10-09T00:36:55.129Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "epic's next work item decision delivered while fixing the eval sandbox's temp-directory denies in grade.ts",
+      "claude_reason": "epic's next work item decision delivered while fixing the eval sandbox's temp-directory denies in grade.ts; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was fixing evaluation sandbox defects, not choosing the next epic item or implementing grading checkpoints.",
+      "codex_reason": "The agent is fixing sandbox review findings, not selecting the epic's next task.",
       "settled": "irrelevant",
       "class": "finished-plan",
-      "class_reason": "plan for T1 #269, done 2026-10-06T06:52:08Z, delivered 2026-10-09T00:36:55.129Z"
+      "class_reason": "plan for T1 #269, done 2026-10-06T06:52:08Z, delivered 2026-10-09T00:36:55.129Z",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was fixing evaluation sandbox defects, not choosing the next epic item or implementing grading checkpoints.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 52,
@@ -1265,8 +1339,8 @@
       "codex": "useful",
       "codex_reason": "The record-server reply redesign must preserve deduplication of warnings produced by both check and save.",
       "settled": "useful",
-      "class": "finished-plan",
-      "class_reason": "plan for task T09 of E1, PR #297, done 2026-10-07T07:37:54Z, delivered 2026-10-11T13:42:39.818Z"
+      "class": "standing",
+      "class_reason": "a lasting condition: keep the merged save-reply warnings even without the warning trial (it names E1 task T09, but the text keeps a behaviour); reclassified after the full-diff review"
     },
     {
       "n": 53,
@@ -1318,12 +1392,18 @@
       "at": "2026-10-10T19:20:22.750Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "no compile cache in hook bundles, delivered to a shipping review of the own-words change reading manifests",
+      "claude_reason": "no compile cache in hook bundles, delivered to a shipping review of the own-words change reading manifests; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The shipping review concerned quotation authority and doctor output; no compile-cache change was proposed or examined.",
+      "codex_reason": "The shipping review concerns quotation handling and doctor output; no compile-cache change is proposed.",
       "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The shipping review concerned quotation authority and doctor output; no compile-cache change was proposed or examined.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 56,
@@ -1375,12 +1455,18 @@
       "at": "2026-10-13T03:52:06.988Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "one-baseline worktree race (dead end), delivered on an \"OK\" prompt while finishing the Codex review and forget tasks",
+      "claude_reason": "one-baseline worktree race (dead end), delivered on an \"OK\" prompt while finishing the Codex review and forget tasks; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "irrelevant",
-      "codex_reason": "The agent was finishing Codex review delivery and forget changes, not redesigning worktree baseline attribution.",
+      "codex_reason": "The visible work finishes review delivery and forget messaging, without changing edit-baseline tracking.",
       "settled": "irrelevant",
       "class": "other",
-      "class_reason": "kind dead_end"
+      "class_reason": "kind dead_end",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "irrelevant",
+        "codex_reason": "The agent was finishing Codex review delivery and forget changes, not redesigning worktree baseline attribution.",
+        "settled": "irrelevant"
+      }
     },
     {
       "n": 59,
@@ -1470,12 +1556,18 @@
       "at": "2026-10-13T11:17:12.452Z",
       "transcript": "found",
       "claude": "useful",
-      "claude_reason": "search fixes plan (path normalization, strict input schemas) delivered on Go while the as-of search work changed search arguments and tests",
+      "claude_reason": "search fixes plan (path normalization, strict input schemas) delivered on Go while the as-of search work changed search arguments and tests; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "useful",
-      "codex_reason": "The agent was changing and regression-testing search; existing candidate-query, path-validation, and normalization decisions are conditions to preserve.",
+      "codex_reason": "Adding historical search and timeline behavior must preserve existing search query, matching, and input-validation decisions.",
       "settled": "useful",
       "class": "finished-plan",
-      "class_reason": "plan for #204 search fixes, done 2026-10-02T17:16:42Z, delivered 2026-10-13T11:17:12.452Z"
+      "class_reason": "plan for #204 search fixes, done 2026-10-02T17:16:42Z, delivered 2026-10-13T11:17:12.452Z",
+      "first": {
+        "claude": "useful",
+        "codex": "useful",
+        "codex_reason": "The agent was changing and regression-testing search; existing candidate-query, path-validation, and normalization decisions are conditions to preserve.",
+        "settled": "useful"
+      }
     },
     {
       "n": 64,
@@ -1527,12 +1619,18 @@
       "at": "2026-10-09T01:23:47.253Z",
       "transcript": "found",
       "claude": "useful",
-      "claude_reason": "hidden tests judge real files in a scratch sandbox, delivered while fixing the eval sandbox's deny list around hidden tests",
+      "claude_reason": "hidden tests judge real files in a scratch sandbox, delivered while fixing the eval sandbox's deny list around hidden tests; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "useful",
-      "codex_reason": "The agent was fixing hidden-test scratch-directory and sandbox behavior, directly covered by the real-file testing decision.",
+      "codex_reason": "The agent examines hidden-test scratch handling, where real sandboxed file writes are the required evaluation method.",
       "settled": "useful",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "useful",
+        "codex": "useful",
+        "codex_reason": "The agent was fixing hidden-test scratch-directory and sandbox behavior, directly covered by the real-file testing decision.",
+        "settled": "useful"
+      }
     },
     {
       "n": 67,
@@ -1546,12 +1644,18 @@
       "at": "2026-10-11T08:03:50.158Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "owner's no-compromise fixing stance delivered to a shipping-review subagent",
+      "claude_reason": "owner's no-compromise fixing stance delivered to a shipping-review subagent; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
       "codex": "useful",
-      "codex_reason": "The reviewer was checking reply-budget fixes and their tests; the requirement to address underlying problems applies to that assessment.",
+      "codex_reason": "The owner's requirement to investigate problems thoroughly applies to this review's reproduction and test-gap checks.",
       "settled": "unknown",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "useful",
+        "codex_reason": "The reviewer was checking reply-budget fixes and their tests; the requirement to address underlying problems applies to that assessment.",
+        "settled": "unknown"
+      }
     },
     {
       "n": 68,
@@ -1683,8 +1787,8 @@
       "codex": "irrelevant",
       "codex_reason": "The review concerned unit_answer revision triggers and rollback, not duplicate warning lines in save replies.",
       "settled": "irrelevant",
-      "class": "finished-plan",
-      "class_reason": "plan for task T09 of E1, PR #297, done 2026-10-07T07:37:54Z, delivered 2026-10-14T01:40:01.988Z"
+      "class": "standing",
+      "class_reason": "a lasting condition: keep the merged save-reply warnings even without the warning trial (it names E1 task T09, but the text keeps a behaviour); reclassified after the full-diff review"
     },
     {
       "n": 75,
@@ -1717,12 +1821,18 @@
       "at": "2026-10-13T01:07:30.354Z",
       "transcript": "found",
       "claude": "irrelevant",
-      "claude_reason": "lock-then-plan for read delivery, delivered while moving once-markers out of deliver.ts",
-      "codex": "useful",
-      "codex_reason": "Changes to delivery conversation accounting must preserve locking, deduplication, and budget guarantees described by the record.",
-      "settled": "unknown",
+      "claude_reason": "lock-then-plan for read delivery, delivered while moving once-markers out of deliver.ts; relabelled on the fixed sheet, same label: the added lines are later work of the same turn",
+      "codex": "irrelevant",
+      "codex_reason": "The visible delivery edit extracts once-only notice markers, rather than changing locked delivery planning or logging.",
+      "settled": "irrelevant",
       "class": "standing",
-      "class_reason": "a lasting rule or decision, not the scope of one piece of work"
+      "class_reason": "a lasting rule or decision, not the scope of one piece of work",
+      "first": {
+        "claude": "irrelevant",
+        "codex": "useful",
+        "codex_reason": "Changes to delivery conversation accounting must preserve locking, deduplication, and budget guarantees described by the record.",
+        "settled": "unknown"
+      }
     },
     {
       "n": 77,
@@ -1803,15 +1913,15 @@
   ],
   "result": {
     "n": 80,
-    "F": 23,
+    "F": 20,
     "I": 11,
-    "U": 9,
-    "R": 3,
+    "U": 7,
+    "R": 2,
     "classes": {
       "finished-plan": {
-        "useful": 3,
+        "useful": 2,
         "irrelevant": 11,
-        "unknown": 9
+        "unknown": 7
       },
       "open-plan": {
         "useful": 0,
@@ -1824,8 +1934,8 @@
         "unknown": 0
       },
       "standing": {
-        "useful": 5,
-        "irrelevant": 26,
+        "useful": 6,
+        "irrelevant": 28,
         "unknown": 22
       },
       "other": {
@@ -1836,14 +1946,23 @@
     },
     "settled": {
       "useful": 9,
-      "irrelevant": 40,
-      "unknown": 31
+      "irrelevant": 42,
+      "unknown": 29
     },
     "no_transcript": 18,
-    "labellers_agreed": 67,
+    "labellers_agreed": 69,
     "prevented": [],
-    "prevented_note": "Neither labeller found a pair where the transcript shows the agent changing course because of the delivered record."
+    "prevented_note": "Neither labeller found a pair where the transcript shows the agent changing course because of the delivered record.",
+    "relabelled": {
+      "entries": [2, 10, 12, 15, 17, 21, 23, 26, 31, 34, 37, 42, 51, 55, 58, 63, 66, 67, 76],
+      "why": "the sheet was rewritten after the full-diff review (T11: a long turn keeps its end; T12 and T14: unmarked user lines are prompts only when the model answers them, meta lines skipped); both labellers labelled the entries whose sheet changed again, independently, and the earlier labels are kept under first"
+    }
   },
   "bar": "F < 8 decides nothing; go when 5I >= 4F and R + U <= 1; not adopted when 5(I + U) < 4F or R >= 2; undecided otherwise (F = I + U + R over finished-plan pairs)",
-  "verdict": "not adopted"
+  "verdict": "not adopted",
+  "sheet": {
+    "head": 20,
+    "tail": 10,
+    "note": "a long turn after a delivery shows its first 20 and last 10 lines and counts the rest"
+  }
 }

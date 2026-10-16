@@ -151,7 +151,7 @@ base: main
   - コミット: `fix(eval): skip meta lines and keep timeless lines when judging unmarked prompts (T14)`
   - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前はサブエージェントの依頼が notice になり落ちた（actual notice review this change）。timestamp の無い行を挟む入力は、直す前の readTimeline で `prompt [Request interrupted by user]` になった。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 20 件 pass。`bun run check` → 0
 
-- [ ] T13: 直したシートで変わった項目を 2 者がラベルし直し、u386 を standing に直して判定し直す
+- [x] T13: 直したシートで変わった項目を 2 者がラベルし直し、u386 を standing に直して判定し直す
   - 種別: 修正
   - 計画: S2, S3
   - 依存: T11（直したシート）, T12（直したシート）, T14（直したシート）
@@ -159,6 +159,7 @@ base: main
   - red: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → u386 の 3 組を finished-plan に数えた (23,11,9,3) が出る
   - 完了条件: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 作り直したシートと直した分類での値が出て、`node server/evals/delivery/sample.ts --decide` の出力と一致する。ラベルし直した項目と前のラベルが JSON に残り、#346 に差分を書いたコメントの URL が note にある
   - コミット: `test(eval): relabel the entries the fixed sheet changed and reclassify u386 (T13)`
+  - 結果: red: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 直す前は {"F":23,"I":11,"U":9,"R":3} "not adopted"。直した後 `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → {"F":20,"I":11,"U":7,"R":2} "not adopted"。JSON の sample から作ったラベルで `node server/evals/delivery/sample.ts --decide` → 同じ値と verdict。変わった 19 項目を 2 者が別々にラベルし直し（Codex が 37・76 を useful から irrelevant に、Claude は変更なし）、前のラベルは first に残した。訂正のコメント https://github.com/iroha924/sphica/issues/346#issuecomment-6211346726 を note に入れた
 
 ## 記録
 
