@@ -39,7 +39,7 @@ base: main
   - 変更: `server/evals/acceptance/cases-run.ts`, `server/evals/acceptance/run.ts`, `server/evals/acceptance/shard-1.ts`, `package.json`, `server/test/acceptance-cases.test.ts`, `knip.json`, `scripts/check-english.mjs`
   - 完了条件: `caffeinate -i bun run acceptance` → pass 148 / fail 0 で、時間が 271 秒より短い（選んだ N・並行数と、比べた値を結果に書く）。`cd server && node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → pass。`bun run --cwd server acceptance` → pass 148
   - コミット: `test(eval): run the acceptance cases as parallel shards (T02)`
-  - 結果: N と並行数の実測（この Mac 12 コア、caffeinate -i、全部 pass 148 / fail 0）: N=8・既定の並行数（11）42 秒、N=12・11 で 50 秒、N=16・16 で 36 秒、N=4・3 で 116 秒、N=8・3 で 95 秒。N=8、並行数は既定を採った（CI の 4 vCPU では既定が 3）
+  - 結果: `node --test --test-timeout=60000 --test-concurrency=<c> server/evals/acceptance/shard-*.ts` → N と並行数を変えて（この Mac 12 コア、caffeinate -i）全部 pass 148 / fail 0。N=8・既定の並行数（11）42 秒、N=12・11 で 50 秒、N=16・16 で 36 秒、N=4・3 で 116 秒、N=8・3 で 95 秒。N=8、並行数は既定を採った（CI の 4 vCPU では既定が 3）
   - 結果: `bun run acceptance` → 44 秒、tests 148 / pass 148 / fail 0（基準 271 秒）。`bun run --cwd server acceptance` → 250 秒、pass 148。`node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → pass 6。`bun run sql:reach` → 266 / 266。knip・english・lint・typecheck → 0
 
 ## P2: CI の check を部分ごとの並行のジョブにする
