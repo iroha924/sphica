@@ -112,13 +112,14 @@ base: main
   - コミット: `test(eval): pin the 2026-10-09..16 delivery population (T04)`
   - 結果: `node server/evals/delivery/sample.ts --db ~/.sphica/sphica.db --project git:github.com/iroha924/sphica --from 2026-10-09T00:00:00Z --to 2026-10-16T00:00:00Z --population server/evals/delivery/population-2026-10-16.json` → 3093 pairs pinned、もう一度流して 3093 pairs, the same。`--sample ... --seed 20261016 --size 80` を 2 回 → 標準出力と JSON が `cmp` で一致。`--sheet` → 80 件、うち 18 件（Codex の 16 セッション）は no transcript found
 
-- [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
+- [x] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
   - 種別: 追加
   - 計画: S2, S3
   - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）, T08（ラベルに使うシートの直し）, T09（ラベルに使うシートの直し）, T10（ラベルに使うシートの直し）
   - 変更: `server/evals/delivery/precision-baseline.json`
   - 完了条件: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。#346 のコメント（文面は持ち主の承認の後）の URL が JSON の note にある
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
+  - 結果: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。`node server/evals/delivery/sample.ts --decide <settled.json>` → F=23, I=11, U=9, R=3、verdict not adopted。2 者の一致 67/80、記録なし 18。#346 のコメント https://github.com/iroha924/sphica/issues/346#issuecomment-6211102236（持ち主の承認の後に投稿）を note に入れた
 
 ## 記録
 
