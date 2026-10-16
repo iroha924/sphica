@@ -507,6 +507,11 @@ await withTempDir(async (dir) => {
   );
   const nodeExe = path.basename(process.execPath);
   const withoutNode = dirs.filter((d) => d !== path.dirname(process.execPath));
+  // Every outer shell starts the same inner line, and "node exiting 7" shows each passes a failure on, so a missing node is shown once:
+  // on Windows the inner PowerShell takes 24 to 50 seconds to report it
+  const missingNodeShell = windows ? "cmd.exe" : "sh";
+  if (!shells.some((s) => s.name === missingNodeShell))
+    throw new Error(`${missingNodeShell} is not among the shells`);
   for (const s of shells) {
     // PowerShell turns any failing native command into 1; the others pass node's code through
     const powershell = /powershell|pwsh/.test(s.name);
@@ -522,7 +527,16 @@ await withTempDir(async (dir) => {
         expect: (st) => (powershell ? st !== 0 : st === 7),
         pathDirs: [...dirs, ...shellDirs],
       },
-      { what: "without node", code: "0", expect: (st) => st !== 0, pathDirs: [...withoutNode, ...shellDirs] },
+      ...(s.name === missingNodeShell
+        ? [
+            {
+              what: "without node",
+              code: "0",
+              expect: (st) => st !== 0,
+              pathDirs: [...withoutNode, ...shellDirs],
+            },
+          ]
+        : []),
     ]) {
       const line = (
         windows ? (captureHook.commandWindows ?? captureHook.command) : captureHook.command
@@ -533,7 +547,7 @@ await withTempDir(async (dir) => {
         env: { ...env, PATH: pathDirs.join(path.delimiter), PLUGIN_ROOT: stub, STUB_EXIT: code },
         input: "{}",
         encoding: "utf8",
-        // A PowerShell that cannot find node takes 24 to 39 seconds to say so on the Windows runner
+        // A PowerShell that cannot find node takes 24 to 50 seconds to say so on the Windows runner
         timeout: 2 * TIMEOUT_MS,
         windowsVerbatimArguments: Boolean(s.verbatim),
         windowsHide: true,

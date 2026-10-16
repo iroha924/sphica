@@ -1,6 +1,6 @@
 # Checks what pre-commit does not.
 #
-# **The main value is the tests and SQL reach in `bun run verify`**: pre-commit does not run them; pre-push and CI do.
+# **The main value is the tests and SQL reach in `bun run verify`**: pre-commit does not run them; CI does, and pre-push before a push to main.
 # The rest duplicates pre-commit, but closes the `--no-verify` and no-hooks paths here. The plugin version, though,
 # is checked not per commit but across the whole range from the merge target or the pre-push commit to HEAD.
 #
@@ -10,7 +10,9 @@ name: check
 on:
   push:
     branches: [main]
+  # Only pull requests into main: a push to main reuses a passed run on the merged head only when that run tested a merge into main
   pull_request:
+    branches: [main]
 
 # It neither reasons nor writes anywhere, so it gets read access only.
 permissions:
@@ -22,10 +24,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A push to main runs its own checks here (the merge commit's message, the version across the push), then asks whether the pull request
+  # already passed this tree (scripts/same-tree.mjs); only then are the jobs below skipped. Pull requests skip this job and run everything.
+  same-tree:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Reads the merged head's runs; nothing else is granted
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tested: ${{ steps.decide.outputs.tested }}
+    steps:
+      - uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15"
+      - name: commit message
+        env:
+          RANGE: ${{ format('{0}..HEAD', github.event.before) }}
+        run: node scripts/check-commit-msg.mjs --range "$RANGE"
+      - name: Is the plugin version bumped
+        env:
+          BASE: ${{ github.event.before }}
+        run: node scripts/check-mcp-version.mjs --base "$BASE"
+      - name: Did the pull request already pass this tree
+        id: decide
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/same-tree.mjs
+
   # verify runs here split into parts that run at once: each part runs package.json's ci:<part>, and `bun run pairs` checks that the parts
-  # add up to verify exactly (pre-push runs verify whole). Every part runs on both the engines floor (24.15) and the next line (26).
+  # add up to verify exactly (pre-push runs verify whole before a push to main). Every part runs on both the engines floor (24.15) and the next line (26).
   part:
     name: "part (${{ matrix.node }}, ${{ matrix.part }})"
+    needs: same-tree
+    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # If one part fails, the others' results are kept.
@@ -93,12 +135,14 @@ jobs:
         run: bun run setup
 
       # static: Biome, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
-      # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database. acceptance: the cases.
+      # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database; on the floor line the tests
+      # run without coverage, the part's largest cost there, and reach is counted on the other line. acceptance: the cases.
       # On Node 26 the tests run in a random order, from a seed printed in the log, so a test that leans on another's leftovers shows up.
       # The flag goes to the test command, not NODE_OPTIONS, which children would inherit (a child node refuses --test-randomize without --test)
       - name: This part of verify
         env:
           PART: ${{ matrix.part }}
+          SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}
           TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
         run: bun run "ci:$PART"
 
@@ -113,9 +157,9 @@ jobs:
           node ../scripts/check-tarball.mjs "$tgz"
 
   # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
-  # skipped, so this runs always and fails unless every part (on both lines) succeeded.
+  # skipped, so this runs always and fails unless every part (on both lines) and both macos jobs succeeded.
   check:
-    needs: part
+    needs: [same-tree, part, macos]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -135,13 +179,21 @@ jobs:
       - name: Did every part succeed
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/check-parts.mjs part
+          EVENT: ${{ github.event_name }}
+        run: node scripts/check-parts.mjs part macos
 
   # The evaluation's hidden tests run the agent's code inside macOS's sandbox-exec, which exists nowhere else. This job tries every way out of
   # that sandbox for real, and runs the poisoned tasks' hidden tests through it, so a weaker profile fails here and not in an evaluation.
   macos:
+    needs: same-tree
+    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}
     runs-on: macos-latest
     timeout-minutes: 15
+    # Each Node line fences the network its own way (26 refuses it in Node first), so the sandbox is checked on both
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["24.15", "26"]
     steps:
       - uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
         with:
@@ -155,7 +207,7 @@ jobs:
           no-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.15"
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: bun run setup
       - name: The hidden test sandbox, and the poisoned tasks' hidden tests through it
@@ -174,6 +226,17 @@ jobs:
           node --test --test-reporter=tap --test-timeout=120000 test/test-run.test.ts | tee test-run.tap
           grep -qx "# fail 0" test-run.tap
           grep -qE "^# pass [1-9]" test-run.tap
+      # On macOS collect reads the hidden test's parts and the review evaluation runs the real sandbox; elsewhere both take another branch,
+      # and pre-push runs verify only before a push to main, so this is where those branches run
+      - name: The evaluations' macOS branches
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/eval-claude.test.ts test/review-eval.test.ts | tee evals.tap
+          grep -qx "# fail 0" evals.tap
+          # A file with no tests still counts as one pass, so each file must show its macOS test passing: whole names, so `# SKIP` or `# TODO` do not match
+          grep -qE "^ok [0-9]+ - collect keeps the hidden test.s completion, compliance, and poison parts apart, and a part with a forged line is unknown$" evals.tap
+          grep -qE "^ok [0-9]+ - M2 judges a run.s final patch: a forbidden import that stays is a violation, the exception is not, and the hidden test decides completion$" evals.tap
       # Sphica runs git outside the agent's sandbox: config, attributes, and hooks the agent writes must run nothing, here as on Linux
       - name: Git config the agent writes runs nothing
         working-directory: server
@@ -189,6 +252,8 @@ jobs:
   # it runs the file lock tests, and checks that the bundled tarball starts without node_modules and can create a database with node:sqlite.
   # How the CLI draws in a terminal shows only on a real machine (CI cannot check it).
   windows:
+    needs: same-tree
+    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 15
     defaults:
@@ -285,6 +350,8 @@ jobs:
   # The oldest git Sphica supports reads core.fsmonitor=false as a hook named "false" and has no GIT_NO_LAZY_FETCH: the attack tests run on
   # Ubuntu 22.04's own git 2.34, and the job fails if that is not the git it runs
   git-2-34:
+    needs: same-tree
+    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:

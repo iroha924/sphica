@@ -39,7 +39,7 @@ pre-commit:
         bun run bundle
         bun run scripts/check-mcp-version.mjs
     # This checks only how SQL is written. Whether SQL ran against a real SQLite database (sql:reach) and the child process lane (sql:live)
-    # rerun the tests, so pre-push verify and CI check them.
+    # rerun the tests, so CI checks them, and pre-push verify before a push to main.
     - name: sql
       glob: "{server/src/**/*.ts,server/test/**/*.ts,db/schema.sql,scripts/check-sql.mjs}"
       run: bun run sql
@@ -61,12 +61,9 @@ pre-commit:
 
 pre-push:
   jobs:
-    # The commit-msg hook cannot tell `-m` from the editor, so a `-m '# body'` passes it and is stored as a body.
-    # Check the stored messages of the pushed refs. Lefthook skips it when the pushed commits change no files; CI still checks those.
-    - name: commit-messages
+    # The commit-msg hook cannot tell `-m` from the editor, so a `-m '# body'` passes it and is stored as a body: the stored messages of the
+    # pushed refs are checked first. Then verify runs before a push to main and check before any other push (every pull request runs verify
+    # in CI). One job, since lefthook passes stdin to one job only. Lefthook skips it when the pushed commits change no files; CI still checks those.
+    - name: pre-push
       use_stdin: true
-      run: node scripts/check-commit-msg.mjs --pre-push
-    - name: verify
-      # If left set, git in the temp repositories the tests create points at this repository
-      # (measured: it wrote core.bare=true and user.*, and added 2 commits).
-      run: unset $(git rev-parse --local-env-vars); bun run verify
+      run: node scripts/pre-push.mjs

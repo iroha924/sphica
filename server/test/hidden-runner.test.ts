@@ -5,12 +5,14 @@
 // way out for real and expects it refused, so a weaker profile fails here rather than in an evaluation.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import {
   hiddenEnv,
   hiddenNodeArgs,
@@ -18,6 +20,8 @@ import {
   NO_PARTS,
   runHiddenTest,
 } from "../evals/cloud/hidden-test.ts";
+
+const execFileAsync = promisify(execFile);
 
 test("the runner passes each Node permission as its own flag and gives the test nothing but its paths", () => {
   assert.deepEqual(hiddenNodeArgs("/c", "/s"), [
@@ -44,6 +48,18 @@ test("the runner passes each Node permission as its own flag and gives the test 
     assert.ok(profile.includes(rule), rule);
   assert.doesNotMatch(profile, /allow file-write\*[^)]*"\/c"/, "the checkout is never writable");
 });
+
+/** Runs a fetch of the port with `file` and `args` (ending in node) and returns what it printed: the refusal's code, or "connected" */
+async function reach(
+  port: number,
+  file: string,
+  args: string[],
+  options: { cwd: string; env: Record<string, string> },
+) {
+  const probe = `fetch("http://127.0.0.1:${port}/", { signal: AbortSignal.timeout(5000) }).then(() => console.log("connected"), (e) => console.log(e?.cause?.code ?? e?.code ?? e?.name))`;
+  const { stdout } = await execFileAsync(file, [...args, "-e", probe], { ...options, timeout: 30_000 });
+  return stdout.trim();
+}
 
 /** A checkout holding nothing but the hidden test, and a directory beside the scratch that a run must not reach */
 function fixture(t: { after: (fn: () => void) => void }) {
@@ -114,12 +130,13 @@ test("completion: a link in the scratch leads nowhere outside it", () => {
         refused(() => fs.readFileSync(path.join(link, "secret.txt"), "utf8"))),
   );
 });
-test("completion: the network is closed by the OS", async () => {
+test("completion: the network is closed by one of the fences", async () => {
   const e = await fetch("http://127.0.0.1:" + process.env.PROBE_PORT + "/", { signal: AbortSignal.timeout(5000) }).then(
     () => null,
     (x) => x,
   );
-  assert.equal(e?.cause?.code, "EPERM");
+  // The OS refuses with EPERM; a Node whose permission model covers the network (26 on) refuses first
+  assert.ok(["EPERM", "ERR_ACCESS_DENIED"].includes(e?.cause?.code ?? e?.code), String(e?.cause?.code ?? e?.code));
 });
 `;
   const r = runHiddenTest(
@@ -137,6 +154,36 @@ test("completion: the network is closed by the OS", async () => {
     // A connection the kernel accepted while this process was blocked surfaces now
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(connections, 0);
+
+    // The OS fence alone, with Node's permission model off, so it is checked on every Node line
+    const node = fs.realpathSync(process.execPath);
+    const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-probe-")));
+    t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+    const fenced = await reach(
+      port,
+      "/usr/bin/sandbox-exec",
+      ["-p", hiddenProfile(work, scratch, node), node],
+      {
+        cwd: work,
+        env: hiddenEnv(work, scratch),
+      },
+    );
+    assert.equal(fenced, "EPERM");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(connections, 0);
+    // The same probe outside the sandbox connects, so the refusal above is the profile's
+    let reached = 0;
+    const open = net.createServer((c) => {
+      reached++;
+      c.destroy();
+    });
+    await new Promise<void>((resolve) => open.listen(0, "127.0.0.1", resolve));
+    t.after(() => open.close());
+    await reach((open.address() as net.AddressInfo).port, node, [], {
+      cwd: work,
+      env: hiddenEnv(work, scratch),
+    });
+    assert.ok(reached > 0, "the probe without the sandbox reached its listener");
   } else {
     assert.match(r.tests, /^not run to the end/);
     assert.deepEqual(r.parts, NO_PARTS);

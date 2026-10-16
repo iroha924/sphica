@@ -508,7 +508,7 @@ if (TRAILER !== null) {
 
 // ---- CI runs what verify runs ----
 //
-// pre-push runs verify whole; check.yml runs it split into parts (package.json ci:<part>). A check added to verify but to no part, or a part
+// pre-push runs verify whole before a push to main; check.yml runs it split into parts (package.json ci:<part>). A check added to verify but to no part, or a part
 // dropped from the matrix, would leave CI green without it. The jobs that run verify:ai or check-tarball need lychee at mise.toml's pin.
 {
   const lychee = grab(

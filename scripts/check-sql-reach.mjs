@@ -24,7 +24,7 @@ import { runTestsIsolated } from "./lib/test-run.mjs";
 const TYPES_ONLY = ["src/db-types.ts"];
 
 // A failure is printed and the process left to end on its own: exiting at once would drop output still waiting in the pipe
-function main() {
+export function sqlReach() {
   const covDir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-sql-reach-"));
   try {
     reach(covDir);
@@ -127,4 +127,4 @@ function reach(covDir) {
   );
 }
 
-main();
+if (import.meta.main) sqlReach();

@@ -22,7 +22,7 @@ bun run setup                # dependencies and the Git hooks (Lefthook)
 ## Checks
 
 ```bash
-bun run verify   # lint, types, docs, bundle, and tests: the same checks pre-push and CI run
+bun run verify   # lint, types, docs, bundle, and tests: the same checks CI runs, and pre-push before a push to main
 bun run fix      # format and apply the safe lint fixes
 ```
 

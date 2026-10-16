@@ -64,19 +64,19 @@ test("a check verify runs but no part runs, or one run twice or outside verify, 
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run acceptance";
+      s["ci:unit"] = "bun run unit && bun run acceptance";
     }),
     /more than one ci:<part> script runs acceptance/,
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run notices";
+      s["ci:unit"] = "bun run unit && bun run notices";
     }),
     /runs notices, which verify does not/,
   );
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach; true";
+      s["ci:unit"] = "bun run unit; true";
     }),
     /ci:unit is not a chain/,
   );
@@ -127,7 +127,7 @@ test("a part left out of the matrix, a condition on the verify step, or a matrix
 test("a check job that can be skipped or does not look at the parts fails", () => {
   fails(edit("check", "    if: always()\n", ""), /check job does not run always/);
   fails(
-    edit("check", "run: node scripts/check-parts.mjs part", "run: true"),
+    edit("check", "run: node scripts/check-parts.mjs part macos", "run: true"),
     /check job does not run always/,
   );
 });
@@ -194,7 +194,7 @@ test("a part job on fewer Node lines than the required checks, or a judge step t
 
 test("a part that runs a check verify runs after the bundle, without bundling first, fails", () => {
   for (const [part, check] of [
-    ["unit", "sql:reach"],
+    ["unit", "unit"],
     ["acceptance", "acceptance"],
     ["static", "sql:live"],
   ] as const) {
@@ -207,8 +207,106 @@ test("a part that runs a check verify runs after the bundle, without bundling fi
   }
   fails(
     scripts(real(), (s) => {
-      s["ci:unit"] = "bun run sql:reach && bun run bundle";
+      s["ci:unit"] = "bun run unit && bun run bundle";
     }),
-    /ci:unit runs sql:reach without running bundle before it/,
+    /ci:unit runs unit without running bundle before it/,
   );
+});
+
+test("a unit mode that skips reach on another line, on every line, or on none fails", () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+  const line = "          SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}\n";
+  const want = /does not set SPHICA_UNIT_MODE to tests-only on the first Node line \(24\.15\) alone/;
+  fails(edit("check", line, ""), want);
+  fails(edit("check", line, line.replace("'24.15'", "'26'")), want);
+  fails(edit("check", line, line.replace("'tests-only' || 'full'", "'full' || 'tests-only'")), want);
+  fails(edit("check", line, "          SPHICA_UNIT_MODE: tests-only\n"), want);
+  fails(
+    edit(
+      "check",
+      '        node: ["24.15", "26"]\n        part:',
+      '        node: ["26", "24.15"]\n        part:',
+    ),
+    /tests-only on the first Node line \(26\) alone/,
+  );
+});
+
+test("a part matrix with only the floor line, once or repeated, where nothing counts SQL reach, fails", () => {
+  for (const only of ['["24.15"]', '["24.15", "24.15"]']) {
+    const files = real();
+    files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', `        node: ${only}\n`);
+    fails(files, /has no line other than the first, so SQL reach and coverage are counted nowhere/);
+  }
+});
+
+test("a part matrix entry that is not a plain version, which could hide a repeated floor, fails", () => {
+  for (const only of ['["24.15",]', '["24.15", "24.\\x31\\x35"]']) {
+    const files = real();
+    files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', `        node: ${only}\n`);
+    fails(files, /holds an entry that is not a plain version/);
+  }
+});
+
+test("a push to main that could skip the heavy jobs without same-tree's evidence, or a pull request that could skip them, fails", () => {
+  const skipIf =
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+    "    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}\n";
+  const trigger = /does not run on pushes to main and on pull requests into main only/;
+  fails(edit("check", "  pull_request:\n    branches: [main]\n", "  pull_request:\n"), trigger);
+  fails(edit("check", "  push:\n    branches: [main]\n", "  push:\n"), trigger);
+  const detector = /same-tree job does not run only on push/;
+  fails(edit("check", "    if: github.event_name == 'push'\n", ""), detector);
+  fails(edit("check", "      actions: read\n", ""), detector);
+  fails(edit("check", "        id: decide\n", ""), detector);
+  fails(
+    edit(
+      "check",
+      "        run: node scripts/same-tree.mjs\n",
+      "        run: node scripts/same-tree.mjs || true\n",
+    ),
+    detector,
+  );
+  fails(
+    edit(
+      "check",
+      /( {6}- name: commit message\n)( {8}env:\n {10}RANGE: \$\{\{ format)/,
+      "$1        if: false\n$2",
+    ),
+    detector,
+  );
+  fails(
+    edit(
+      "check",
+      /( {8}env:\n {10}BASE: \$\{\{ github\.event\.before \}\}\n {8}run: node scripts\/check-mcp-version\.mjs --base "\$BASE"\n)/,
+      "",
+    ),
+    detector,
+  );
+  fails(edit("check", /\n {2}same-tree:\n[\s\S]*?\n\n/, "\n"), /has no same-tree job/);
+  for (const name of ["part", "macos", "windows", "git-2-34"]) {
+    const at = new RegExp(
+      `(\\n {2}${name}:\\n(?: {4}name: .*\\n)?) {4}needs: same-tree\\n${skipIf.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&")}`,
+    );
+    const want = new RegExp(
+      `${name} job is not skipped exactly when same-tree found the tree already passed`,
+    );
+    fails(edit("check", at, "$1"), want);
+    fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("!cancelled() && ", "")}`), want);
+    fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("== 'true'", "!= 'false'")}`), want);
+    fails(edit("check", at, `$1    needs: same-tree\n    if: always()\n`), want);
+  }
+  const gate = /check job does not run always after same-tree, part, and macos and check, by event/;
+  fails(edit("check", "    needs: [same-tree, part, macos]\n", "    needs: part\n"), gate);
+  // A macOS failure must block the required checks too
+  fails(edit("check", "    needs: [same-tree, part, macos]\n", "    needs: [same-tree, part]\n"), gate);
+  fails(
+    edit(
+      "check",
+      "run: node scripts/check-parts.mjs part macos\n",
+      "run: node scripts/check-parts.mjs part\n",
+    ),
+    gate,
+  );
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+  fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
 });
