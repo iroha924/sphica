@@ -211,13 +211,15 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `ci: try test concurrency 4 (T11)`
   - 結果: `rg -n "test-concurrency=4" .github/workflows/check.yml` → one TEST_ORDER line with `--test-concurrency=4 --test-randomize --test-random-seed=350` on 26 and `--test-concurrency=4` otherwise; `actionlint` → exit 0
 
-- [ ] T12: keep or drop concurrency 4 by the 10% rule and restore the seed
+- [x] T12: keep or drop concurrency 4 by the 10% rule and restore the seed
   - 種別: 変更
   - 計画: S3
   - 依存: T11（the measurements the rule reads）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `rg -n "test-concurrency|test-random-seed" .github/workflows/check.yml` → the seed comes from `github.run_number`, and `--test-concurrency=4` is present only if both lines' medians dropped by 10% or more; the four runs' unit step times are in this task's result
   - コミット: `ci: settle the test concurrency and restore the per-run seed (T12)`
+  - 結果: `gh run view <run> --json jobs` → unit step seconds, concurrency 3 (run 38858891038, attempts 1 and 2): Node 24.15 287 and 277 (median 282), Node 26 308 and 187 (median 248); concurrency 4 (run 38860130253, attempts 1 and 2): Node 24.15 181 and 211 (median 196, -30%), Node 26 277 and 245 (median 261, +5%)
+  - 結果: Node 26 did not drop by 10%, so 4 is dropped. `rg -n "test-concurrency|test-random-seed" .github/workflows/check.yml` → no `--test-concurrency`, the seed from `github.run_number` on 26; `actionlint` → exit 0. Attempt 2's 24.15 unit failed `reconcile.test.ts` "judge budget … under 200 ms" (224.8 ms) under concurrency 4; the test is unchanged
 
 ## 記録
 
@@ -239,3 +241,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T10, T11 / 完了条件 was "both unit part steps' times recorded for the run and one rerun" and is now the pinned flags in check.yml / the times exist only after the push that follows the commit; T12 records all four runs' times before it decides
 - 2026-10-16 / T09 / Codex review of 1d14bb11 (high): 1 finding [P2]: a PR retargeted to main without a push starts no check run, so its required checks stay pending / declined: it fails closed (cannot merge), 2 of 195 PRs ever targeted another branch, closing and reopening or one push starts the run, and catching `edited` would rerun everything on every body edit
 - 2026-10-16 / T19 / review-shipping on the branch: ship it; release kind none; release.yml's reliance on the PR's check run holds; 1 medium: work-branch pushes no longer run the whole suite on macOS before merge (asked of the owner, not changed); 3 low stale passages / fixed in the added T19
+- 2026-10-16 / T12 / under concurrency 4, attempt 2 of run 38860130253 failed a lock-time test on Node 24.15 (224.8 ms against 200 ms); not seen at concurrency 3 / not a reason by itself (the 10% rule decided), recorded as a sign that 4 workers on 4 vCPUs crowd timing tests

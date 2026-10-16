@@ -143,7 +143,7 @@ jobs:
         env:
           PART: ${{ matrix.part }}
           SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}
-          TEST_ORDER: ${{ matrix.node == '26' && '--test-concurrency=4 --test-randomize --test-random-seed=350' || '--test-concurrency=4' }}
+          TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
         run: bun run "ci:$PART"
 
       # **Check what ships as a tarball.** dist and db are untracked, so `git diff` shows nothing.
