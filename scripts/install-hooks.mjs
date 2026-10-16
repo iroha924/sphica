@@ -18,12 +18,16 @@ function main() {
     console.log("hooks: not installed in CI");
     return;
   }
+  // Run from inside a git hook, GIT_DIR and the like still name the outer repository; the tree is the one this runs in
+  const env = { ...process.env };
   let top, gitDir, common;
   try {
+    for (const k of execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8" }).split("\n"))
+      delete env[k];
     [top, gitDir, common] = execFileSync(
       "git",
       ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
-      { encoding: "utf8" },
+      { encoding: "utf8", env },
     )
       .trim()
       .split("\n");
@@ -39,7 +43,7 @@ function main() {
     return;
   }
   const lefthook = path.join(top, "server", "node_modules", "lefthook", "bin", "index.js");
-  const r = spawnSync(process.execPath, [lefthook, "install"], { cwd: top, stdio: "inherit" });
+  const r = spawnSync(process.execPath, [lefthook, "install"], { cwd: top, env, stdio: "inherit" });
   if (r.status !== 0) {
     console.error(`hooks: lefthook install ended with ${r.status ?? r.signal ?? r.error?.message}`);
     process.exitCode = 1;

@@ -51,8 +51,8 @@ function repos() {
 const install = (cwd: string, env: Record<string, string | undefined> = {}) => {
   const e: NodeJS.ProcessEnv = { ...process.env, ...env };
   for (const [k, v] of Object.entries(env)) if (v === undefined) delete e[k];
-  // A run from inside a git hook would carry these and point git at the outer repository
-  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete e[k];
+  // The shell running the tests may itself run inside a git hook; only the variables a test sets reach the script
+  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) if (!(k in env)) delete e[k];
   return spawnSync(process.execPath, [SCRIPT], { cwd, env: e, encoding: "utf8" });
 };
 const hash = (file: string) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
@@ -93,4 +93,19 @@ test("a failed install, or a directory outside any repository, fails setup", () 
   const outside = install(fs.realpathSync(tempDir("sphica-no-repo-")), { CI: undefined });
   assert.equal(outside.status, 1);
   assert.match(outside.stderr, /cannot tell whether this is the main working tree/);
+});
+
+test("git variables a hook passes on, naming the main repository, do not make a worktree install", () => {
+  const { main, worktree, hook } = repos();
+  assert.equal(install(main, { CI: undefined }).status, 0);
+  const before = hash(hook);
+  const r = install(worktree, {
+    CI: undefined,
+    GIT_DIR: path.join(main, ".git"),
+    GIT_WORK_TREE: main,
+    GIT_INDEX_FILE: path.join(main, ".git", "index"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /not installed from the worktree/);
+  assert.equal(hash(hook), before);
 });

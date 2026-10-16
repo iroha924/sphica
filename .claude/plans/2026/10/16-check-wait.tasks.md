@@ -113,6 +113,16 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → pass 4 / fail 0。worktree の判定を外した写しでは worktree のケースが落ちることを確かめて戻した
   - 結果: `env -u CI bun run setup` → 捨てる clone で main は hook を main へ向け、worktree は「not installed from the worktree」で 3 つの hook のハッシュが前後で同じ、`CI=1` は「not installed in CI」。このリポジトリでも rc=0 で pre-commit がこのリポジトリの server/node_modules を指す。lint・typecheck・knip・english・headers・comments・pairs・verify:ai → 0
 
+- [x] T10: hook の中から setup が呼ばれても、引き継いだ git の変数で worktree を main と取り違えないようにする
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（install-hooks とそのテストが要る）
+  - 変更: `scripts/install-hooks.mjs`, `server/test/install-hooks.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → 直す前の install-hooks では、worktree から GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE を main に向けて流すケースが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → 5 件 pass
+  - コミット: `fix(setup): ignore the git variables a hook passes on when telling a worktree (T10)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → 直す前（2cc07756 の install-hooks）で pass 4 / fail 1（足したケース）、直した後で pass 5 / fail 0。lint・typecheck・english・comments・knip → 0
+
 ## P5: README の Features を中心の 5 つから始める
 
 - [x] T07: README.md と README.ja.md の Features を並べ替える
@@ -131,3 +141,5 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
 - 2026-10-16 / T03, T04 / T03 の変更欄に `scripts/lib/check-parts.d.mts`、T04 の変更欄に `package.json`（ci:<part>）と `scripts/lib/verify-pairs.d.mts` を足した（既存の .mjs は .d.mts で型を持つ）。T03 は knip の未使用を避けるため T04 と同じコミット / 変更欄を直した
 - 2026-10-16 / T04 / Codex のレビュー（high）: F1〜F4（PART と matrix.part の切断、`- if:` の先頭キー、part の node の軸、判定ステップの if を verify-pairs が見逃す）を 4 件とも採った。どれも再現付き / 修正タスク T09 を足した
 - 2026-10-16 / T05 / Codex のレビュー（high）: 指摘なし。tarball の新旧比較は sandbox で未実行なので、A9 の計測の clone で verify の前後の pack を比べる / 記録だけ
+- 2026-10-16 / T09 / red を手元でも確かめた: 07f850b7 の verify-pairs に戻して流すと、足した 2 つのテストが落ちる（pass 7 / fail 2）/ 記録だけ
+- 2026-10-16 / T06 / Codex のレビュー（medium）: F1「hook から引き継いだ GIT_DIR などで worktree を main と取り違える」を採った。再現付き / 修正タスク T10 を足した
