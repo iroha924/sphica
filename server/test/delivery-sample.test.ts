@@ -157,12 +157,17 @@ test("the script pins the population once, and stops with the difference when th
 });
 
 test("the script names the arguments a mode is missing", () => {
-  const r = spawnSync(process.execPath, [SCRIPT, "--db", "x.db", "--from", WINDOW.from], {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH },
-  });
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /--db needs --project, --to, --population/);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-sample-"));
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, "--db", "x.db", "--from", WINDOW.from], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home },
+    });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--db needs --project, --to, --population/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("a window given without milliseconds keeps the delivery at its first instant", async () => {
@@ -653,6 +658,7 @@ test("a Codex child thread's delivery is labelled from the child's log, not its 
       path.join(codexDir, "rollout-2026-10-11T00-00-01-01bb-child.jsonl"),
       log("the child's task"),
     );
+    fs.mkdirSync(path.join(dir, "claude"));
     const drawnFile = path.join(dir, "drawn.json");
     fs.writeFileSync(drawnFile, JSON.stringify({ pairs: [{ n: 1, delivery: d, unit: u }] }));
     const out = path.join(dir, "sheet.md");
@@ -882,6 +888,88 @@ test("a task notice between an unmarked request and its answer does not settle t
     );
     assert.equal(around(t, "2026-10-10T00:00:01.500Z").prompt?.text, "fix search ranking");
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the script stops by name on a missing transcript root, a bad seed or size, an empty window, and a pair never delivered", async () => {
+  const db = tempDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-sample-"));
+  try {
+    const f = fixture(db);
+    const env = { PATH: process.env.PATH, HOME: dir };
+    const go = (args: string[]) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env });
+    const population = path.join(dir, "population.json");
+    const pin = (from: string, to: string, out = population) =>
+      go([
+        "--db",
+        db.file,
+        "--project",
+        "git:github.com/o/r",
+        "--from",
+        from,
+        "--to",
+        to,
+        "--population",
+        out,
+      ]);
+    for (const [from, to] of [
+      [WINDOW.to, WINDOW.from],
+      [WINDOW.from, WINDOW.from],
+    ] as const) {
+      const r = pin(from, to, path.join(dir, "empty.json"));
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /--from must be before --to/);
+      assert.equal(fs.existsSync(path.join(dir, "empty.json")), false);
+    }
+    assert.equal(pin(WINDOW.from, WINDOW.to).status, 0);
+    for (const [flag, value, said] of [
+      ["--size", "-1", /--size -1 is not a whole number above 0/],
+      ["--size", "nope", /--size nope is not a whole number above 0/],
+      ["--size", "0", /--size 0 is not a whole number above 0/],
+      ["--seed", "nope", /--seed nope is not a whole number/],
+    ] as const) {
+      const rest = flag === "--seed" ? ["--size", "3"] : ["--seed", "7"];
+      const r = go([
+        "--sample",
+        "--population",
+        population,
+        ...rest,
+        `${flag}=${value}`,
+        "--out",
+        path.join(dir, "d.json"),
+      ]);
+      assert.notEqual(r.status, 0, `${flag} ${value}`);
+      assert.match(r.stderr, said);
+    }
+    const claude = path.join(dir, "claude");
+    fs.mkdirSync(claude);
+    const drawn = path.join(dir, "drawn.json");
+    const sheet = (codex: string) =>
+      go([
+        "--sheet",
+        drawn,
+        "--db",
+        db.file,
+        "--claude",
+        claude,
+        "--codex",
+        codex,
+        "--out",
+        path.join(dir, "s.md"),
+      ]);
+    fs.writeFileSync(drawn, JSON.stringify({ pairs: [{ n: 1, delivery: f.first, unit: f.a }] }));
+    const missing = sheet(path.join(dir, "no-such-codex"));
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /--codex .*no-such-codex is not a directory/);
+    fs.mkdirSync(path.join(dir, "codex"));
+    assert.equal(sheet(path.join(dir, "codex")).status, 0);
+    fs.writeFileSync(drawn, JSON.stringify({ pairs: [{ n: 1, delivery: f.lowId, unit: f.a }] }));
+    const never = sheet(path.join(dir, "codex"));
+    assert.notEqual(never.status, 0);
+    assert.match(never.stderr, new RegExp(`pair 1 \\(delivery ${f.lowId}, unit ${f.a}\\) was not delivered`));
+  } finally {
+    await db.done();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

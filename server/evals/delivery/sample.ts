@@ -86,6 +86,26 @@ function instant(name: string, value: string): string {
   return d.toISOString();
 }
 
+function window(from: string, to: string): Window {
+  const w = { from: instant("from", from), to: instant("to", to) };
+  if (w.from >= w.to) throw new Error(`--from must be before --to (${w.from}, ${w.to})`);
+  return w;
+}
+
+/** A whole-number argument at or above min, so a typo cannot draw another sample than the one asked for */
+function whole(name: string, value: string, min: number): number {
+  const n = Number(value);
+  if (!/^-?\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n < min)
+    throw new Error(`--${name} ${value} is not a whole number${min > 0 ? " above 0" : ""}`);
+  return n;
+}
+
+function directory(name: string, value: string): string {
+  if (!fs.existsSync(value) || !fs.statSync(value).isDirectory())
+    throw new Error(`--${name} ${value} is not a directory`);
+  return value;
+}
+
 /** project is the project's key: names are not unique, since the same owner and repository can live on two hosts */
 async function pin(file: string, project: string, w: Window, population: string): Promise<void> {
   const db = openReader(file);
@@ -307,7 +327,16 @@ async function sheetEntry(
     .select(["key", "kind", "stance", "text", "why"])
     .where("id", "=", d.unit)
     .executeTakeFirst();
-  if (!row || !u) return `## ${d.n}. delivery ${d.delivery} unit ${d.unit}: not in the database\n`;
+  const delivered = await db
+    .selectFrom("delivery_unit")
+    .select("unit_id")
+    .where("delivery_id", "=", d.delivery)
+    .where("unit_id", "=", d.unit)
+    .executeTakeFirst();
+  if (!row || !u || !delivered)
+    throw new Error(
+      `pair ${d.n} (delivery ${d.delivery}, unit ${d.unit}) was not delivered in this database`,
+    );
   const options = await db
     .selectFrom("unit_option")
     .select(["outcome", "text"])
@@ -457,11 +486,13 @@ async function main(): Promise<void> {
     const population = JSON.parse(fs.readFileSync(values.population as string, "utf8")) as Population;
     if (digest(population.pairs) !== population.sha256)
       throw new Error(`${values.population} does not hash to its pinned sha256`);
-    const drawn = draw(population, Number(values.seed), Number(values.size));
+    const seed = whole("seed", values.seed as string, 0);
+    const size = whole("size", values.size as string, 1);
+    const drawn = draw(population, seed, size);
     const out = {
       population_sha256: population.sha256,
-      seed: Number(values.seed),
-      size: Number(values.size),
+      seed,
+      size,
       pairs: drawn,
     };
     fs.writeFileSync(values.out as string, `${JSON.stringify(out, null, 2)}\n`);
@@ -472,8 +503,8 @@ async function main(): Promise<void> {
     need("--sheet", ["db", "claude", "codex", "out"]);
     const drawn = (JSON.parse(fs.readFileSync(values.sheet, "utf8")) as { pairs: Drawn[] }).pairs;
     const text = await sheet(values.db as string, drawn, {
-      claude: values.claude as string,
-      codex: values.codex as string,
+      claude: directory("claude", values.claude as string),
+      codex: directory("codex", values.codex as string),
     });
     fs.writeFileSync(values.out as string, text);
     console.log(`${drawn.length} entries written to ${values.out}`);
@@ -484,7 +515,7 @@ async function main(): Promise<void> {
     await pin(
       values.db,
       values.project as string,
-      { from: instant("from", values.from as string), to: instant("to", values.to as string) },
+      window(values.from as string, values.to as string),
       values.population as string,
     );
     return;
