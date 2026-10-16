@@ -214,8 +214,12 @@ function codexLine(d: Record<string, unknown>, at: string): Entry[] {
   return [];
 }
 
-export function readTimeline(file: string, host: string): Entry[] {
+export const readTimeline = (file: string, host: string): Entry[] => readLog(file, host).entries;
+
+/** A conversation's entries, and how many of its lines could not be read: a sheet built from a damaged log says so */
+function readLog(file: string, host: string): { entries: Entry[]; unreadable: number } {
   const out: Entry[] = [];
+  let unreadable = 0;
   /** Where in out the Claude Code user lines with no origin are that no message line has followed yet */
   let waiting: number[] = [];
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
@@ -224,9 +228,13 @@ export function readTimeline(file: string, host: string): Entry[] {
     try {
       d = JSON.parse(line);
     } catch {
+      unreadable++;
       continue;
     }
-    if (!isObject(d)) continue;
+    if (!isObject(d)) {
+      unreadable++;
+      continue;
+    }
     // The model answers only a prompt, not a local command's output or an interruption marker. A meta line (a Skill's text) or a notice
     // can sit between a prompt and its answer, so neither settles it; a line without a time still does
     const origin = isObject(d.origin) ? d.origin.kind : undefined;
@@ -249,7 +257,7 @@ export function readTimeline(file: string, host: string): Entry[] {
     }
   }
   for (const i of waiting) (out[i] as Entry).kind = "notice";
-  return out;
+  return { entries: out, unreadable };
 }
 
 /** Where a delivery's conversation is: a Claude Code session or one of its subagents by name, a Codex thread (a child's own) by the id its log names */
@@ -314,7 +322,7 @@ async function sheetEntry(
   d: Drawn,
   roots: { claude: string; codex: string },
   codexFiles: () => string[],
-  timelines: Map<string, Entry[]>,
+  timelines: Map<string, ReturnType<typeof readLog>>,
 ): Promise<string> {
   const row = await db
     .selectFrom("delivery as d")
@@ -355,12 +363,13 @@ async function sheetEntry(
   else {
     let t = timelines.get(file);
     if (!t) {
-      t = readTimeline(file, row.host);
+      t = readLog(file, row.host);
       timelines.set(file, t);
     }
-    const a = around(t, row.at);
+    const a = around(t.entries, row.at);
+    const damaged = t.unreadable ? ` (${t.unreadable} unreadable line${t.unreadable === 1 ? "" : "s"})` : "";
     lines.push(
-      `conversation: ${file}`,
+      `conversation: ${file}${damaged}`,
       a.opensAfter ? "the first prompt, which came after the delivery:" : "the prompt that opened the turn:",
       a.prompt ? `    ${indent(head(a.prompt.text, 1500))}` : "    (none before the delivery)",
       "just before the delivery:",
@@ -393,7 +402,7 @@ async function sheet(
     files ??= walk(roots.codex);
     return files;
   };
-  const timelines = new Map<string, Entry[]>();
+  const timelines = new Map<string, ReturnType<typeof readLog>>();
   const db = openReader(file);
   try {
     const out: string[] = [];

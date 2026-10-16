@@ -181,7 +181,7 @@ base: main
   - コミット: `fix(eval): validate the sample script's inputs at the boundary (T16)`
   - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は逆の窓が終了コード 0 で落ちた。直す前のスクリプトに差し戻して各場合の終了コードを出すと、`--size=-1`、`--size=nope`、`--size=0`、`--seed=nope`、無い `--codex`、配信されていない組がどれも 0 だった。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 22 件 pass。`bun run check` → 0
 
-- [ ] T17: 会話の記録の読めない行を数えてシートに出す
+- [x] T17: 会話の記録の読めない行を数えてシートに出す
   - 種別: 修正
   - 計画: S1
   - 依存: T16（同じファイルの直しの後）
@@ -189,6 +189,7 @@ base: main
   - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 読めない行のある記録で、シートに件数が出ないテストが落ちる
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。conversation の行に読めない行の件数が出る
   - コミット: `fix(eval): show a transcript's unreadable lines in the sheet (T17)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は「(1 unreadable line)」が出ずシートのテストが落ちた。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 22 件 pass。`bun run check` → 0
 
 ## 記録
 

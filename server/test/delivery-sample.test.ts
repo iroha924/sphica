@@ -497,6 +497,8 @@ test("the script draws the same sample twice and writes a sheet with each conver
     assert.match(entry(sub), /subagent ag1[\s\S]*agent-ag1\.jsonl/);
     assert.match(entry(codex), /Review commit abc[\s\S]*No defects/);
     assert.match(entry(none), /conversation: no transcript found/);
+    assert.match(entry(main), /conversation: \S+cc-1\.jsonl \(1 unreadable line\)/);
+    assert.match(entry(codex), /\(1 unreadable line\)/);
     fs.writeFileSync(
       population,
       fs.readFileSync(population, "utf8").replace(/"sha256":"[0-9a-f]+"/, '"sha256":"00"'),
