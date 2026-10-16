@@ -15,9 +15,9 @@ export function pushLines(stdin) {
     const [localRef, localOid, remoteRef, remoteOid] = fields;
     if (
       fields.length !== 4 ||
-      !localRef ||
+      !/^\S+$/.test(localRef ?? "") ||
       !OID.test(localOid ?? "") ||
-      !remoteRef?.startsWith("refs/") ||
+      !/^refs\/\S+$/.test(remoteRef ?? "") ||
       !OID.test(remoteOid ?? "")
     )
       return {

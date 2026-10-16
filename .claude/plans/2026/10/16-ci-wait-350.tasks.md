@@ -109,6 +109,16 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - 結果: `node --test server/test/pre-push.test.ts` → pass 4, fail 0; `bun run typecheck` → exit 0
   - 結果: `node scripts/pre-push.mjs < <this branch's pre-push line>` → exit 0, `commit messages: 6 checked`, `pre-push: bun run check` (the real check ran; the first try failed in knip, fixed, see 記録)
 
+- [x] T16: refuse whitespace inside a pushed ref, so a malformed line runs nothing
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（the parser it tightens）
+  - 変更: `scripts/lib/pre-push.mjs`, `server/test/pre-push.test.ts`
+  - red: `node --test server/test/pre-push.test.ts` → fail 1 before the fix (`HEAD <oid> refs/heads/main\t <zero oid>` was accepted and ran check; Codex review of T05)
+  - 完了条件: `node --test server/test/pre-push.test.ts` → all pass, with refs holding a tab refused
+  - コミット: `fix(hooks): refuse whitespace inside a pushed ref (T16)`
+  - 結果: red: `node --test server/test/pre-push.test.ts` with the new cases → pass 3, fail 1; after: → pass 4, fail 0; `bun run typecheck` → exit 0
+
 - [x] T06: run the Darwin branches of eval-claude and review-eval in the macos job
   - 種別: 変更
   - 計画: S5
@@ -187,3 +197,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T05 / 変更 was `scripts/pre-push.mjs, lefthook.yml, server/test/pre-push.test.ts, CLAUDE.md` and is now also `scripts/lib/pre-push.mjs`, `scripts/lib/pre-push.d.mts`, `knip.json`, `.claude/skills/fork-pr/SKILL.md` / tested logic lives in scripts/lib with a .d.mts as elsewhere; knip finds entries in package.json and workflows but not lefthook.yml, so it reported the hook script unused; the fork-pr Skill said pre-push runs verify on a pushed branch
 - 2026-10-16 / T13 / Codex re-review of fed98ebd: 1 finding [P2] reproduced: a matrix repeating the floor (`["24.15", "24.15"]`) still passes / fixed in the added T14
 - 2026-10-16 / T14 / Codex re-review of 2d60d047: 1 finding [P2] reproduced: a trailing comma or escaped scalar in the matrix passes / fixed in the added T15; further findings that rely on YAML spellings the reader does not decode are declined (a repository writer's own CI file, not shipped, not a security boundary; third round on the same rule)
+- 2026-10-16 / T05 / Codex review of a1db2de3: 1 finding [P3] reproduced: a ref holding a tab passed the parser and ran check (Git never writes one; no way around verify for main) / fixed in the added T16

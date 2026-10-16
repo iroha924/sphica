@@ -37,6 +37,8 @@ test("Git's four fields are read whatever the local side names, and anything els
     `refs/heads/x ${A.slice(1)} refs/heads/x ${B}`,
     `refs/heads/x ${A} heads/x ${B}`,
     `refs/heads/x  ${A} refs/heads/x ${B}`,
+    `HEAD ${A} refs/heads/main\t ${Z}`,
+    `HEAD\t ${A} refs/heads/main ${Z}`,
   ])
     assert.match(pushLines(bad).bad ?? "", /^line \d+ is not/, bad);
 });
