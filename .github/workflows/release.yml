@@ -3,6 +3,8 @@
 # Runs when a `v<version>` tag is pushed to the PR head (before the merge). prepare checks the tag, PR, CI, and environment and builds the tarball,
 # then comments on the PR with this run's URL. After the owner's approval, publish sends the same tarball to `npm publish --tag latest`,
 # merge merges the PR, and finish checks what npm serves and creates the GitHub Release (.agents/skills/plugin-release/SKILL.md).
+# prepare does not rerun verify: the gate requires the PR's check (verify on both Node lines) to have succeeded on the same commit,
+# and the PR's dry run runs this same build path.
 #
 # No secrets. It reaches npm through trusted publishing (OIDC), with provenance.
 name: release
@@ -187,7 +189,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-env.mjs
 
-      # The links check in verify (verify:ai) needs lychee; the version matches mise.toml (bun run pairs checks it)
+      # The tarball check needs lychee; the version matches mise.toml (bun run pairs checks it)
       - name: Install lychee
         env:
           LYCHEE: "0.24.2"
@@ -204,10 +206,11 @@ jobs:
       - name: Install dependencies
         run: bun run setup
 
-      - name: Lint, types, bundle, tests, SQL reach, and the child process lane
-        run: bun run verify
+      # The checks ran in the PR's check on this commit (the gate requires it), so this only builds what ships
+      - name: Bundle
+        run: bun run bundle
 
-      # If verify rewrote tracked files, what ships would drift from the tag commit
+      # If the build rewrote tracked files, what ships would drift from the tag commit
       - name: Is the working tree still at the tag commit
         run: git diff --exit-code HEAD
 

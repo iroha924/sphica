@@ -78,13 +78,14 @@ check の壁時計を、部分（static / unit / acceptance）のうち最も長
 
 タグの push の prepare から verify の重複（約 10 分）を外し、PR の dry run で同じ経路を実走する。
 
-- [ ] T05: release.yml の prepare から verify を外し、plugin-release の説明を合わせる
+- [x] T05: release.yml の prepare から verify を外し、plugin-release の説明を合わせる
   - 種別: 変更
   - 計画: S4
   - 依存: T04（check-pairs が release.yml の verify の行を要求しなくなる）
   - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run pairs && bun run verify:ai` → 0。`mise exec -- actionlint .github/workflows/release.yml` → 0。`rg -n "bun run verify" .github/workflows/release.yml` → ヒットなし
   - コミット: `ci(release): build and check the tarball in prepare without rerunning verify (T05)`
+  - 結果: `bun run pairs && bun run verify:ai` → 0。`mise exec -- actionlint .github/workflows/release.yml` → 0。`rg -n "bun run verify" .github/workflows/release.yml` → ヒットなし（rc=1）。捨てる clone（07f850b7 に新しい release.yml）で `CI=1 bun run setup && bun run bundle && git diff --exit-code HEAD` → npm pack → `node scripts/check-tarball.mjs` → 55 ファイル、CLI 0.6.60 が起動して DB を作成
 
 ## P4: worktree が共有の hook を書き換えないようにする
 
