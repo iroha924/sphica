@@ -26,6 +26,7 @@
         "evals/cloud/report.ts",
         "evals/acceptance/shard-*.ts",
         "evals/asked/run.ts",
+        "evals/delivery/sample.ts",
         "evals/order/run.ts",
         "evals/retrieval/run.ts",
         "evals/post-write/replay.ts",
