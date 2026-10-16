@@ -132,13 +132,14 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
 
 merge 後の main への push は、push 専用の検査だけ流して重い job を省き、根拠が揃わなければ全部流す。
 
-- [ ] T07: decide from git and the Actions API whether the pushed merge repeats a passed PR run
+- [x] T07: decide from git and the Actions API whether the pushed merge repeats a passed PR run
   - 種別: 追加
   - 計画: S6
   - 依存: なし
-  - 変更: `scripts/lib/same-tree.mjs`, `scripts/same-tree.mjs`, `server/test/same-tree.test.ts`
+  - 変更: `scripts/lib/same-tree.mjs`, `scripts/lib/same-tree.d.mts`, `scripts/same-tree.mjs`, `server/test/same-tree.test.ts`, `knip.json`
   - 完了条件: `node --test server/test/same-tree.test.ts` → all pass (true case; one parent; HEAD^1 not before; not an ancestor; tree differs; no branch filter in HEAD^2's check.yml; no run; newer unfinished run over an older success; tie; non-success; API error)
   - コミット: `ci: tell whether a push to main repeats its pull request's passed run (T07)`
+  - 結果: `node --test server/test/same-tree.test.ts` → pass 5, fail 0 (the table, the reply reader, and the script against a throwaway merge without network; the first run caught a trimmed check.yml, fixed); `bun run typecheck` → exit 0; `bun run knip` → exit 0
 
 - [ ] T08: make check-parts event-aware for the same-tree job
   - 種別: 変更
@@ -152,7 +153,7 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - 種別: 変更
   - 計画: S6
   - 依存: T07（the job runs scripts/same-tree.mjs）, T08（the gate passes EVENT and the new needs to check-parts）
-  - 変更: `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - 変更: `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `knip.json`
   - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass, including mutations of each heavy job's needs and predicate, the gate's needs and EVENT, and the pull_request filter; `bun run pairs` → exit 0; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
   - コミット: `ci: skip the heavy jobs when a push to main repeats a passed pull request run (T09)`
 
@@ -198,3 +199,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T13 / Codex re-review of fed98ebd: 1 finding [P2] reproduced: a matrix repeating the floor (`["24.15", "24.15"]`) still passes / fixed in the added T14
 - 2026-10-16 / T14 / Codex re-review of 2d60d047: 1 finding [P2] reproduced: a trailing comma or escaped scalar in the matrix passes / fixed in the added T15; further findings that rely on YAML spellings the reader does not decode are declined (a repository writer's own CI file, not shipped, not a security boundary; third round on the same rule)
 - 2026-10-16 / T05 / Codex review of a1db2de3: 1 finding [P3] reproduced: a ref holding a tab passed the parser and ran check (Git never writes one; no way around verify for main) / fixed in the added T16
+- 2026-10-16 / T07, T09 / 変更 of T07 adds `scripts/lib/same-tree.d.mts` and `knip.json`, T09 adds `knip.json` / knip reports the script unused until check.yml runs it, so T07 lists it as an entry and T09 removes that entry
