@@ -151,21 +151,23 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `ci: tell whether a push to main repeats its pull request's passed run (T07)`
   - 結果: `node --test server/test/same-tree.test.ts` → pass 5, fail 0 (the table, the reply reader, and the script against a throwaway merge without network; the first run caught a trimmed check.yml, fixed); `bun run typecheck` → exit 0; `bun run knip` → exit 0
 
-- [ ] T08: make check-parts event-aware for the same-tree job
+- [x] T08: make check-parts event-aware for the same-tree job
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `scripts/lib/check-parts.mjs`, `scripts/check-parts.mjs`, `server/test/check-parts.test.ts`
   - 完了条件: `node --test server/test/check-parts.test.ts` → all pass over the whole table (push with same-tree success and tested true/false, same-tree failed with tested true, pull_request with same-tree skipped, failed/cancelled/missing part, missing EVENT)
   - コミット: `ci: judge the parts by event and the same-tree result (T08)`
+  - 結果: `node --test server/test/check-parts.test.ts` → pass 4, fail 0 over the push and pull_request tables; main's `partProblems` on a tested push (same-tree success, tested true, part skipped) → `["part ended skipped","same-tree is in needs but not expected"]`; committed with T09 so the gate passes EVENT in the same commit
 
-- [ ] T09: add the same-tree job, limit PR runs to main, and gate the heavy jobs on it
+- [x] T09: add the same-tree job, limit PR runs to main, and gate the heavy jobs on it
   - 種別: 変更
   - 計画: S6
   - 依存: T07（the job runs scripts/same-tree.mjs）, T08（the gate passes EVENT and the new needs to check-parts）
   - 変更: `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `knip.json`
   - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass, including mutations of each heavy job's needs and predicate, the gate's needs and EVENT, and the pull_request filter; `bun run pairs` → exit 0; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
   - コミット: `ci: skip the heavy jobs when a push to main repeats a passed pull request run (T09)`
+  - 結果: `node --test server/test/verify-pairs.test.ts server/test/check-parts.test.ts server/test/same-tree.test.ts` → pass 23, fail 0; main's verify-pairs on the new files → `check job does not run always after part …` (it rejects the valid new gate); `bun run pairs`, `bun run knip`, `bun run typecheck`, `actionlint` → exit 0
 
 ## P5: 並列数の試し
 

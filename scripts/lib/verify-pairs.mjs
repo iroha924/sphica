@@ -9,6 +9,11 @@
 const BUILDS = ["bundle"];
 const CI_RUN = '        run: bun run "ci:$PART"';
 const TARBALL_RUN = /node (\.\.\/)?scripts\/check-tarball\.mjs/;
+// Jobs a push to main skips when its pull request already passed the same tree; each must run on anything else
+const HEAVY = ["part", "macos", "windows", "git-2-34"];
+const SKIP_IF =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+  "    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}";
 
 /** The script names of a `bun run a && bun run b` line, or null for anything else */
 export function chain(line) {
@@ -150,12 +155,16 @@ export function verifyProblems({ pkg, check, release, lychee }) {
   else {
     const judge = steps(gate).find((s) => s.includes("        run: node scripts/check-parts.mjs part"));
     if (
-      !gate.includes("    needs: part") ||
+      !gate.includes("    needs: [same-tree, part]") ||
       !gate.includes("    if: always()") ||
       !judge ||
-      conditional(judge)
+      conditional(judge) ||
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+      !judge.includes("          EVENT: ${{ github.event_name }}")
     )
-      problems.push("check.yml check job does not run always after part and check that every part succeeded");
+      problems.push(
+        "check.yml check job does not run always after same-tree and part and check, by event, that every part succeeded",
+      );
     // Each required check stands for every Node line, so the part job must run on the same lines
     const lines = matrixOf(gate, "node");
     const partLines = part && matrixOf(part, "node");
@@ -164,6 +173,8 @@ export function verifyProblems({ pkg, check, release, lychee }) {
         `check.yml part job runs on Node [${partLines?.join(", ") ?? "?"}], the check job on [${lines?.join(", ") ?? "?"}]`,
       );
   }
+
+  problems.push(...sameTreeProblems(check));
 
   const prepare = job(release, "prepare");
   if (!prepare) problems.push("release.yml has no prepare job");
@@ -186,6 +197,47 @@ export function verifyProblems({ pkg, check, release, lychee }) {
     for (const s of bun)
       if (!s.includes("          no-cache: true"))
         problems.push(`${file}: a setup-bun step restores Bun from a cache (no no-cache: true)`);
+  }
+  return problems;
+}
+
+/** What lets a push to main skip the heavy jobs without the evidence scripts/same-tree.mjs requires, or a pull request skip them */
+function sameTreeProblems(check) {
+  const problems = [];
+  // The reuse holds only for runs that tested a merge into main
+  if (
+    !check.includes(`on:\n  push:\n    branches: [main]\n`) ||
+    !/\n {2}pull_request:\n {4}branches: \[main\]\n/.test(check)
+  )
+    problems.push("check.yml does not run on pushes to main and on pull requests into main only");
+  const detector = job(check, "same-tree");
+  if (!detector) problems.push("check.yml has no same-tree job");
+  else {
+    const all = steps(detector);
+    const has = (run) =>
+      all.some((st) => st.some((l) => l.startsWith(`        run: ${run}`)) && !conditional(st));
+    if (
+      !detector.includes("    if: github.event_name == 'push'") ||
+      !detector.includes("      actions: read") ||
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+      !detector.includes("      tested: ${{ steps.decide.outputs.tested }}") ||
+      !all.some(
+        (st) => st.includes("        id: decide") && st.includes("        run: node scripts/same-tree.mjs"),
+      ) ||
+      !has('node scripts/check-commit-msg.mjs --range "$RANGE"') ||
+      !has('node scripts/check-mcp-version.mjs --base "$BASE"')
+    )
+      problems.push(
+        "check.yml same-tree job does not run only on push, check the push's messages and version, and decide with scripts/same-tree.mjs",
+      );
+  }
+  for (const name of HEAVY) {
+    const lines = job(check, name);
+    if (!lines) problems.push(`check.yml has no ${name} job`);
+    else if (!lines.includes("    needs: same-tree") || !lines.includes(SKIP_IF))
+      problems.push(
+        `check.yml ${name} job is not skipped exactly when same-tree found the tree already passed`,
+      );
   }
   return problems;
 }

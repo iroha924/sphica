@@ -246,3 +246,57 @@ test("a part matrix entry that is not a plain version, which could hide a repeat
     fails(files, /holds an entry that is not a plain version/);
   }
 });
+
+test("a push to main that could skip the heavy jobs without same-tree's evidence, or a pull request that could skip them, fails", () => {
+  const skipIf =
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+    "    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}\n";
+  const trigger = /does not run on pushes to main and on pull requests into main only/;
+  fails(edit("check", "  pull_request:\n    branches: [main]\n", "  pull_request:\n"), trigger);
+  fails(edit("check", "  push:\n    branches: [main]\n", "  push:\n"), trigger);
+  const detector = /same-tree job does not run only on push/;
+  fails(edit("check", "    if: github.event_name == 'push'\n", ""), detector);
+  fails(edit("check", "      actions: read\n", ""), detector);
+  fails(edit("check", "        id: decide\n", ""), detector);
+  fails(
+    edit(
+      "check",
+      "        run: node scripts/same-tree.mjs\n",
+      "        run: node scripts/same-tree.mjs || true\n",
+    ),
+    detector,
+  );
+  fails(
+    edit(
+      "check",
+      /( {6}- name: commit message\n)( {8}env:\n {10}RANGE: \$\{\{ format)/,
+      "$1        if: false\n$2",
+    ),
+    detector,
+  );
+  fails(
+    edit(
+      "check",
+      /( {8}env:\n {10}BASE: \$\{\{ github\.event\.before \}\}\n {8}run: node scripts\/check-mcp-version\.mjs --base "\$BASE"\n)/,
+      "",
+    ),
+    detector,
+  );
+  fails(edit("check", /\n {2}same-tree:\n[\s\S]*?\n\n/, "\n"), /has no same-tree job/);
+  for (const name of ["part", "macos", "windows", "git-2-34"]) {
+    const at = new RegExp(
+      `(\\n {2}${name}:\\n(?: {4}name: .*\\n)?) {4}needs: same-tree\\n${skipIf.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&")}`,
+    );
+    const want = new RegExp(
+      `${name} job is not skipped exactly when same-tree found the tree already passed`,
+    );
+    fails(edit("check", at, "$1"), want);
+    fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("!cancelled() && ", "")}`), want);
+    fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("== 'true'", "!= 'false'")}`), want);
+    fails(edit("check", at, `$1    needs: same-tree\n    if: always()\n`), want);
+  }
+  const gate = /check job does not run always after same-tree and part and check, by event/;
+  fails(edit("check", "    needs: [same-tree, part]\n", "    needs: part\n"), gate);
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+  fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
+});
