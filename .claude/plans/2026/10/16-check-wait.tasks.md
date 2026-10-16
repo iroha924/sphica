@@ -91,7 +91,7 @@ check の壁時計を、部分（static / unit / acceptance）のうち最も長
 
 setup は依存の install scripts を流さず、hook はメインの作業ツリーで CI でないときだけ入れる。
 
-- [ ] T06: setup を --ignore-scripts にし、install-hooks で hook を入れる
+- [x] T06: setup を --ignore-scripts にし、install-hooks で hook を入れる
   - 種別: 修正
   - 計画: S5
   - 依存: なし
@@ -99,6 +99,9 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
   - red: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → テストを先に書いて今の setup の形で流すと、worktree のケースが、共有の `.git/hooks/pre-commit` が worktree の node_modules を指すことで落ちる（捨てるリポジトリでは 2026-10-16 に再現済み）
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → main で入る / CI で入らない / worktree で前後のハッシュが同じ・無ければ作られない / install の失敗で 1、が pass。`bun run setup` → 0 で、`.git/hooks/pre-commit` がこのリポジトリの server/node_modules を指す
   - コミット: `fix(setup): install the git hooks only from the main working tree (T06)`
+  - 結果: `env -u CI bun run setup` → red: 捨てる clone（19dbe3ea）の main と worktree で流すと、共有の pre-commit が main を 0 回・worktree を 2 回指す（worktree が書き換えた）
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → pass 4 / fail 0。worktree の判定を外した写しでは worktree のケースが落ちることを確かめて戻した
+  - 結果: `env -u CI bun run setup` → 捨てる clone で main は hook を main へ向け、worktree は「not installed from the worktree」で 3 つの hook のハッシュが前後で同じ、`CI=1` は「not installed in CI」。このリポジトリでも rc=0 で pre-commit がこのリポジトリの server/node_modules を指す。lint・typecheck・knip・english・headers・comments・pairs・verify:ai → 0
 
 ## P5: README の Features を中心の 5 つから始める
 

@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "setup": "bun install --cwd server --frozen-lockfile",
+    "setup": "bun install --cwd server --frozen-lockfile --ignore-scripts && node scripts/install-hooks.mjs",
     "cli": "node server/src/cli.ts",
     "lint": "server/node_modules/.bin/biome ci . --error-on-warnings",
     "fix": "server/node_modules/.bin/biome check --write .",
