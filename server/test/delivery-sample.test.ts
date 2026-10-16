@@ -389,6 +389,7 @@ test("a timeline keeps prompts, calls, and replies of both hosts, and leaves out
       before: [],
       after: [],
       more: 0,
+      tail: [],
     });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -585,7 +586,7 @@ test("after a delivery the sheet keeps the whole turn up to the next prompt, and
     text: `c${i}`,
   }));
   const b = around([{ at: t(0), kind: "prompt" as const, text: "go" }, ...long], t(1));
-  assert.equal(b.after.length + b.more, 40);
+  assert.equal(b.after.length + b.more + b.tail.length, 40);
   assert.ok(b.more > 0);
 });
 
@@ -748,4 +749,64 @@ test("a delivery made before any prompt is shown with the first prompt after it 
     around([e(0, "prompt", "go"), e(2, "call", "c")], "2026-10-10T00:00:01.000Z").opensAfter,
     false,
   );
+});
+
+test("a long turn keeps its first lines and its last ones, so the reply that ends it is never cut", () => {
+  const t = (i: number) => new Date(Date.UTC(2026, 9, 10, 0, 1, i)).toISOString();
+  const calls = Array.from({ length: 31 }, (_, i) => ({
+    at: t(i + 1),
+    kind: "call" as const,
+    text: `c${i}`,
+  }));
+  const a = around(
+    [
+      { at: t(0), kind: "prompt", text: "go" },
+      ...calls,
+      { at: t(40), kind: "reply", text: "changed the decision" },
+      { at: t(50), kind: "prompt", text: "next" },
+    ],
+    "2026-10-10T00:01:00.500Z",
+  );
+  assert.equal(a.tail.at(-1)?.text, "changed the decision");
+  assert.equal(a.after.length + a.more + a.tail.length, 32);
+  assert.ok(a.more > 0);
+});
+
+test("a user line without an origin starts a turn only when the model answers it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-timeline-"));
+  try {
+    const at = (s: number) => `2026-10-10T00:00:0${s}.000Z`;
+    fs.writeFileSync(
+      path.join(dir, "c.jsonl"),
+      jsonl([
+        { type: "user", timestamp: at(0), origin: { kind: "human" }, message: { content: "fix it" } },
+        {
+          type: "assistant",
+          timestamp: at(1),
+          message: { content: [{ type: "tool_use", id: "t", name: "Bash", input: {} }] },
+        },
+        {
+          type: "user",
+          timestamp: at(2),
+          message: { content: "[Request interrupted by user for tool use]" },
+        },
+        { type: "user", timestamp: at(3), message: { content: "<bash-stdout>ok</bash-stdout>" } },
+        { type: "user", timestamp: at(4), message: { content: "a subagent's task, answered" } },
+        { type: "assistant", timestamp: at(5), message: { content: [{ type: "text", text: "on it" }] } },
+      ]),
+    );
+    assert.deepEqual(
+      readTimeline(path.join(dir, "c.jsonl"), "claude-code").map((e) => `${e.kind} ${e.text}`),
+      [
+        "prompt fix it",
+        "call Bash {}",
+        "notice [Request interrupted by user for tool use]",
+        "notice <bash-stdout>ok</bash-stdout>",
+        "prompt a subagent's task, answered",
+        "reply on it",
+      ],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

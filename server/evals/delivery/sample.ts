@@ -149,7 +149,7 @@ const callText = (name: unknown, input: unknown) =>
   `${String(name ?? "")} ${typeof input === "string" ? input : JSON.stringify(input ?? {})}`;
 
 /** A Claude Code transcript's prompts and notices (not tool results, meta lines, or compaction summaries), tool calls, and replies */
-function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
+function claudeLine(d: Record<string, unknown>, at: string): (Entry & { unmarked?: true })[] {
   const content = isObject(d.message) ? d.message.content : undefined;
   if (d.type === "assistant" && Array.isArray(content))
     return content.flatMap((c): Entry[] =>
@@ -166,7 +166,10 @@ function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
   const text = texts(content, "text");
   const origin = isObject(d.origin) ? d.origin.kind : undefined;
   if (!text.trim()) return [];
-  return [{ at, kind: origin === undefined || origin === "human" ? "prompt" : "notice", text }];
+  // A user line with no origin waits for the next message line: only one the model answers is a prompt
+  return origin === undefined
+    ? [{ at, kind: "notice", text, unmarked: true }]
+    : [{ at, kind: origin === "human" ? "prompt" : "notice", text }];
 }
 
 /** How the context Codex adds as a user message starts in its session logs (tags, and AGENTS.md's text); a request of the user's may start with a tag */
@@ -193,6 +196,8 @@ function codexLine(d: Record<string, unknown>, at: string): Entry[] {
 
 export function readTimeline(file: string, host: string): Entry[] {
   const out: Entry[] = [];
+  /** Where in out the Claude Code user lines with no origin are that no message line has followed yet */
+  let waiting: number[] = [];
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let d: unknown;
@@ -202,8 +207,19 @@ export function readTimeline(file: string, host: string): Entry[] {
       continue;
     }
     if (!isObject(d) || typeof d.timestamp !== "string") continue;
-    out.push(...(host === "codex" ? codexLine(d, d.timestamp) : claudeLine(d, d.timestamp)));
+    // The way transcript.ts tells a prompt from a local command's output or an interruption marker: the model answers only a prompt
+    if (host !== "codex" && (d.type === "user" || d.type === "assistant")) {
+      for (const i of waiting) (out[i] as Entry).kind = d.type === "assistant" ? "prompt" : "notice";
+      waiting = [];
+    }
+    const lines: (Entry & { unmarked?: true })[] =
+      host === "codex" ? codexLine(d, d.timestamp) : claudeLine(d, d.timestamp);
+    for (const { unmarked, ...e } of lines) {
+      if (unmarked) waiting.push(out.length);
+      out.push(e);
+    }
   }
+  for (const i of waiting) (out[i] as Entry).kind = "notice";
   return out;
 }
 
@@ -224,14 +240,22 @@ function locate(
   return file && fs.existsSync(file) ? file : null;
 }
 
-/** Lines after a delivery the sheet shows at most; a longer turn shows its first ones and counts the rest */
-const AFTER = 30;
+/** Lines of the turn after a delivery the sheet shows from its start and from its end; what lies between is counted */
+const HEAD = 20;
+const TAIL = 10;
 
 /** Around a delivery: the prompt that opened its turn, the last lines before it, and what the agent did next until the next prompt */
 export function around(
   entries: Entry[],
   at: string,
-): { prompt: Entry | null; opensAfter: boolean; before: Entry[]; after: Entry[]; more: number } {
+): {
+  prompt: Entry | null;
+  opensAfter: boolean;
+  before: Entry[];
+  after: Entry[];
+  more: number;
+  tail: Entry[];
+} {
   const i = entries.findIndex((e) => e.at > at);
   const cut = i < 0 ? entries.length : i;
   const earlier = entries.slice(0, cut);
@@ -246,8 +270,9 @@ export function around(
     prompt: opened >= 0 ? (earlier[opened] as Entry) : first >= 0 ? (next[first] as Entry) : null,
     opensAfter: first >= 0,
     before: earlier.slice(Math.max(opened + 1, cut - 3)),
-    after: turn.slice(0, AFTER),
-    more: Math.max(turn.length - AFTER, 0),
+    after: turn.length > HEAD + TAIL ? turn.slice(0, HEAD) : turn,
+    more: Math.max(turn.length - HEAD - TAIL, 0),
+    tail: turn.length > HEAD + TAIL ? turn.slice(-TAIL) : [],
   };
 }
 
@@ -304,7 +329,8 @@ async function sheetEntry(
       ...a.before.map(show),
       a.opensAfter ? "that turn, until the next prompt:" : "after the delivery, until the next prompt:",
       ...a.after.map(show),
-      ...(a.more ? [`  … ${a.more} more lines until the next prompt`] : []),
+      ...(a.more ? [`  … ${a.more} lines left out`] : []),
+      ...a.tail.map(show),
     );
   }
   lines.push("label: useful / irrelevant / unknown", "");

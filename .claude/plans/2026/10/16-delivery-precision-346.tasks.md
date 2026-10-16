@@ -121,8 +121,38 @@ base: main
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
   - 結果: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。`node server/evals/delivery/sample.ts --decide <settled.json>` → F=23, I=11, U=9, R=3、verdict not adopted。2 者の一致 67/80、記録なし 18。#346 のコメント https://github.com/iroha924/sphica/issues/346#issuecomment-6211102236（持ち主の承認の後に投稿）を note に入れた
 
+- [x] T11: 配信の後のターンが長いときも、最後の動きと返答をシートに残す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T10（直す対象のターンの切り出し）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 31 件の呼び出しの後の返答がシートから消えるテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。長いターンは先頭と末尾を出し、間で省いた件数を書き、ターンの最後の返答は必ず残る
+  - コミット: `fix(eval): keep the end of a long turn in labelling sheets (T11)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は長いターンのテストが落ちた（tail が無く、31 件の呼び出しの後の返答が出ない）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 19 件 pass。先頭 20 行と末尾 10 行を出し、間の件数を書く。`bun run check` → 0。T12 と同じコミット
+
+- [x] T12: origin の無い Claude Code の行は、次が AI の返事のときだけ依頼とみなす
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象の依頼と通知の見分け）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → `[Request interrupted by user for tool use]` と `<bash-stdout>` が依頼になりターンを切るテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。origin の無い行は、次のメッセージの行が AI の返事なら依頼、そうでなければ notice（`server/evals/post-write/transcript.ts` の readConversation と同じ決め方）
+  - コミット: `fix(eval): count an unmarked user line as a prompt only when the model answers it (T12)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は `[Request interrupted by user for tool use]` と `<bash-stdout>ok</bash-stdout>` が prompt になり落ちた。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 19 件 pass。`bun run check` → 0
+
+- [ ] T13: 直したシートで変わった項目を 2 者がラベルし直し、u386 を standing に直して判定し直す
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T11（直したシート）, T12（直したシート）
+  - 変更: `server/evals/delivery/precision-baseline.json`
+  - red: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → u386 の 3 組を finished-plan に数えた (23,11,9,3) が出る
+  - 完了条件: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 作り直したシートと直した分類での値が出て、`node server/evals/delivery/sample.ts --decide` の出力と一致する。ラベルし直した項目と前のラベルが JSON に残り、#346 に差分を書いたコメントの URL が note にある
+  - コミット: `test(eval): relabel the entries the fixed sheet changed and reclassify u386 (T13)`
+
 ## 記録
 
+- 2026-10-16 / T11, T12, T13 / 全差分の Codex のレビューで P2 が 3 件（30 行で切ると最後の返答が消える、u386 は続く条件なので standing、origin の無い host の行が依頼になる）。どれも採る。u386 を直しても判定は not adopted のまま（(20,10,8,2)）/ 修正タスク T11〜T13 を足した。T08〜T10 は個別のレビューを頼まず、この全差分のレビューで見てもらった
 - 2026-10-16 / T10 / 直したシートで、セッションの開始の配信など 7 項目は最初の依頼より前に届くので、依頼が無く配信の後も空になり、ラベルの材料が無かった / 修正タスク T10 を足し、T05 の依存に T10 を足した（前: T03, T04, T07, T08, T09、新: T03, T04, T07, T08, T09, T10）
 - 2026-10-16 / T09 / 直したシートで、Claude Code の 11 項目のターンの始まりが `<task-notification>`（origin が task-notification）だった。サブエージェントの報告（origin が peer）も同じ形で入る / 修正タスク T09 を足し、T05 の依存に T09 を足した（前: T03, T04, T07, T08、新: T03, T04, T07, T08, T09）
 - 2026-10-16 / T08 / ラベルを付け始めて、Codex が AGENTS.md の本文を `# AGENTS.md instructions` で始まる user メッセージとして差し込み、シートがそれを依頼と読んで本当の依頼の手前でターンを切ることに気付いた（直近 400 ログで 401 回、シートの 6 項目）。古いシートで始めた Codex のラベルは止めた / 修正タスク T08 を足し、T05 の依存に T08 を足した（前: T03, T04, T07、新: T03, T04, T07, T08）
