@@ -106,7 +106,8 @@ Once, before the first release, the owner sets these up in the web UI (without t
    no longer contains main (`scripts/release-gate.mjs`), and the finish fails when the merge's tree differs from the tag's
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
    that `check`, `pr-body`, and `release` succeeded on that head, and that no review thread is left open (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
-   after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
+   it does not rerun `verify` (the gate's `check` on the same head ran it on both Node lines), but bundles, runs `npm pack`, and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
+   The PR's `release` dry run runs the same build path, so a tag never takes a path CI has not run.
    It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner.
    Beside `prepare`, `osv` scans the tag commit's dependencies with osv-scanner (`scripts/osv-summary.mjs`): the run summary shows the scanned SHA and

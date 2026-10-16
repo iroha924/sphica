@@ -91,6 +91,8 @@ const LEAKY = [
   "CLAUDE_CODE_SESSION_ID",
   "CODEX_THREAD_ID",
   "CODEX_SESSION_ID",
+  // SessionStart appends the session id to this file for the host's shell
+  "CLAUDE_ENV_FILE",
 ];
 
 /** Where each case's directory goes, read once: a case that never finishes keeps its own TMPDIR set, and the next must not nest in it */
