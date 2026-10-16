@@ -238,3 +238,11 @@ test("a part matrix with only the floor line, once or repeated, where nothing co
     fails(files, /has no line other than the first, so SQL reach and coverage are counted nowhere/);
   }
 });
+
+test("a part matrix entry that is not a plain version, which could hide a repeated floor, fails", () => {
+  for (const only of ['["24.15",]', '["24.15", "24.\\x31\\x35"]']) {
+    const files = real();
+    files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', `        node: ${only}\n`);
+    fails(files, /holds an entry that is not a plain version/);
+  }
+});

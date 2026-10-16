@@ -85,6 +85,16 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - コミット: `ci: require a Node line other than the floor to count SQL reach (T14)`
   - 結果: red before: `verifyProblems` on both matrices `["24.15", "24.15"]` → `[]`; after: `node --test server/test/verify-pairs.test.ts` → pass 12, fail 0; `bun run pairs` → exit 0
 
+- [x] T15: accept only plain versions in the part matrix, so YAML spellings cannot hide a repeated floor
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T14（the rule it hardens）
+  - 変更: `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - red: `node --test --test-name-pattern="not a plain version" server/test/verify-pairs.test.ts` → fail 1 against T14's verify-pairs (`["24.15",]` and an escaped `"24.\x31\x35"` pass verify-pairs; Codex re-review of T14)
+  - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass; `bun run pairs` → exit 0
+  - コミット: `ci: accept only plain versions in the part matrix (T15)`
+  - 結果: red: with T14's verify-pairs (stashed), the new test → pass 0, fail 1; after: `node --test server/test/verify-pairs.test.ts` → pass 13, fail 0; `bun run pairs` → exit 0
+
 ## P3: pre-push を main への push だけ verify に
 
 作業ブランチへの push は数秒で終わり、pre-push だけが見ていた macOS の経路は CI の macos job が見る。
@@ -176,3 +186,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T04 / Codex review of d0b7fa19: 1 finding [P2] reproduced: both Node matrices reduced to the floor pass verify-pairs while nothing counts reach / fixed in the added T13
 - 2026-10-16 / T05 / 変更 was `scripts/pre-push.mjs, lefthook.yml, server/test/pre-push.test.ts, CLAUDE.md` and is now also `scripts/lib/pre-push.mjs`, `scripts/lib/pre-push.d.mts`, `knip.json`, `.claude/skills/fork-pr/SKILL.md` / tested logic lives in scripts/lib with a .d.mts as elsewhere; knip finds entries in package.json and workflows but not lefthook.yml, so it reported the hook script unused; the fork-pr Skill said pre-push runs verify on a pushed branch
 - 2026-10-16 / T13 / Codex re-review of fed98ebd: 1 finding [P2] reproduced: a matrix repeating the floor (`["24.15", "24.15"]`) still passes / fixed in the added T14
+- 2026-10-16 / T14 / Codex re-review of 2d60d047: 1 finding [P2] reproduced: a trailing comma or escaped scalar in the matrix passes / fixed in the added T15; further findings that rely on YAML spellings the reader does not decode are declined (a repository writer's own CI file, not shipped, not a security boundary; third round on the same rule)

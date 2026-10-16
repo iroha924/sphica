@@ -128,7 +128,12 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       // Reach is counted on every line but the first (the engines floor), and nowhere else is it skipped
       const nodes = matrixOf(part, "node") ?? [];
       const floor = nodes[0];
-      if (!nodes.some((n) => n !== floor))
+      // Read as plain versions only: YAML spellings the reader does not decode (a trailing comma, escapes) could hide a repeated floor
+      if (!nodes.every((n) => /^\d+(\.\d+)*$/.test(n)))
+        problems.push(
+          `check.yml part job: Node [${nodes.join(", ")}] holds an entry that is not a plain version`,
+        );
+      else if (!nodes.some((n) => n !== floor))
         problems.push(
           `check.yml part job: Node [${nodes.join(", ")}] has no line other than the first, so SQL reach and coverage are counted nowhere`,
         );
