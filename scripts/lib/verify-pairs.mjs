@@ -4,6 +4,9 @@
 // Checks that CI runs exactly what verify runs, and that the jobs running the checks have what they need. It reads the files' texts, so
 // tests can feed edited copies; a shape it cannot read is a problem, never a pass.
 
+// Builds whose output later checks read (tests run plugin/dist). Each part runs on its own runner, so a part that runs a check verify runs
+// after a build runs that build first; builds alone may run in several parts.
+const BUILDS = ["bundle"];
 const CI_RUN = '        run: bun run "ci:$PART"';
 const TARBALL_RUN = /node (\.\.\/)?scripts\/check-tarball\.mjs/;
 
@@ -80,14 +83,23 @@ export function verifyProblems({ pkg, check, release, lychee }) {
   const ran = [];
   for (const p of parts) {
     const c = chain(scripts[`ci:${p}`]);
-    if (c) ran.push(...c);
-    else problems.push(`package.json ci:${p} is not a chain of \`bun run <script>\``);
+    if (!c) {
+      problems.push(`package.json ci:${p} is not a chain of \`bun run <script>\``);
+      continue;
+    }
+    ran.push(...c);
+    for (const build of BUILDS) {
+      const after = c.find((s) => verify.indexOf(s) > verify.indexOf(build) && verify.includes(build));
+      if (after && !(c.includes(build) && c.indexOf(build) < c.indexOf(after)))
+        problems.push(`ci:${p} runs ${after} without running ${build} before it, as verify does`);
+    }
   }
   for (const s of verify)
     if (!ran.includes(s)) problems.push(`no ci:<part> script runs ${s}, which verify runs`);
   for (const s of new Set(ran)) {
     if (!verify.includes(s)) problems.push(`ci:<part> runs ${s}, which verify does not`);
-    else if (ran.filter((r) => r === s).length > 1) problems.push(`more than one ci:<part> script runs ${s}`);
+    else if (!BUILDS.includes(s) && ran.filter((r) => r === s).length > 1)
+      problems.push(`more than one ci:<part> script runs ${s}`);
   }
 
   const part = job(check, "part");

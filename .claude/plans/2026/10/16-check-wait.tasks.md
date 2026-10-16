@@ -84,6 +84,18 @@ check の壁時計を、部分（static / unit / acceptance）のうち最も長
   - コミット: `ci: catch part jobs cut off from their part, Node line, or judge in check-pairs (T09)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → pass 9 / fail 0。`bun run pairs`・lint・english・comments → 0
 
+- [x] T11: CI の unit と acceptance の部分が、verify と同じく先に bundle を流すようにし、check-pairs でそれを見る
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T09（今の verify-pairs と分割した check.yml が要る）
+  - 変更: `package.json`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="running the capture hook" test/capture.test.ts` → plugin/dist を退けると `Cannot find module .../plugin/dist/capture.js` で落ちる（CI の unit の部分は bundle を作らないので、新しいランナーでは必ずこうなる）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → bundle を抜いた部分で失敗するケースが pass。plugin/dist を退けて `bun run ci:unit` → 0
+  - コミット: `ci: bundle in every part that runs checks verify runs after the bundle (T11)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="running the capture hook" test/capture.test.ts` → plugin/dist を退けると MODULE_NOT_FOUND で fail（red）
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → 直す前（630b4037 の verify-pairs）で pass 8 / fail 2、直した後で pass 10 / fail 0
+  - 結果: `bun run ci:unit` → plugin/dist を退けた状態から rc=0、SQL 266 / 266、dist を作り直した。pairs・lint・typecheck・english・comments → 0
+
 ## P3: release の prepare を bundle の経路にする
 
 タグの push の prepare から verify の重複（約 10 分）を外し、PR の dry run で同じ経路を実走する。
@@ -143,3 +155,5 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
 - 2026-10-16 / T05 / Codex のレビュー（high）: 指摘なし。tarball の新旧比較は sandbox で未実行なので、A9 の計測の clone で verify の前後の pack を比べる / 記録だけ
 - 2026-10-16 / T09 / red を手元でも確かめた: 07f850b7 の verify-pairs に戻して流すと、足した 2 つのテストが落ちる（pass 7 / fail 2）/ 記録だけ
 - 2026-10-16 / T06 / Codex のレビュー（medium）: F1「hook から引き継いだ GIT_DIR などで worktree を main と取り違える」を採った。再現付き / 修正タスク T10 を足した
+- 2026-10-16 / T11 / 全差分の Codex レビュー（high）と review-shipping が同じ P1 を出した: unit の部分が bundle なしで plugin/dist/capture.js を実行するテストを流し、新しいランナーでは落ちる。手元の verify は先に bundle するので見えなかった / 修正タスク T11 を足した
+- 2026-10-16 / T06 / review-shipping の 2 件目（core.hooksPath があるときや .git の無い木で setup が 1 で終わる）は見送り: 前は postinstall が失敗を飲み込んで hook が黙って入らなかった。install の失敗を setup の失敗にするのは計画どおり（Codex との C9）/ PR 本文の Declined findings へ

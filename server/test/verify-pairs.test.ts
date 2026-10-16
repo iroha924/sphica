@@ -191,3 +191,24 @@ test("a part job on fewer Node lines than the required checks, or a judge step t
     /check job does not run always/,
   );
 });
+
+test("a part that runs a check verify runs after the bundle, without bundling first, fails", () => {
+  for (const [part, check] of [
+    ["unit", "sql:reach"],
+    ["acceptance", "acceptance"],
+    ["static", "sql:live"],
+  ] as const) {
+    fails(
+      scripts(real(), (s) => {
+        s[`ci:${part}`] = String(s[`ci:${part}`]).replace("bun run bundle && ", "");
+      }),
+      new RegExp(`ci:${part} runs ${check} without running bundle before it`),
+    );
+  }
+  fails(
+    scripts(real(), (s) => {
+      s["ci:unit"] = "bun run sql:reach && bun run bundle";
+    }),
+    /ci:unit runs sql:reach without running bundle before it/,
+  );
+});
