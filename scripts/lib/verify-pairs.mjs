@@ -126,7 +126,12 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       if (!all[at].includes("          PART: ${{ matrix.part }}"))
         problems.push("check.yml part job: the verify step does not take PART from matrix.part");
       // Reach is counted on every line but the first (the engines floor), and nowhere else is it skipped
-      const floor = matrixOf(part, "node")?.[0];
+      const nodes = matrixOf(part, "node") ?? [];
+      const floor = nodes[0];
+      if (nodes.length < 2)
+        problems.push(
+          `check.yml part job: Node [${nodes.join(", ")}] leaves no line after the first, so SQL reach and coverage are counted nowhere`,
+        );
       const unitMode = `          SPHICA_UNIT_MODE: \${{ matrix.node == '${floor}' && 'tests-only' || 'full' }}`;
       if (!floor || !all[at].includes(unitMode))
         problems.push(

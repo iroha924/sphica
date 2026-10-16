@@ -65,6 +65,16 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - コミット: `ci: take coverage and SQL reach on Node 26 only (T04)`
   - 結果: `node --test server/test/verify-pairs.test.ts` → pass 11, fail 0; main's verify-pairs on the mutated check.yml (line removed, other Node line, modes swapped) → no problem for any ("NOT caught by main" ×3); `bun run pairs` → exit 0; `actionlint` → exit 0
 
+- [x] T13: require a Node line after the floor in the part matrix, so SQL reach is counted somewhere
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T04（the rule it tightens）
+  - 変更: `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - red: `verifyProblems` with both Node matrices set to `["24.15"]` → `[]` (every unit part tests-only, reach counted nowhere; Codex review of T04)
+  - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass, including the single-line matrix; `bun run pairs` → exit 0
+  - コミット: `ci: fail verify-pairs when no Node line counts SQL reach (T13)`
+  - 結果: red before the rule: `verifyProblems` on both matrices `["24.15"]` → `[]`; after: `node --test server/test/verify-pairs.test.ts` → pass 12, fail 0; `bun run pairs` → exit 0
+
 ## P3: pre-push を main への push だけ verify に
 
 作業ブランチへの push は数秒で終わり、pre-push だけが見ていた macOS の経路は CI の macos job が見る。
@@ -149,3 +159,5 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T03 / 変更 was `…, server/test/run-unit.test.ts, .claude/rules/verification.md` and is now `…, server/test/run-unit.test.ts, server/test/verify-pairs.test.ts` / verify-pairs tests named sql:reach as ci:unit's check; verification.md never says verify runs sql:reach by name, so it stays
 - 2026-10-16 / T03 / Node copies NODE_V8_COVERAGE from process.env into a child's environment that lacks it, so deleting it from the child's copy was not enough (the new test caught it) / tests-only deletes it from process.env
 - 2026-10-16 / T04 / 完了条件 was "the new valid-configuration test fails against main's verify-pairs" and is now "main's verify-pairs reports no problem for the new test's mutations" / the valid configuration passes main's verify-pairs too (it only adds an env line); what main lacks is the rejection of the mutations
+- 2026-10-16 / T03 / Codex review of eef00413: 0 findings (tests not run in its read-only sandbox; run here) / nothing to fix
+- 2026-10-16 / T04 / Codex review of d0b7fa19: 1 finding [P2] reproduced: both Node matrices reduced to the floor pass verify-pairs while nothing counts reach / fixed in the added T13
