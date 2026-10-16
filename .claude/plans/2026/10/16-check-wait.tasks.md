@@ -105,13 +105,14 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
 
 ## P5: README の Features を中心の 5 つから始める
 
-- [ ] T07: README.md と README.ja.md の Features を並べ替える
+- [x] T07: README.md と README.ja.md の Features を並べ替える
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `for f in README.md README.ja.md; do awk '/^## (Features|できること)/{p=1;next} /^## /{p=0} p' $f | grep -c '^- \*\*'; done` → 17 と 17。`bun run verify:ai && bun run markdown` → 0
   - コミット: `docs(readme): lead the features with the core five (T07)`
+  - 結果: `for f in README.md README.ja.md; do awk '/^## (Features|できること)/{p=1;next} /^## /{p=0} p' $f | grep -c '^- \*\*'; done` → 17 と 17。先頭の 5 つは Automatic recording / Records with their sources / Shown when it matters / Find what you asked before / Forget what should not have been kept（日本語版も同じ順）。空行を除いた行の集合を HEAD と比べ、増えたのは見出し 1 行ずつだけ。`bun run verify:ai && bun run markdown` → 0
 
 ## 記録
 
