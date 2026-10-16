@@ -192,13 +192,14 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `ci: pin test concurrency 3 and a fixed seed for the trial (T10)`
   - 結果: `rg -n "test-concurrency=3" .github/workflows/check.yml` → one TEST_ORDER line with `--test-concurrency=3 --test-randomize --test-random-seed=350` on 26 and `--test-concurrency=3` otherwise; `actionlint` → exit 0
 
-- [ ] T11: try test concurrency 4 with the same seed
+- [x] T11: try test concurrency 4 with the same seed
   - 種別: 変更
   - 計画: S3
   - 依存: T10（the baseline it is compared against）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `rg -n "test-concurrency=4" .github/workflows/check.yml` → the unit step's TEST_ORDER pins 4 on both lines and the same seed 350 on Node 26
   - コミット: `ci: try test concurrency 4 (T11)`
+  - 結果: `rg -n "test-concurrency=4" .github/workflows/check.yml` → one TEST_ORDER line with `--test-concurrency=4 --test-randomize --test-random-seed=350` on 26 and `--test-concurrency=4` otherwise; `actionlint` → exit 0
 
 - [ ] T12: keep or drop concurrency 4 by the 10% rule and restore the seed
   - 種別: 変更
@@ -226,3 +227,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T06 / Codex review of 8cf0b21e: 1 finding [P2] reproduced: the name greps accept `# SKIP` / `# TODO` lines / fixed in the added T17 (the older git steps' greps share the pattern; left as they are, outside this plan)
 - 2026-10-16 / T07 / Codex review of a204edc5 (high): 4 findings reproduced: [P1] the filter matched as text anywhere; [P2] another workflow's run counted; [P2] a malformed token was printed through fetch's error; [P2] an unreadable start time on an unchosen run passed / all fixed in the added T18; verify-pairs now reads the trigger with the same function
 - 2026-10-16 / T10, T11 / 完了条件 was "both unit part steps' times recorded for the run and one rerun" and is now the pinned flags in check.yml / the times exist only after the push that follows the commit; T12 records all four runs' times before it decides
+- 2026-10-16 / T09 / Codex review of 1d14bb11 (high): 1 finding [P2]: a PR retargeted to main without a push starts no check run, so its required checks stay pending / declined: it fails closed (cannot merge), 2 of 195 PRs ever targeted another branch, closing and reopening or one push starts the run, and catching `edited` would rerun everything on every body edit
