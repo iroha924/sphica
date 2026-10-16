@@ -109,7 +109,7 @@ F = I + U + R（finished-plan の組の中。I は確定した irrelevant、U �
 ## 完了条件
 
 - A1: `bun run verify` → 通る
-- A2: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。`jq '.result | {F, I, U, R}, .verdict' server/evals/delivery/precision-baseline.json` → 4 つの数と verdict が出る
+- A2: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。`jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 4 つの数と verdict が出る
 - A3: `node --test server/test/delivery-sample.test.ts` → 保存した母集団と seed 20261016 で 2 回抜き取ると同じ 80 組が同じ順に出る、保存した一覧と違う母集団では違いを報告して 0 以外で終わる、の両方のテストが通る
 - A4: `node --test server/test/delivery-sample.test.ts` → (8,7,1,0) は進む、(10,8,2,0) と (8,0,8,0) は undecided、F < 8 は判定できない、のテストが通る
 - A5: `gh issue view 346 --comments` → 結果・分類ごとの割合・防げた例・判定を書いたコメントがある
@@ -125,3 +125,5 @@ F = I + U + R（finished-plan の組の中。I は確定した irrelevant、U �
 なし
 
 ## 変更履歴
+
+- 2026-10-16 / A2 の jq を `(.result | {F, I, U, R}), .verdict` に直した / 元の式は `.verdict` を `.result` の中で読み null になる（JSON の verdict は最上位にある）/ 完了条件のコマンドの誤りで、範囲は変わらないので Go は不要
