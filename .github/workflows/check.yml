@@ -63,7 +63,7 @@ jobs:
         run: node scripts/same-tree.mjs
 
   # verify runs here split into parts that run at once: each part runs package.json's ci:<part>, and `bun run pairs` checks that the parts
-  # add up to verify exactly (pre-push runs verify whole). Every part runs on both the engines floor (24.15) and the next line (26).
+  # add up to verify exactly (pre-push runs verify whole before a push to main). Every part runs on both the engines floor (24.15) and the next line (26).
   part:
     name: "part (${{ matrix.node }}, ${{ matrix.part }})"
     needs: same-tree

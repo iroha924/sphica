@@ -179,6 +179,16 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `fix(ci): read the pull request filter from the on: block and keep the token out of errors (T18)`
   - 結果: red: `node --test server/test/same-tree.test.ts` with the new cases → pass 5, fail 3; after: the three files → pass 26, fail 0; `bun run typecheck`, `bun run pairs`, `bun run knip` → exit 0
 
+- [x] T19: say where pre-push still runs verify in the comments and docs that said it always does
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（the behavior they describe）
+  - 変更: `.github/workflows/check.yml`, `lefthook.yml`, `CONTRIBUTING.md`, `scripts/check-pairs.mjs`
+  - red: `rg -n "pre-push runs verify whole;|pre-push verify and CI check them|checks pre-push and CI run" .github lefthook.yml CONTRIBUTING.md scripts` → 3 lines plus check.yml's "(pre-push runs verify whole)" (review-shipping)
+  - 完了条件: `rg -n "pre-push" .github lefthook.yml CONTRIBUTING.md scripts CLAUDE.md` → every line that says pre-push runs verify names a push to main; `bun run verify:ai` → exit 0
+  - コミット: `docs: say pre-push runs verify only before a push to main (T19)`
+  - 結果: red: the rg above → the four passages; after: `rg -n "pre-push" …` → each mention of pre-push verify names a push to main; `bun run verify:ai` → exit 0; `actionlint` → exit 0
+
 ## P5: 並列数の試し
 
 同じコードと seed で並列数 3 と 4 を比べ、効いたときだけ 4 を残す。
@@ -228,3 +238,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T07 / Codex review of a204edc5 (high): 4 findings reproduced: [P1] the filter matched as text anywhere; [P2] another workflow's run counted; [P2] a malformed token was printed through fetch's error; [P2] an unreadable start time on an unchosen run passed / all fixed in the added T18; verify-pairs now reads the trigger with the same function
 - 2026-10-16 / T10, T11 / 完了条件 was "both unit part steps' times recorded for the run and one rerun" and is now the pinned flags in check.yml / the times exist only after the push that follows the commit; T12 records all four runs' times before it decides
 - 2026-10-16 / T09 / Codex review of 1d14bb11 (high): 1 finding [P2]: a PR retargeted to main without a push starts no check run, so its required checks stay pending / declined: it fails closed (cannot merge), 2 of 195 PRs ever targeted another branch, closing and reopening or one push starts the run, and catching `edited` would rerun everything on every body edit
+- 2026-10-16 / T19 / review-shipping on the branch: ship it; release kind none; release.yml's reliance on the PR's check run holds; 1 medium: work-branch pushes no longer run the whole suite on macOS before merge (asked of the owner, not changed); 3 low stale passages / fixed in the added T19
