@@ -212,3 +212,21 @@ test("a part that runs a check verify runs after the bundle, without bundling fi
     /ci:unit runs unit without running bundle before it/,
   );
 });
+
+test("a unit mode that skips reach on another line, on every line, or on none fails", () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+  const line = "          SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}\n";
+  const want = /does not set SPHICA_UNIT_MODE to tests-only on the first Node line \(24\.15\) alone/;
+  fails(edit("check", line, ""), want);
+  fails(edit("check", line, line.replace("'24.15'", "'26'")), want);
+  fails(edit("check", line, line.replace("'tests-only' || 'full'", "'full' || 'tests-only'")), want);
+  fails(edit("check", line, "          SPHICA_UNIT_MODE: tests-only\n"), want);
+  fails(
+    edit(
+      "check",
+      '        node: ["24.15", "26"]\n        part:',
+      '        node: ["26", "24.15"]\n        part:',
+    ),
+    /tests-only on the first Node line \(26\) alone/,
+  );
+});

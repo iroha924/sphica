@@ -56,13 +56,14 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - 結果: `node --test server/test/run-unit.test.ts server/test/verify-pairs.test.ts server/test/test-run.test.ts` → pass 20, fail 0 (the first run failed tests-only's cleared NODE_V8_COVERAGE; fixed, see 記録)
   - 結果: `caffeinate -i bun run unit` → exit 0, `SQL: tests ran 266 / 266 sites against a real SQLite database`, 97 s; `SPHICA_UNIT_MODE=tests-only bun run unit` → exit 0, `SQL reach was not counted`, 78 s; `bun run pairs` → exit 0
 
-- [ ] T04: set tests-only on the Node 24.15 unit part and require that line in verify-pairs
+- [x] T04: set tests-only on the Node 24.15 unit part and require that line in verify-pairs
   - 種別: 変更
   - 計画: S2
   - 依存: T03（the mode the env line selects is defined there）
   - 変更: `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
-  - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass, and the new valid-configuration test fails against main's `scripts/lib/verify-pairs.mjs`; `bun run pairs` → exit 0
+  - 完了条件: `node --test server/test/verify-pairs.test.ts` → all pass, and main's `scripts/lib/verify-pairs.mjs` reports no problem for the new test's mutations; `bun run pairs` → exit 0
   - コミット: `ci: take coverage and SQL reach on Node 26 only (T04)`
+  - 結果: `node --test server/test/verify-pairs.test.ts` → pass 11, fail 0; main's verify-pairs on the mutated check.yml (line removed, other Node line, modes swapped) → no problem for any ("NOT caught by main" ×3); `bun run pairs` → exit 0; `actionlint` → exit 0
 
 ## P3: pre-push を main への push だけ verify に
 
@@ -147,3 +148,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T02 / Codex review of a8f35cac: 0 findings (sandbox runs not executed in its read-only sandbox; run here on both Node lines) / nothing to fix
 - 2026-10-16 / T03 / 変更 was `…, server/test/run-unit.test.ts, .claude/rules/verification.md` and is now `…, server/test/run-unit.test.ts, server/test/verify-pairs.test.ts` / verify-pairs tests named sql:reach as ci:unit's check; verification.md never says verify runs sql:reach by name, so it stays
 - 2026-10-16 / T03 / Node copies NODE_V8_COVERAGE from process.env into a child's environment that lacks it, so deleting it from the child's copy was not enough (the new test caught it) / tests-only deletes it from process.env
+- 2026-10-16 / T04 / 完了条件 was "the new valid-configuration test fails against main's verify-pairs" and is now "main's verify-pairs reports no problem for the new test's mutations" / the valid configuration passes main's verify-pairs too (it only adds an env line); what main lacks is the rejection of the mutations

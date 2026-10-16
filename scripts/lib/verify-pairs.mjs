@@ -125,6 +125,13 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
       if (!all[at].includes("          PART: ${{ matrix.part }}"))
         problems.push("check.yml part job: the verify step does not take PART from matrix.part");
+      // Reach is counted on every line but the first (the engines floor), and nowhere else is it skipped
+      const floor = matrixOf(part, "node")?.[0];
+      const unitMode = `          SPHICA_UNIT_MODE: \${{ matrix.node == '${floor}' && 'tests-only' || 'full' }}`;
+      if (!floor || !all[at].includes(unitMode))
+        problems.push(
+          `check.yml part job: the verify step does not set SPHICA_UNIT_MODE to tests-only on the first Node line (${floor ?? "?"}) alone`,
+        );
       problems.push(...lycheeProblems("check.yml part job", all, at, lychee));
     }
   }

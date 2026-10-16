@@ -93,12 +93,14 @@ jobs:
         run: bun run setup
 
       # static: Biome, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
-      # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database. acceptance: the cases.
+      # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database; on the floor line the tests
+      # run without coverage, the part's largest cost there, and reach is counted on the other line. acceptance: the cases.
       # On Node 26 the tests run in a random order, from a seed printed in the log, so a test that leans on another's leftovers shows up.
       # The flag goes to the test command, not NODE_OPTIONS, which children would inherit (a child node refuses --test-randomize without --test)
       - name: This part of verify
         env:
           PART: ${{ matrix.part }}
+          SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}
           TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
         run: bun run "ci:$PART"
 
