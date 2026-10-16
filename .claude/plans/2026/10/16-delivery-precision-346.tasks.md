@@ -31,13 +31,24 @@ base: main
   - コミット: `feat(eval): extract and pin the delivery population for the #346 sample (T01)`
   - 結果: `node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts`（server/）→ 4 件 pass（窓・project・outcome の絞り込みと並び、照合の 4 種の違い、子プロセスで 2 回目は同じと報告・行を消した DB では 0 以外で終わり保存ファイルは変わらない、足りない引数の名指し）。`bun run check` → 0
 
-- [ ] T02: 保存した母集団から seed で 80 組を抜き取り、ラベル用のシートを出す（`--sample`）
+- [x] T06: 窓の時刻を正規化し、プロジェクトを一意な key で選ぶ
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の抽出と保存）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → ミリ秒なしの from で境界の行が抜ける、同じ名前の 2 プロジェクトで片方を黙って選ぶ、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。ミリ秒の有無で同じ組が出て、日時でない値は名指しで止まり、`--project` は key で選ぶ
+  - コミット: `fix(eval): normalize the window and pick the project by key (T06)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` に直す前のコードで流した → ミリ秒なしの from で境界の行が 0 件（expected 1）、key を渡すと `no project named git:gitlab.com/o/r` で落ちた。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 9 件 pass（ミリ秒なしでも 4 組・窓は正規化して保存、`yesterday` は名指しで止まる、gitlab の key でそちらの組だけ）。T02 と同じコミット
+
+- [x] T02: 保存した母集団から seed で 80 組を抜き取り、ラベル用のシートを出す（`--sample`）
   - 種別: 追加
   - 計画: S1
   - 依存: T01（保存した母集団の形が要る）
   - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
   - 完了条件: `node --test server/test/delivery-sample.test.ts` → 同じ母集団と seed で 2 回流すと同じ組が同じ順に出る。一時の Claude Code と Codex の会話の記録から依頼と動きがシートに入り、記録の無い組は「記録なし」で残る
   - コミット: `feat(eval): sample delivered records and write labelling sheets (T02)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 9 件 pass（同じ seed で同じ 80 組・同じ順、2 回の `--sample` の出力が一致、sha256 を書き換えた母集団で止まる、Claude Code の main とサブエージェント・Codex の会話から依頼と動きがシートに入り、記録の無い組は no transcript found）
 
 - [ ] T03: ラベルから判定を出す（`--decide`）
   - 種別: 追加
@@ -56,7 +67,7 @@ base: main
   - 計画: S2
   - 依存: T02（抜き取りとシートが要る）
   - 変更: `server/evals/delivery/population-2026-10-16.json`
-  - 完了条件: `node server/evals/delivery/sample.ts --sample --population server/evals/delivery/population-2026-10-16.json --seed 20261016 --size 80` → 2 回流して同じ 80 組が同じ順に出る。シートは scratchpad に置き、コミットしない
+  - 完了条件: `node server/evals/delivery/sample.ts --sample --population server/evals/delivery/population-2026-10-16.json --seed 20261016 --size 80 --out <scratchpad>/drawn.json` → 2 回流して同じ 80 組が同じ順に出る。`--sheet` でシートを scratchpad に書き、コミットしない
   - コミット: `test(eval): pin the 2026-10-09..16 delivery population (T04)`
 
 - [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
@@ -68,3 +79,6 @@ base: main
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
 
 ## 記録
+
+- 2026-10-16 / T04 / 完了条件のコマンドに `--out` が無かった（`--sample` は書き出し先が要る）。前: `--size 80` まで、新: `--out <scratchpad>/drawn.json` を足し、シートは `--sheet` で書く / 欄を直した
+- 2026-10-16 / T06 / T01 の Codex のレビューで P2 が 2 件（窓の時刻を文字列のまま比べる、一意でない名前でプロジェクトを選ぶ）。どちらも再現できる指摘として採る / 修正タスク T06 を T02 の前に足した
