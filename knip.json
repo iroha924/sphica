@@ -3,6 +3,7 @@
   "includeEntryExports": true,
   "workspaces": {
     ".": {
+      "entry": ["scripts/pre-push.mjs"],
       "project": ["scripts/**/*.{js,mjs,cjs,ts}"],
       "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens"],
       "ignoreBinaries": ["lefthook", "lychee"]

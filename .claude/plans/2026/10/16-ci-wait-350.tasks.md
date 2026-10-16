@@ -79,13 +79,15 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
 
 作業ブランチへの push は数秒で終わり、pre-push だけが見ていた macOS の経路は CI の macos job が見る。
 
-- [ ] T05: run verify in pre-push only for an update of main, and check otherwise
+- [x] T05: run verify in pre-push only for an update of main, and check otherwise
   - 種別: 変更
   - 計画: S5
   - 依存: なし
-  - 変更: `scripts/pre-push.mjs`, `lefthook.yml`, `server/test/pre-push.test.ts`, `CLAUDE.md`
+  - 変更: `scripts/pre-push.mjs`, `scripts/lib/pre-push.mjs`, `scripts/lib/pre-push.d.mts`, `lefthook.yml`, `knip.json`, `server/test/pre-push.test.ts`, `CLAUDE.md`, `.claude/skills/fork-pr/SKILL.md`
   - 完了条件: `node --test server/test/pre-push.test.ts` → all pass (main, work branch, HEAD~1 source, new ref, tag, deleting main, mixed, malformed line, commit-message failure first); `printf 'refs/heads/x <oid> refs/heads/x <zero oid>\n' | node scripts/pre-push.mjs` → runs check, not verify
   - コミット: `ci(hooks): run verify before a push to main and check before other pushes (T05)`
+  - 結果: `node --test server/test/pre-push.test.ts` → pass 4, fail 0; `bun run typecheck` → exit 0
+  - 結果: `node scripts/pre-push.mjs` with this branch's line on stdin (`refs/heads/ci/ci-wait-350 <HEAD> … <zero oid>`) → exit 0, `commit messages: 6 checked`, `pre-push: bun run check` (the real check ran; the first try failed in knip, fixed, see 記録)
 
 - [ ] T06: run the Darwin branches of eval-claude and review-eval in the macos job
   - 種別: 変更
@@ -161,3 +163,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T04 / 完了条件 was "the new valid-configuration test fails against main's verify-pairs" and is now "main's verify-pairs reports no problem for the new test's mutations" / the valid configuration passes main's verify-pairs too (it only adds an env line); what main lacks is the rejection of the mutations
 - 2026-10-16 / T03 / Codex review of eef00413: 0 findings (tests not run in its read-only sandbox; run here) / nothing to fix
 - 2026-10-16 / T04 / Codex review of d0b7fa19: 1 finding [P2] reproduced: both Node matrices reduced to the floor pass verify-pairs while nothing counts reach / fixed in the added T13
+- 2026-10-16 / T05 / 変更 was `scripts/pre-push.mjs, lefthook.yml, server/test/pre-push.test.ts, CLAUDE.md` and is now also `scripts/lib/pre-push.mjs`, `scripts/lib/pre-push.d.mts`, `knip.json`, `.claude/skills/fork-pr/SKILL.md` / tested logic lives in scripts/lib with a .d.mts as elsewhere; knip finds entries in package.json and workflows but not lefthook.yml, so it reported the hook script unused; the fork-pr Skill said pre-push runs verify on a pushed branch

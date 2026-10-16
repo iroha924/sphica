@@ -61,12 +61,9 @@ pre-commit:
 
 pre-push:
   jobs:
-    # The commit-msg hook cannot tell `-m` from the editor, so a `-m '# body'` passes it and is stored as a body.
-    # Check the stored messages of the pushed refs. Lefthook skips it when the pushed commits change no files; CI still checks those.
-    - name: commit-messages
+    # The commit-msg hook cannot tell `-m` from the editor, so a `-m '# body'` passes it and is stored as a body: the stored messages of the
+    # pushed refs are checked first. Then verify runs before a push to main and check before any other push (every pull request runs verify
+    # in CI). One job, since lefthook passes stdin to one job only. Lefthook skips it when the pushed commits change no files; CI still checks those.
+    - name: pre-push
       use_stdin: true
-      run: node scripts/check-commit-msg.mjs --pre-push
-    - name: verify
-      # If left set, git in the temp repositories the tests create points at this repository
-      # (measured: it wrote core.bare=true and user.*, and added 2 commits).
-      run: unset $(git rev-parse --local-env-vars); bun run verify
+      run: node scripts/pre-push.mjs
