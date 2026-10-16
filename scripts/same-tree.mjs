@@ -41,7 +41,8 @@ async function runsOf(sha) {
     if (!res.ok) return `the API answered ${res.status}`;
     return runsFrom(await res.json());
   } catch (e) {
-    return `the API request failed: ${e instanceof Error ? e.message : String(e)}`;
+    // The message can quote the request's headers, token included
+    return `the API request failed (${e instanceof Error ? e.name : "unknown error"})`;
   }
 }
 

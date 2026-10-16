@@ -169,6 +169,16 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `ci: skip the heavy jobs when a push to main repeats a passed pull request run (T09)`
   - 結果: `node --test server/test/verify-pairs.test.ts server/test/check-parts.test.ts server/test/same-tree.test.ts` → pass 23, fail 0; main's verify-pairs on the new files → `check job does not run always after part …` (it rejects the valid new gate); `bun run pairs`, `bun run knip`, `bun run typecheck`, `actionlint` → exit 0
 
+- [x] T18: read the branch filter as the on: block's trigger, check the run's workflow file and every start time, and keep the token out of errors
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（the decision it fixes）
+  - 変更: `scripts/lib/same-tree.mjs`, `scripts/lib/same-tree.d.mts`, `scripts/same-tree.mjs`, `scripts/lib/verify-pairs.mjs`, `server/test/same-tree.test.ts`
+  - red: `node --test server/test/same-tree.test.ts` → fail 3 before the fix (the filter text inside `name: |` with `on.pull_request.branches: [release]` gave tested=true; a run of other.yml counted; an unreadable start time on an unchosen run gave true; a malformed GH_TOKEN reached the log; Codex review of T07)
+  - 完了条件: `node --test server/test/same-tree.test.ts server/test/verify-pairs.test.ts server/test/check-parts.test.ts` → all pass, including the real check.yml read as limited to main; `bun run knip` → exit 0
+  - コミット: `fix(ci): read the pull request filter from the on: block and keep the token out of errors (T18)`
+  - 結果: red: `node --test server/test/same-tree.test.ts` with the new cases → pass 5, fail 3; after: the three files → pass 26, fail 0; `bun run typecheck`, `bun run pairs`, `bun run knip` → exit 0
+
 ## P5: 並列数の試し
 
 同じコードと seed で並列数 3 と 4 を比べ、効いたときだけ 4 を残す。
@@ -213,3 +223,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T05 / Codex review of a1db2de3: 1 finding [P3] reproduced: a ref holding a tab passed the parser and ran check (Git never writes one; no way around verify for main) / fixed in the added T16
 - 2026-10-16 / T07, T09 / 変更 of T07 adds `scripts/lib/same-tree.d.mts` and `knip.json`, T09 adds `knip.json` / knip reports the script unused until check.yml runs it, so T07 lists it as an entry and T09 removes that entry
 - 2026-10-16 / T06 / Codex review of 8cf0b21e: 1 finding [P2] reproduced: the name greps accept `# SKIP` / `# TODO` lines / fixed in the added T17 (the older git steps' greps share the pattern; left as they are, outside this plan)
+- 2026-10-16 / T07 / Codex review of a204edc5 (high): 4 findings reproduced: [P1] the filter matched as text anywhere; [P2] another workflow's run counted; [P2] a malformed token was printed through fetch's error; [P2] an unreadable start time on an unchosen run passed / all fixed in the added T18; verify-pairs now reads the trigger with the same function

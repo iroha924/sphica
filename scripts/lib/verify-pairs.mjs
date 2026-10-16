@@ -4,6 +4,8 @@
 // Checks that CI runs exactly what verify runs, and that the jobs running the checks have what they need. It reads the files' texts, so
 // tests can feed edited copies; a shape it cannot read is a problem, never a pass.
 
+import { limitsPullRequestsToMain } from "./same-tree.mjs";
+
 // Builds whose output later checks read (tests run plugin/dist). Each part runs on its own runner, so a part that runs a check verify runs
 // after a build runs that build first; builds alone may run in several parts.
 const BUILDS = ["bundle"];
@@ -205,10 +207,7 @@ export function verifyProblems({ pkg, check, release, lychee }) {
 function sameTreeProblems(check) {
   const problems = [];
   // The reuse holds only for runs that tested a merge into main
-  if (
-    !check.includes(`on:\n  push:\n    branches: [main]\n`) ||
-    !/\n {2}pull_request:\n {4}branches: \[main\]\n/.test(check)
-  )
+  if (!check.includes(`on:\n  push:\n    branches: [main]\n`) || !limitsPullRequestsToMain(check))
     problems.push("check.yml does not run on pushes to main and on pull requests into main only");
   const detector = job(check, "same-tree");
   if (!detector) problems.push("check.yml has no same-tree job");

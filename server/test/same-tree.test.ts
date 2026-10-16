@@ -10,7 +10,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { PR_TO_MAIN, type Run, runsFrom, sameTree } from "../../scripts/lib/same-tree.mjs";
+import {
+  limitsPullRequestsToMain,
+  PR_TO_MAIN,
+  type Run,
+  runsFrom,
+  sameTree,
+} from "../../scripts/lib/same-tree.mjs";
 
 const ROOT = path.join(import.meta.dirname, "..", "..");
 const BASE = "a".repeat(40);
@@ -23,6 +29,7 @@ const run = (over: Partial<Run> = {}): Run => ({
   conclusion: "success",
   created_at: "2026-10-16T01:00:00Z",
   run_attempt: 1,
+  path: ".github/workflows/check.yml",
   ...over,
 });
 const facts = (over: Partial<Parameters<typeof sameTree>[0]> = {}) => ({
@@ -154,4 +161,53 @@ test("the script reads the merge from git and writes tested=false when anything 
 test("the script fails, writing nothing, when it has nowhere to write its answer", (t) => {
   const r = merged(t, `on:\n${PR_TO_MAIN}`)({ GITHUB_OUTPUT: "" });
   assert.notEqual(r.status, 0);
+});
+
+test("the branch filter counts only as the pull_request trigger under on:, not as text anywhere in the file", () => {
+  const elsewhere = [
+    `name: |\n${PR_TO_MAIN}on:\n  pull_request:\n    branches: [release]\n`,
+    `env:\n  X: |\n  ${PR_TO_MAIN}on: [push, pull_request]\n`,
+    "on:\n  pull_request:\n    branches: [main, release]\n",
+    "on:\n  pull_request:\n    branches: [main]\n    paths: [src/**]\n",
+    `on:\n${PR_TO_MAIN}"on":\n  pull_request:\n`,
+  ];
+  for (const workflow of elsewhere) {
+    const d = sameTree(facts({ workflow }));
+    assert.equal(d.tested, false, workflow);
+    assert.match(d.reason, /does not limit pull request runs to main/, workflow);
+  }
+  // This repository's own check.yml must read as limited, or no push would ever reuse a run
+  assert.equal(
+    limitsPullRequestsToMain(fs.readFileSync(path.join(ROOT, ".github", "workflows", "check.yml"), "utf8")),
+    true,
+  );
+  // Comments and other triggers around it are fine
+  const ok =
+    "name: check\n\non:\n  push:\n    branches: [main]\n  # into main only\n  pull_request:\n    branches: [main]\n\njobs: {}\n";
+  assert.equal(sameTree(facts({ workflow: ok })).tested, true);
+});
+
+test("a run of another workflow file, or a candidate whose start time cannot be read, never counts", () => {
+  const other = sameTree(facts({ runs: [run({ path: ".github/workflows/other.yml" })] }));
+  assert.equal(other.tested, false);
+  assert.match(other.reason, /no check.yml pull request run/);
+  const unreadable = sameTree(
+    facts({
+      runs: [
+        run({ created_at: "2026-10-16T02:00:00Z" }),
+        run({ id: 2, created_at: "unreadable", status: "in_progress", conclusion: null }),
+      ],
+    }),
+  );
+  assert.equal(unreadable.tested, false);
+  assert.match(unreadable.reason, /no readable start time/);
+  const { path: _, ...noPath } = run();
+  assert.match(String(runsFrom({ total_count: 1, workflow_runs: [noPath] })), /lacks a field/);
+});
+
+test("a token the request refuses never reaches the log", (t) => {
+  const r = merged(t, `on:\n${PR_TO_MAIN}`)({ GITHUB_REPOSITORY: "o/r", GH_TOKEN: "FAKE_TOKEN_VALUE\nTAIL" });
+  assert.equal(r.output, "tested=false\n");
+  assert.doesNotMatch(r.out, /FAKE_TOKEN_VALUE|TAIL/);
+  assert.match(r.out, /the API request failed/);
 });

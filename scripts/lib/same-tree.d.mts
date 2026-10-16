@@ -9,8 +9,10 @@ export type Run = {
   conclusion: string | null;
   created_at: string;
   run_attempt: number;
+  path: string;
 };
 export const PR_TO_MAIN: string;
+export function limitsPullRequestsToMain(workflow: string): boolean;
 export function sameTree(facts: {
   parents: string[];
   before: string;
