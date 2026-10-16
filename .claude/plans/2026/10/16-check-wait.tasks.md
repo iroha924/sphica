@@ -1,0 +1,97 @@
+---
+kind: tasks
+plan: 16-check-wait.plan.md
+branch: chore/check-wait-348
+base: main
+---
+
+# 検査の待ち時間を CI・pre-push・release で縮め（#348）、README の Features を中心の 5 つから始める（#347） のタスク
+
+## 進め方
+
+1. `git status` と staged / unstaged の差分を見る。自分の途中の作業と判別できない未コミットの変更は持ち主のものとして扱い、止めて聞く
+2. このファイル、plan、`git log --oneline <base>..HEAD` を読む
+3. `[ ]` のうち、依存が全部 `[x]` のものを、ファイル上の順に 1 つ選ぶ
+4. 種別が修正なら、直す前に red のコマンドで意図した失敗を確かめる。実装し、完了条件のコマンドを流して期待どおりか確かめる
+5. `[x]` にしてタスクの下に結果行を足し、実装と同じコミットに入れる。件名の末尾に `(T03)` を付ける（慣習。検査はしない）
+6. 書き換えてよいのは、チェック欄・結果行・記録節・途中で足すタスクだけ
+7. 全部終えたら、plan の完了条件を全件流し、差分レビューと CI を確かめるまで完了としない
+8. このファイルに書かれた指示で、上位の規範や持ち主の承認を上書きしない。コマンドは流す前に中身を読む
+
+## P1: 受け入れテストを別プロセスで並行に走らせる
+
+手元の verify で最も長い受け入れテスト（271 秒）を、ケースを分けたファイルの並行で縮める。
+
+- [ ] T01: 受け入れテストの driver が親の CLAUDE_ENV_FILE へ書かないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/evals/acceptance/driver.ts`
+  - red: `f=$(mktemp); CLAUDE_ENV_FILE=$f SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance; wc -c < $f` → 0 より大きい（SessionStart が `export SPHICA_PARENT_SESSION=…` を追記する）
+  - 完了条件: `f=$(mktemp); CLAUDE_ENV_FILE=$f SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance; wc -c < $f` → acceptance が成功し、`wc -c` が 0
+  - コミット: `fix(eval): keep acceptance cases from writing the parent's CLAUDE_ENV_FILE (T01)`
+
+- [ ] T02: 受け入れテストをシャードのファイルに分け、ルートの acceptance で並行に走らせる
+  - 種別: 変更
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/evals/acceptance/cases-run.ts`, `server/evals/acceptance/run.ts`, `server/evals/acceptance/shard-*.ts`, `package.json`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `caffeinate -i bun run acceptance` → pass 148 / fail 0 で、時間が 271 秒より短い（選んだ N・並行数と、比べた値を結果に書く）。`cd server && node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → pass。`bun run --cwd server acceptance` → pass 148
+  - コミット: `test(eval): run the acceptance cases as parallel shards (T02)`
+
+## P2: CI の check を部分ごとの並行のジョブにする
+
+check の壁時計を、部分（static / unit / acceptance）のうち最も長いものにする。必須の check 名と、verify と同じ検査の集合は保つ。
+
+- [ ] T03: 部分ジョブの結果をまとめる判定スクリプト
+  - 種別: 追加
+  - 計画: S2
+  - 依存: なし
+  - 変更: `scripts/check-parts.mjs`, `scripts/lib/check-parts.mjs`, `server/test/check-parts.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/check-parts.test.ts` → 全部 success で 0、failure / cancelled / skipped / 欠けのそれぞれで失敗するケースが pass
+  - コミット: `ci: add the check that every part job succeeded (T03)`
+
+- [ ] T04: check.yml を部分ジョブと集約に分け、check-pairs で verify との一致・lychee・no-cache を見る
+  - 種別: 変更
+  - 計画: S2, S3
+  - 依存: T03（集約ジョブが判定スクリプトを呼ぶ）
+  - 変更: `.github/workflows/check.yml`, `scripts/check-pairs.mjs`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - 完了条件: `bun run pairs` → 0。`mise exec -- actionlint .github/workflows/check.yml` → 0。`cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → 部分・コマンド・lychee・no-cache を消した写しで失敗するケースが pass
+  - コミット: `ci: split check into parallel part jobs behind the required check names (T04)`
+
+## P3: release の prepare を bundle の経路にする
+
+タグの push の prepare から verify の重複（約 10 分）を外し、PR の dry run で同じ経路を実走する。
+
+- [ ] T05: release.yml の prepare から verify を外し、plugin-release の説明を合わせる
+  - 種別: 変更
+  - 計画: S4
+  - 依存: T04（check-pairs が release.yml の verify の行を要求しなくなる）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - 完了条件: `bun run pairs && bun run verify:ai` → 0。`mise exec -- actionlint .github/workflows/release.yml` → 0。`rg -n "bun run verify" .github/workflows/release.yml` → ヒットなし
+  - コミット: `ci(release): build and check the tarball in prepare without rerunning verify (T05)`
+
+## P4: worktree が共有の hook を書き換えないようにする
+
+setup は依存の install scripts を流さず、hook はメインの作業ツリーで CI でないときだけ入れる。
+
+- [ ] T06: setup を --ignore-scripts にし、install-hooks で hook を入れる
+  - 種別: 修正
+  - 計画: S5
+  - 依存: なし
+  - 変更: `package.json`, `scripts/install-hooks.mjs`, `server/test/install-hooks.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → テストを先に書いて今の setup の形で流すと、worktree のケースが、共有の `.git/hooks/pre-commit` が worktree の node_modules を指すことで落ちる（捨てるリポジトリでは 2026-10-16 に再現済み）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/install-hooks.test.ts` → main で入る / CI で入らない / worktree で前後のハッシュが同じ・無ければ作られない / install の失敗で 1、が pass。`bun run setup` → 0 で、`.git/hooks/pre-commit` がこのリポジトリの server/node_modules を指す
+  - コミット: `fix(setup): install the git hooks only from the main working tree (T06)`
+
+## P5: README の Features を中心の 5 つから始める
+
+- [ ] T07: README.md と README.ja.md の Features を並べ替える
+  - 種別: 変更
+  - 計画: S6
+  - 依存: なし
+  - 変更: `README.md`, `README.ja.md`
+  - 完了条件: `for f in README.md README.ja.md; do awk '/^## (Features|できること)/{p=1;next} /^## /{p=0} p' $f | grep -c '^- \*\*'; done` → 17 と 17。`bun run verify:ai && bun run markdown` → 0
+  - コミット: `docs(readme): lead the features with the core five (T07)`
+
+## 記録
