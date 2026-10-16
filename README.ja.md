@@ -11,7 +11,7 @@ Sphica は開発のセッションを記録し、決めたこと・捨てたこ�
 DB は手元の SQLite の 1 ファイルです。
 
 [![npm](https://img.shields.io/npm/v/sphica?logo=npm&label=sphica)](https://www.npmjs.com/package/sphica)
-[![License](https://img.shields.io/github/license/iroha924/sphica)](https://github.com/iroha924/sphica/blob/main/LICENSE)
+[![License](https://img.shields.io/npm/l/sphica)](https://github.com/iroha924/sphica/blob/main/LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/iroha924/sphica/badge)](https://scorecard.dev/viewer/?uri=github.com/iroha924/sphica)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14787/badge)](https://www.bestpractices.dev/projects/14787)
 [![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](https://www.npmjs.com/package/sphica#provenance)
