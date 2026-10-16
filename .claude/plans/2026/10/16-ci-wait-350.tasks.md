@@ -189,6 +189,16 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `docs: say pre-push runs verify only before a push to main (T19)`
   - 結果: red: the rg above → the four passages; after: `rg -n "pre-push" …` → each mention of pre-push verify names a push to main; `bun run verify:ai` → exit 0; `actionlint` → exit 0
 
+- [x] T20: treat two runs started in the same second as unordered, whatever their attempt numbers
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T18（the ordering it corrects）
+  - 変更: `scripts/lib/same-tree.mjs`, `server/test/same-tree.test.ts`
+  - red: `node --test --test-name-pattern="same second" server/test/same-tree.test.ts` → fail 1 (an older success on attempt 2 and a newer in-progress run on attempt 1 in the same second gave tested=true; GitHub's Codex on PR #351)
+  - 完了条件: `node --test server/test/same-tree.test.ts` → all pass
+  - コミット: `fix(ci): treat same-second runs as unordered in same-tree (T20)`
+  - 結果: red: → pass 0, fail 1; after: `node --test server/test/same-tree.test.ts` → pass 9, fail 0; `bun run typecheck`, `bun run pairs` → exit 0
+
 ## P5: 並列数の試し
 
 同じコードと seed で並列数 3 と 4 を比べ、効いたときだけ 4 を残す。
@@ -242,3 +252,5 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 - 2026-10-16 / T09 / Codex review of 1d14bb11 (high): 1 finding [P2]: a PR retargeted to main without a push starts no check run, so its required checks stay pending / declined: it fails closed (cannot merge), 2 of 195 PRs ever targeted another branch, closing and reopening or one push starts the run, and catching `edited` would rerun everything on every body edit
 - 2026-10-16 / T19 / review-shipping on the branch: ship it; release kind none; release.yml's reliance on the PR's check run holds; 1 medium: work-branch pushes no longer run the whole suite on macOS before merge (asked of the owner, not changed); 3 low stale passages / fixed in the added T19
 - 2026-10-16 / T12 / under concurrency 4, attempt 2 of run 38860130253 failed a lock-time test on Node 24.15 (224.8 ms against 200 ms); not seen at concurrency 3 / not a reason by itself (the 10% rule decided), recorded as a sign that 4 workers on 4 vCPUs crowd timing tests
+- 2026-10-16 / T20 / GitHub's Codex on PR #351 (head b774d2fa): 3 threads [P2]: run_attempt used across runs (fixed in T20); a ref-qualified run path (declined: this repository's pull_request runs report `.github/workflows/check.yml` with no ref in 5 of 5 samples, and a mismatch only runs everything); CONTRIBUTING.md's pre-push line (fixed in T19)
+- 2026-10-16 / final / Codex full-diff review (high): 1 finding [P1]: the gate does not wait for macos, so a macOS failure does not block the required checks (same on main; heavier now that Darwin tests moved there) / asked of the owner with review-shipping's macOS finding

@@ -211,3 +211,16 @@ test("a token the request refuses never reaches the log", (t) => {
   assert.doesNotMatch(r.out, /FAKE_TOKEN_VALUE|TAIL/);
   assert.match(r.out, /the API request failed/);
 });
+
+test("two runs started in the same second are unordered, whatever their attempts, so nothing is skipped", () => {
+  const d = sameTree(
+    facts({
+      runs: [
+        run({ id: 1, run_attempt: 2 }),
+        run({ id: 2, run_attempt: 1, status: "in_progress", conclusion: null }),
+      ],
+    }),
+  );
+  assert.equal(d.tested, false, d.reason);
+  assert.match(d.reason, /same time/);
+});

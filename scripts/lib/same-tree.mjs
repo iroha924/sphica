@@ -48,16 +48,12 @@ export function sameTree({ parents, before, ancestor, tree, headTree, workflow, 
   if (typeof runs === "string") return no(`the head's runs could not be read: ${runs}`);
   const own = runs.filter((r) => r.head_sha === head && r.event === "pull_request" && r.path === CHECK_YML);
   if (!own.length) return no("no check.yml pull request run on the merged head");
-  const order = (r) => [Date.parse(r.created_at), r.run_attempt];
-  // Unordered candidates cannot tell which run is the latest
-  if (own.some((r) => Number.isNaN(order(r)[0])))
+  // Runs are ordered by start time alone (an attempt number counts within its own run), and candidates that cannot be ordered tell no latest
+  const started = (r) => Date.parse(r.created_at);
+  if (own.some((r) => Number.isNaN(started(r))))
     return no("a run on the merged head has no readable start time");
-  const sorted = [...own].sort((a, b) => {
-    const [x, y] = [order(a), order(b)];
-    return y[0] - x[0] || y[1] - x[1];
-  });
-  const [latest, next] = sorted;
-  if (next && order(next)[0] === order(latest)[0] && order(next)[1] === order(latest)[1])
+  const [latest, next] = [...own].sort((a, b) => started(b) - started(a));
+  if (next && started(next) === started(latest))
     return no("two runs on the merged head started at the same time");
   if (latest.status !== "completed") return no(`the latest run on the merged head is ${latest.status}`);
   if (latest.conclusion !== "success")
