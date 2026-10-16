@@ -31,7 +31,7 @@ Windows job が約 2 分縮み、hidden runner の検査が Node 24.15 と 26 �
   - コミット: `ci(windows): check the missing-node launch line through one shell (T01)`
   - 結果: `bun run bundle && bun run hooks:live` → exit 0, `codex launch line through sh: node exiting 0 → 0 in 24 ms, node exiting 7 → 7 in 24 ms, without node → 127 in 4 ms`
 
-- [ ] T02: check both fences in the hidden runner test and the OS fence alone, on both Node lines in CI
+- [x] T02: check both fences in the hidden runner test and the OS fence alone, on both Node lines in CI
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -39,6 +39,8 @@ Windows job が約 2 分縮み、hidden runner の検査が Node 24.15 と 26 �
   - red: `cd server && mise exec node@26.10.0 -- node --import ./test/isolate-home.ts --test --test-name-pattern="on macOS the sandbox" test/hidden-runner.test.ts` → fails with `'4 passed, 1 failed'` (#350)
   - 完了条件: `cd server && mise exec node@26.10.0 -- node --import ./test/isolate-home.ts --test --test-name-pattern="on macOS the sandbox" test/hidden-runner.test.ts` → pass 1, fail 0, and the same with node@24.15.0; with the OS-only probe's sandbox-exec removed, the test fails on the probe's EPERM assertion
   - コミット: `test(evals): check each sandbox fence on Node 24 and 26 (#350) (T02)`
+  - 結果: red: before the change, `mise exec node@26.10.0 -- node … --test-name-pattern="on macOS the sandbox" test/hidden-runner.test.ts` → fail 1, `actual: '4 passed, 1 failed'`
+  - 結果: after: the same on node@26.10.0 and node@24.15.0 → pass 1, fail 0 each; with sandbox-exec removed from the OS-only probe (temporary edit, restored) → fail 1, `actual: 'ECONNRESET', expected: 'EPERM'`; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
 
 ## P2: unit の入口とカバレッジを片方の Node に
 
@@ -139,3 +141,4 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
 ## 記録
 
 - 2026-10-16 / T01 / 完了条件 was "`bun run hooks:live` → exit 0 on macOS, the sh line still lists \"without node\"; the Windows job's log on this branch's CI lists \"without node\" for cmd.exe only" and is now the macOS part only / the Windows log can only be seen after a push, after the commit that checks the task; it is observed under the plan's A5
+- 2026-10-16 / T01 / Codex review of 03a0e6de: 0 findings (it could not run hooks:live in its read-only sandbox; run here, exit 0) / nothing to fix

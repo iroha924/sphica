@@ -142,6 +142,11 @@ jobs:
   macos:
     runs-on: macos-latest
     timeout-minutes: 15
+    # Each Node line fences the network its own way (26 refuses it in Node first), so the sandbox is checked on both
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["24.15", "26"]
     steps:
       - uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
         with:
@@ -155,7 +160,7 @@ jobs:
           no-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.15"
+          node-version: ${{ matrix.node }}
       - name: Install dependencies
         run: bun run setup
       - name: The hidden test sandbox, and the poisoned tasks' hidden tests through it
