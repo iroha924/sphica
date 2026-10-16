@@ -166,7 +166,10 @@ function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
   return text.trim() ? [{ at, kind: "prompt", text }] : [];
 }
 
-/** A Codex session log's user and assistant messages (not the injected context that starts with a tag) and tool calls */
+/** The tags Codex wraps context it adds to a user message in, as its session logs show them; a request of the user's may start with a tag */
+const INJECTED = /^\s*<(environment_context|skill|external_codex_apps_open_page|user_instructions)>/;
+
+/** A Codex session log's user and assistant messages (not the context Codex injects) and tool calls */
 function codexLine(d: Record<string, unknown>, at: string): Entry[] {
   const p = d.payload;
   if (d.type !== "response_item" || !isObject(p)) return [];
@@ -175,7 +178,7 @@ function codexLine(d: Record<string, unknown>, at: string): Entry[] {
   if (p.type !== "message") return [];
   if (p.role === "user") {
     const text = texts(p.content, "input_text");
-    return text.trim() && !text.trimStart().startsWith("<") ? [{ at, kind: "prompt", text }] : [];
+    return text.trim() && !INJECTED.test(text) ? [{ at, kind: "prompt", text }] : [];
   }
   if (p.role === "assistant") {
     const text = texts(p.content, "output_text");
@@ -200,7 +203,7 @@ export function readTimeline(file: string, host: string): Entry[] {
   return out;
 }
 
-/** Where a delivery's conversation is: a Claude Code session or one of its subagents by name, a Codex session by the id its log names */
+/** Where a delivery's conversation is: a Claude Code session or one of its subagents by name, a Codex thread (a child's own) by the id its log names */
 function locate(
   roots: { claude: string; codex: string },
   host: string,
@@ -210,28 +213,33 @@ function locate(
 ): string | null {
   const file =
     host === "codex"
-      ? codexFiles().find((f) => path.basename(f).endsWith(`-${external}.jsonl`))
+      ? codexFiles().find((f) => path.basename(f).endsWith(`-${agent ?? external}.jsonl`))
       : agent
         ? path.join(roots.claude, external, "subagents", `agent-${agent}.jsonl`)
         : path.join(roots.claude, `${external}.jsonl`);
   return file && fs.existsSync(file) ? file : null;
 }
 
+/** Lines after a delivery the sheet shows at most; a longer turn shows its first ones and counts the rest */
+const AFTER = 30;
+
 /** Around a delivery: the prompt that opened its turn, the last lines before it, and what the agent did next until the next prompt */
 export function around(
   entries: Entry[],
   at: string,
-): { prompt: Entry | null; before: Entry[]; after: Entry[] } {
+): { prompt: Entry | null; before: Entry[]; after: Entry[]; more: number } {
   const i = entries.findIndex((e) => e.at > at);
   const cut = i < 0 ? entries.length : i;
   const earlier = entries.slice(0, cut);
   const opened = earlier.map((e) => e.kind).lastIndexOf("prompt");
   const next = entries.slice(cut);
   const stop = next.findIndex((e) => e.kind === "prompt");
+  const turn = stop < 0 ? next : next.slice(0, stop);
   return {
     prompt: opened < 0 ? null : (earlier[opened] as Entry),
     before: earlier.slice(Math.max(opened + 1, cut - 3)),
-    after: next.slice(0, stop < 0 ? 10 : Math.min(stop, 10)),
+    after: turn.slice(0, AFTER),
+    more: Math.max(turn.length - AFTER, 0),
   };
 }
 
@@ -286,8 +294,9 @@ async function sheetEntry(
       a.prompt ? `    ${indent(head(a.prompt.text, 1500))}` : "    (none before the delivery)",
       "just before the delivery:",
       ...a.before.map(show),
-      "after the delivery, until the next prompt (at most 10):",
+      "after the delivery, until the next prompt:",
       ...a.after.map(show),
+      ...(a.more ? [`  … ${a.more} more lines until the next prompt`] : []),
     );
   }
   lines.push("label: useful / irrelevant / unknown", "");

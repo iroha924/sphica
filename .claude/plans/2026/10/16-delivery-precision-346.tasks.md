@@ -59,6 +59,16 @@ base: main
   - コミット: `feat(eval): decide the finished-plan gate from settled labels (T03)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 12 件 pass（(F,I,U,R)=(8,7,1,0) は go、(10,8,2,0) と (8,0,8,0) は undecided、F=7 は too few、R>=2 は not adopted。F=8〜30 の全ての分け方で unknown を両方に解決した結果と一致。順番の飛びと語彙の外を名指しで拒む）。`bun run check` → 0
 
+- [x] T07: シートを Codex の子スレッドの会話で書き、次のプロンプトまでの動きを数で切らず、差し込みのタグだけを外す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象のシートの作成）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 子スレッドの配信に親のログを選ぶ、配信の後 12 件の呼び出しの 11 件目以降が消える、`<task>` で始まる依頼が消える、の 3 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。子スレッドはその id のログ、配信の後は次のプロンプトまで（多ければ先頭と省いた件数）、外すのは environment_context・skill・external_codex_apps_open_page・user_instructions で始まるものだけ
+  - コミット: `fix(eval): read Codex child threads and whole turns in labelling sheets (T07)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は 3 件が落ちた（配信の後 actual 10 / expected 13、`<task>` の依頼が actual []、子スレッドの配信に親の rollout を選んだ）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 15 件 pass。`bun run check` → 0。配信の後は 30 行まで出し、残りは件数を書く
+
 ## P2: 測定と報告
 
 持ち主の DB の直近 7 日から 80 組を抜き取ってラベルを付け、判定と防げた例を #346 に出す。
@@ -75,13 +85,15 @@ base: main
 - [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
   - 種別: 追加
   - 計画: S2, S3
-  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）
+  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）
   - 変更: `server/evals/delivery/precision-baseline.json`
   - 完了条件: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。#346 のコメント（文面は持ち主の承認の後）の URL が JSON の note にある
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
 
 ## 記録
 
+- 2026-10-16 / T07 / T06・T02 の Codex のレビューで P2 が 3 件（Codex の子スレッドに親のログを使う、配信の後の動きを 10 件で切る、`<` で始まる依頼を全部外す）。どれも再現できる指摘として採る。窓の Codex の配信に子スレッドの行は 0 件なので今回の測定には響かない。差し込みのタグは直近のログで environment_context 302、skill 5、external_codex_apps_open_page 2 だった / 修正タスク T07 を足し、T05 の依存に T07 を足した（前: T03, T04、新: T03, T04, T07）
+- 2026-10-16 / T03 / Codex のレビューは指摘なし（91,881 通りで判定式を直接確かめた）
 - 2026-10-16 / T04 / 抜き取った 80 組のうち 18 組は Codex の 16 セッションで、~/.codex/sessions と archived_sessions のどこにもその id のログが無い（ephemeral の codex exec と推測、未確認） / 計画どおり除かずに「記録なし」で残し、件数を結果に書く
 - 2026-10-16 / T04 / 完了条件のコマンドに `--out` が無かった（`--sample` は書き出し先が要る）。前: `--size 80` まで、新: `--out <scratchpad>/drawn.json` を足し、シートは `--sheet` で書く / 欄を直した
 - 2026-10-16 / T06 / T01 の Codex のレビューで P2 が 2 件（窓の時刻を文字列のまま比べる、一意でない名前でプロジェクトを選ぶ）。どちらも再現できる指摘として採る / 修正タスク T06 を T02 の前に足した

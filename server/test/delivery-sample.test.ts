@@ -383,7 +383,12 @@ test("a timeline keeps prompts, calls, and replies of both hosts, and leaves out
       a.after.map((e) => e.text),
       ['Edit {"file_path":"server/src/search.ts"}'],
     );
-    assert.deepEqual(around([], "2026-10-10T00:00:00.000Z"), { prompt: null, before: [], after: [] });
+    assert.deepEqual(around([], "2026-10-10T00:00:00.000Z"), {
+      prompt: null,
+      before: [],
+      after: [],
+      more: 0,
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -554,4 +559,122 @@ test("labels out of order or outside the vocabulary are refused by name", () => 
     () => decide([{ n: 1, settled: "useful", class: "plan" as Labelled["class"] }]),
     /label 1: class plan is not finished-plan/,
   );
+});
+
+test("after a delivery the sheet keeps the whole turn up to the next prompt, and names how many lines a long one leaves out", () => {
+  const t = (s: number) => `2026-10-10T00:00:${String(s).padStart(2, "0")}.000Z`;
+  const calls = Array.from({ length: 12 }, (_, i) => ({
+    at: t(i + 2),
+    kind: "call" as const,
+    text: `Read f${i}`,
+  }));
+  const entries = [
+    { at: t(0), kind: "prompt" as const, text: "go" },
+    ...calls,
+    { at: t(20), kind: "reply" as const, text: "changed course" },
+    { at: t(30), kind: "prompt" as const, text: "next" },
+  ];
+  const a = around(entries, t(1));
+  assert.equal(a.after.length, 13);
+  assert.equal(a.after.at(-1)?.text, "changed course");
+  assert.equal(a.more, 0);
+  const long = Array.from({ length: 40 }, (_, i) => ({
+    at: `2026-10-10T00:01:${String(i).padStart(2, "0")}.000Z`,
+    kind: "call" as const,
+    text: `c${i}`,
+  }));
+  const b = around([{ at: t(0), kind: "prompt" as const, text: "go" }, ...long], t(1));
+  assert.equal(b.after.length + b.more, 40);
+  assert.ok(b.more > 0);
+});
+
+test("only the context Codex injects is left out of its prompts, not a request that starts with a tag", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-timeline-"));
+  try {
+    const user = (s: number, text: string) => ({
+      timestamp: `2026-10-11T00:00:0${s}.000Z`,
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+    });
+    fs.writeFileSync(
+      path.join(dir, "x.jsonl"),
+      jsonl([
+        user(0, "<environment_context>cwd</environment_context>"),
+        user(1, "<skill>\nname: trace</skill>"),
+        user(2, "<external_codex_apps_open_page>p</external_codex_apps_open_page>"),
+        user(3, "<user_instructions>AGENTS.md</user_instructions>"),
+        user(4, "<task>Fix search ranking</task>"),
+      ]),
+    );
+    assert.deepEqual(
+      readTimeline(path.join(dir, "x.jsonl"), "codex").map((e) => e.text),
+      ["<task>Fix search ranking</task>"],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a Codex child thread's delivery is labelled from the child's log, not its parent's", async () => {
+  const db = tempDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-sample-"));
+  try {
+    const p = project(db);
+    session(db, p, "s1", "codex");
+    db.owner.prepare("update session set external_id = '01aa-parent' where id = 's1'").run();
+    const u = unit(db, p, "r");
+    const d = insert(db, "delivery", {
+      session_id: "s1",
+      agent_id: "01bb-child",
+      event: "pre_read",
+      outcome: "emitted",
+      at: at("2026-10-11T00:00:02.500Z"),
+    });
+    insert(db, "delivery_unit", { delivery_id: d, unit_id: u });
+    const codexDir = path.join(dir, "codex", "2026", "10", "11");
+    fs.mkdirSync(codexDir, { recursive: true });
+    const log = (text: string) =>
+      jsonl([
+        {
+          timestamp: "2026-10-11T00:00:01.000Z",
+          type: "response_item",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+        },
+      ]);
+    fs.writeFileSync(
+      path.join(codexDir, "rollout-2026-10-11T00-00-00-01aa-parent.jsonl"),
+      log("the parent's request"),
+    );
+    fs.writeFileSync(
+      path.join(codexDir, "rollout-2026-10-11T00-00-01-01bb-child.jsonl"),
+      log("the child's task"),
+    );
+    const drawnFile = path.join(dir, "drawn.json");
+    fs.writeFileSync(drawnFile, JSON.stringify({ pairs: [{ n: 1, delivery: d, unit: u }] }));
+    const out = path.join(dir, "sheet.md");
+    const r = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--sheet",
+        drawnFile,
+        "--db",
+        db.file,
+        "--claude",
+        path.join(dir, "claude"),
+        "--codex",
+        path.join(dir, "codex"),
+        "--out",
+        out,
+      ],
+      { encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir } },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const text = fs.readFileSync(out, "utf8");
+    assert.match(text, /the child's task/);
+    assert.doesNotMatch(text, /the parent's request/);
+  } finally {
+    await db.done();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
