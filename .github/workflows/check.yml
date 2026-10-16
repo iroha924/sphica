@@ -181,6 +181,17 @@ jobs:
           node --test --test-reporter=tap --test-timeout=120000 test/test-run.test.ts | tee test-run.tap
           grep -qx "# fail 0" test-run.tap
           grep -qE "^# pass [1-9]" test-run.tap
+      # On macOS collect reads the hidden test's parts and the review evaluation runs the real sandbox; elsewhere both take another branch,
+      # and pre-push runs verify only before a push to main, so this is where those branches run
+      - name: The evaluations' macOS branches
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/eval-claude.test.ts test/review-eval.test.ts | tee evals.tap
+          grep -qx "# fail 0" evals.tap
+          # A file with no tests still counts as one pass, so each file must show its macOS test passing
+          grep -qE "^ok [0-9]+ - collect keeps the hidden test.s completion, compliance, and poison parts apart" evals.tap
+          grep -qE "^ok [0-9]+ - M2 judges a run.s final patch" evals.tap
       # Sphica runs git outside the agent's sandbox: config, attributes, and hooks the agent writes must run nothing, here as on Linux
       - name: Git config the agent writes runs nothing
         working-directory: server

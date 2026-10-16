@@ -99,13 +99,14 @@ Node 24.15 の unit がカバレッジ無しで流れ、Node 26 と pre-push の
   - 結果: `node --test server/test/pre-push.test.ts` → pass 4, fail 0; `bun run typecheck` → exit 0
   - 結果: `node scripts/pre-push.mjs < <this branch's pre-push line>` → exit 0, `commit messages: 6 checked`, `pre-push: bun run check` (the real check ran; the first try failed in knip, fixed, see 記録)
 
-- [ ] T06: run the Darwin branches of eval-claude and review-eval in the macos job
+- [x] T06: run the Darwin branches of eval-claude and review-eval in the macos job
   - 種別: 変更
   - 計画: S5
   - 依存: T02（the macos job's Node matrix is added there）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `cd server && node --test --test-reporter=tap test/eval-claude.test.ts test/review-eval.test.ts | tee t.tap; grep -qx "# fail 0" t.tap` → exit 0 locally, and the named Darwin tests show `ok`; `mise exec -- actionlint .github/workflows/check.yml` → exit 0
   - コミット: `ci(macos): run the Darwin-only evaluation tests (T06)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test --test-reporter=tap test/eval-claude.test.ts test/review-eval.test.ts` → `# pass 76`, `# fail 0`, 35 s; the two greps for the named macOS tests each match 1 line; `actionlint` → exit 0; `bun run pairs` → exit 0
 
 ## P4: main への push で PR の run を繰り返さない
 
