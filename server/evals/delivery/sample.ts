@@ -231,16 +231,20 @@ const AFTER = 30;
 export function around(
   entries: Entry[],
   at: string,
-): { prompt: Entry | null; before: Entry[]; after: Entry[]; more: number } {
+): { prompt: Entry | null; opensAfter: boolean; before: Entry[]; after: Entry[]; more: number } {
   const i = entries.findIndex((e) => e.at > at);
   const cut = i < 0 ? entries.length : i;
   const earlier = entries.slice(0, cut);
   const opened = earlier.map((e) => e.kind).lastIndexOf("prompt");
   const next = entries.slice(cut);
-  const stop = next.findIndex((e) => e.kind === "prompt");
-  const turn = stop < 0 ? next : next.slice(0, stop);
+  // A delivery before any prompt (a session's start) bears on the first turn, so that turn is shown instead
+  const first = opened < 0 ? next.findIndex((e) => e.kind === "prompt") : -1;
+  const rest = first < 0 ? next : next.slice(first + 1);
+  const stop = rest.findIndex((e) => e.kind === "prompt");
+  const turn = stop < 0 ? rest : rest.slice(0, stop);
   return {
-    prompt: opened < 0 ? null : (earlier[opened] as Entry),
+    prompt: opened >= 0 ? (earlier[opened] as Entry) : first >= 0 ? (next[first] as Entry) : null,
+    opensAfter: first >= 0,
     before: earlier.slice(Math.max(opened + 1, cut - 3)),
     after: turn.slice(0, AFTER),
     more: Math.max(turn.length - AFTER, 0),
@@ -294,11 +298,11 @@ async function sheetEntry(
     const a = around(t, row.at);
     lines.push(
       `conversation: ${file}`,
-      "the prompt that opened the turn:",
+      a.opensAfter ? "the first prompt, which came after the delivery:" : "the prompt that opened the turn:",
       a.prompt ? `    ${indent(head(a.prompt.text, 1500))}` : "    (none before the delivery)",
       "just before the delivery:",
       ...a.before.map(show),
-      "after the delivery, until the next prompt:",
+      a.opensAfter ? "that turn, until the next prompt:" : "after the delivery, until the next prompt:",
       ...a.after.map(show),
       ...(a.more ? [`  … ${a.more} more lines until the next prompt`] : []),
     );

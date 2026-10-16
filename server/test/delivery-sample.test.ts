@@ -385,6 +385,7 @@ test("a timeline keeps prompts, calls, and replies of both hosts, and leaves out
     );
     assert.deepEqual(around([], "2026-10-10T00:00:00.000Z"), {
       prompt: null,
+      opensAfter: false,
       before: [],
       after: [],
       more: 0,
@@ -720,4 +721,31 @@ test("a task notice or a subagent's report sits inside the owner's turn instead 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a delivery made before any prompt is shown with the first prompt after it and that turn", () => {
+  const e = (s: number, kind: "prompt" | "call" | "reply", text: string) => ({
+    at: `2026-10-10T00:00:0${s}.000Z`,
+    kind,
+    text,
+  });
+  const a = around(
+    [
+      e(2, "prompt", "first request"),
+      e(3, "call", "Read a"),
+      e(4, "reply", "done"),
+      e(5, "prompt", "second"),
+    ],
+    "2026-10-10T00:00:01.000Z",
+  );
+  assert.equal(a.prompt?.text, "first request");
+  assert.equal(a.opensAfter, true);
+  assert.deepEqual(
+    a.after.map((x) => x.text),
+    ["Read a", "done"],
+  );
+  assert.equal(
+    around([e(0, "prompt", "go"), e(2, "call", "c")], "2026-10-10T00:00:01.000Z").opensAfter,
+    false,
+  );
 });

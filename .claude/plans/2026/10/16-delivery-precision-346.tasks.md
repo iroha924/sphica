@@ -89,6 +89,16 @@ base: main
   - コミット: `fix(eval): keep task notices and subagent reports inside the owner's turn (T09)`
   - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は通知と報告が prompt になりテストが落ちた（actual prompt, prompt / expected notice, notice）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 16 件 pass。`bun run check` → 0
 
+- [x] T10: 最初の依頼より前の配信では、その後の最初の依頼とそのターンをシートに出す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象のターンの区切り）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 依頼より前の配信で、依頼が無いことになり配信の後も空になるテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。依頼より前の配信は、その後の最初の依頼と、次の依頼までの動きが出て、そうだと分かる見出しが付く
+  - コミット: `fix(eval): show the first turn for a delivery made before any prompt (T10)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は依頼より前の配信で prompt が undefined（expected first request）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 17 件 pass。`bun run check` → 0
+
 ## P2: 測定と報告
 
 持ち主の DB の直近 7 日から 80 組を抜き取ってラベルを付け、判定と防げた例を #346 に出す。
@@ -105,13 +115,14 @@ base: main
 - [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
   - 種別: 追加
   - 計画: S2, S3
-  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）, T08（ラベルに使うシートの直し）, T09（ラベルに使うシートの直し）
+  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）, T08（ラベルに使うシートの直し）, T09（ラベルに使うシートの直し）, T10（ラベルに使うシートの直し）
   - 変更: `server/evals/delivery/precision-baseline.json`
   - 完了条件: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。#346 のコメント（文面は持ち主の承認の後）の URL が JSON の note にある
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
 
 ## 記録
 
+- 2026-10-16 / T10 / 直したシートで、セッションの開始の配信など 7 項目は最初の依頼より前に届くので、依頼が無く配信の後も空になり、ラベルの材料が無かった / 修正タスク T10 を足し、T05 の依存に T10 を足した（前: T03, T04, T07, T08, T09、新: T03, T04, T07, T08, T09, T10）
 - 2026-10-16 / T09 / 直したシートで、Claude Code の 11 項目のターンの始まりが `<task-notification>`（origin が task-notification）だった。サブエージェントの報告（origin が peer）も同じ形で入る / 修正タスク T09 を足し、T05 の依存に T09 を足した（前: T03, T04, T07, T08、新: T03, T04, T07, T08, T09）
 - 2026-10-16 / T08 / ラベルを付け始めて、Codex が AGENTS.md の本文を `# AGENTS.md instructions` で始まる user メッセージとして差し込み、シートがそれを依頼と読んで本当の依頼の手前でターンを切ることに気付いた（直近 400 ログで 401 回、シートの 6 項目）。古いシートで始めた Codex のラベルは止めた / 修正タスク T08 を足し、T05 の依存に T08 を足した（前: T03, T04, T07、新: T03, T04, T07, T08）
 - 2026-10-16 / T07 / Codex のレビューは指摘なし
