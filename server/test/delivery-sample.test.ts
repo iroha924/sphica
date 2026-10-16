@@ -680,3 +680,44 @@ test("a Codex child thread's delivery is labelled from the child's log, not its 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a task notice or a subagent's report sits inside the owner's turn instead of starting one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-timeline-"));
+  try {
+    const user = (s: number, text: string, origin?: Record<string, unknown>) => ({
+      type: "user",
+      timestamp: `2026-10-10T00:00:0${s}.000Z`,
+      ...(origin ? { origin } : {}),
+      message: { content: text },
+    });
+    fs.writeFileSync(
+      path.join(dir, "c.jsonl"),
+      jsonl([
+        user(0, "measure the delivery volume", { kind: "human" }),
+        user(1, "<task-notification>done</task-notification>", {
+          kind: "task-notification",
+          producer: "session-task",
+        }),
+        user(2, "[Subagent hand-back] report", { kind: "peer", name: "review-shipping" }),
+        {
+          type: "assistant",
+          timestamp: "2026-10-10T00:00:03.000Z",
+          message: { content: [{ type: "text", text: "reading it" }] },
+        },
+      ]),
+    );
+    const t = readTimeline(path.join(dir, "c.jsonl"), "claude-code");
+    assert.deepEqual(
+      t.map((e) => e.kind),
+      ["prompt", "notice", "notice", "reply"],
+    );
+    const a = around(t, "2026-10-10T00:00:02.500Z");
+    assert.equal(a.prompt?.text, "measure the delivery volume");
+    assert.deepEqual(
+      a.before.map((e) => e.kind),
+      ["notice", "notice"],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

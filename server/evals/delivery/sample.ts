@@ -131,7 +131,8 @@ export function draw(population: Population, seed: number, size: number): Drawn[
 }
 
 /** One line of a conversation the sheet shows: the prompt that opened a turn, a tool call, or a reply */
-export type Entry = { at: string; kind: "prompt" | "call" | "reply"; text: string };
+/** A notice is a user line the host wrote, not the owner: a background task's notification or a subagent's report */
+export type Entry = { at: string; kind: "prompt" | "notice" | "call" | "reply"; text: string };
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -147,7 +148,7 @@ const texts = (content: unknown, type: string) =>
 const callText = (name: unknown, input: unknown) =>
   `${String(name ?? "")} ${typeof input === "string" ? input : JSON.stringify(input ?? {})}`;
 
-/** A Claude Code transcript's prompts (not tool results, meta lines, or compaction summaries), tool calls, and replies */
+/** A Claude Code transcript's prompts and notices (not tool results, meta lines, or compaction summaries), tool calls, and replies */
 function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
   const content = isObject(d.message) ? d.message.content : undefined;
   if (d.type === "assistant" && Array.isArray(content))
@@ -163,7 +164,9 @@ function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
   if (d.type !== "user" || d.isMeta === true || d.isCompactSummary === true) return [];
   if (Array.isArray(content) && content.some((c) => isObject(c) && c.type === "tool_result")) return [];
   const text = texts(content, "text");
-  return text.trim() ? [{ at, kind: "prompt", text }] : [];
+  const origin = isObject(d.origin) ? d.origin.kind : undefined;
+  if (!text.trim()) return [];
+  return [{ at, kind: origin === undefined || origin === "human" ? "prompt" : "notice", text }];
 }
 
 /** How the context Codex adds as a user message starts in its session logs (tags, and AGENTS.md's text); a request of the user's may start with a tag */
