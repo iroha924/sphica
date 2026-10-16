@@ -22,13 +22,14 @@ base: main
 
 Windows job が約 2 分縮み、hidden runner の検査が Node 24.15 と 26 の macOS で通って CI でも両方流れる。
 
-- [ ] T01: run the "without node" launch-line case through cmd.exe only on Windows
+- [x] T01: run the "without node" launch-line case through cmd.exe only on Windows
   - 種別: 変更
   - 計画: S1
   - 依存: なし
   - 変更: `scripts/check-hooks-live.mjs`
-  - 完了条件: `bun run hooks:live` → exit 0 on macOS, the sh line still lists "without node"; the Windows job's log on this branch's CI lists "without node" for cmd.exe only
+  - 完了条件: `bun run hooks:live` → exit 0 on macOS, the sh line still lists "without node"
   - コミット: `ci(windows): check the missing-node launch line through one shell (T01)`
+  - 結果: `bun run bundle && bun run hooks:live` → exit 0, `codex launch line through sh: node exiting 0 → 0 in 24 ms, node exiting 7 → 7 in 24 ms, without node → 127 in 4 ms`
 
 - [ ] T02: check both fences in the hidden runner test and the OS fence alone, on both Node lines in CI
   - 種別: 修正
@@ -136,3 +137,5 @@ merge 後の main への push は、push 専用の検査だけ流して重い jo
   - コミット: `ci: settle the test concurrency and restore the per-run seed (T12)`
 
 ## 記録
+
+- 2026-10-16 / T01 / 完了条件 was "`bun run hooks:live` → exit 0 on macOS, the sh line still lists \"without node\"; the Windows job's log on this branch's CI lists \"without node\" for cmd.exe only" and is now the macOS part only / the Windows log can only be seen after a push, after the commit that checks the task; it is observed under the plan's A5
