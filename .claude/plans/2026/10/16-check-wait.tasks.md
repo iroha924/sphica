@@ -22,7 +22,7 @@ base: main
 
 手元の verify で最も長い受け入れテスト（271 秒）を、ケースを分けたファイルの並行で縮める。
 
-- [ ] T01: 受け入れテストの driver が親の CLAUDE_ENV_FILE へ書かないようにする
+- [x] T01: 受け入れテストの driver が親の CLAUDE_ENV_FILE へ書かないようにする
   - 種別: 修正
   - 計画: S1
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: `f=$(mktemp); CLAUDE_ENV_FILE=$f SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance; wc -c < $f` → 0 より大きい（SessionStart が `export SPHICA_PARENT_SESSION=…` を追記する）
   - 完了条件: `f=$(mktemp); CLAUDE_ENV_FILE=$f SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance; wc -c < $f` → acceptance が成功し、`wc -c` が 0
   - コミット: `fix(eval): keep acceptance cases from writing the parent's CLAUDE_ENV_FILE (T01)`
+  - 結果: red: 直す前に `CLAUDE_ENV_FILE=<一時ファイル> SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance` → pass 18、ファイルが 538 バイト（`export SPHICA_PARENT_SESSION=s-ja-storage` ほか）。直した後に同じコマンド → pass 18 / fail 0、ファイル 0 バイト
 
 - [ ] T02: 受け入れテストをシャードのファイルに分け、ルートの acceptance で並行に走らせる
   - 種別: 変更
