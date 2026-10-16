@@ -22,14 +22,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  # verify runs here split into parts that run at once: each part runs package.json's ci:<part>, and `bun run pairs` checks that the parts
+  # add up to verify exactly (pre-push runs verify whole). Every part runs on both the engines floor (24.15) and the next line (26).
+  part:
+    name: "part (${{ matrix.node }}, ${{ matrix.part }})"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Checks that it passes on both the engines floor (24.15) and the next line (26). If one fails, the other's result is kept.
+    # If one part fails, the others' results are kept.
     strategy:
       fail-fast: false
       matrix:
         node: ["24.15", "26"]
+        part: [static, unit, acceptance]
     steps:
       # Third-party actions are pinned to a full commit SHA (a tag's contents can be swapped later).
       - uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
@@ -43,9 +47,11 @@ jobs:
 
       # **Pin the bun version.** Letting it float picks versions that cannot read the lockfile
       # (actually hit on Vercel: 1.3.14 could not read lockfileVersion 2 and failed).
+      # No cached Bun from another run: the checks here are what the release relies on.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
+          no-cache: true
 
       # Tests run on node's test runner, and the database uses Node's built-in node:sqlite.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -54,6 +60,7 @@ jobs:
 
       # Placed before installing dependencies and verify. If a push to main fails earlier, its range is never checked.
       - name: Is the plugin version bumped
+        if: matrix.part == 'static'
         env:
           # For a PR, the first parent of the checked-out merge commit is the merge target; for a push to main, the pre-push commit.
           # Whether a change reaches users depends on whether the version differs from the previous main, so the whole range is compared.
@@ -63,11 +70,12 @@ jobs:
 
       # Hooks can be skipped, so check what was actually committed: the PR's own commits, or the commits pushed to main.
       - name: commit message
+        if: matrix.part == 'static'
         env:
           RANGE: ${{ github.event_name == 'pull_request' && 'HEAD^1..HEAD^2' || format('{0}..HEAD', github.event.before) }}
         run: node scripts/check-commit-msg.mjs --range "$RANGE"
 
-      # The links check in verify (verify:ai) needs lychee; the version matches mise.toml (bun run pairs checks it)
+      # The links check in verify (verify:ai) and the tarball check need lychee; the version matches mise.toml (bun run pairs checks it)
       - name: Install lychee
         env:
           LYCHEE: "0.24.2"
@@ -84,23 +92,50 @@ jobs:
       - name: Install dependencies
         run: bun run setup
 
-      # Uses the same source of truth as the local pre-push: Biome, types, the package bundle, tests (with sql:reach counting whether every SQL
-      # ran against a real SQLite database), and sql:live, which runs the CLI and capture as child processes against a database in a temp HOME.
+      # static: Biome, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
+      # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database. acceptance: the cases.
       # On Node 26 the tests run in a random order, from a seed printed in the log, so a test that leans on another's leftovers shows up.
       # The flag goes to the test command, not NODE_OPTIONS, which children would inherit (a child node refuses --test-randomize without --test)
-      - name: Lint, types, bundle, tests, SQL reach, and the child process lane
+      - name: This part of verify
         env:
+          PART: ${{ matrix.part }}
           TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
-        run: bun run verify
+        run: bun run "ci:$PART"
 
       # **Check what ships as a tarball.** dist and db are untracked, so `git diff` shows nothing.
       # The same script as release checks the file list, starting outside the repository, and creating a database.
       - name: Is the shipped tarball self-contained
+        if: matrix.part == 'static'
         run: |
           set -e
           cd plugin
           tgz="$(npm pack --silent)"
           node ../scripts/check-tarball.mjs "$tgz"
+
+  # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
+  # skipped, so this runs always and fails unless every part (on both lines) succeeded.
+  check:
+    needs: part
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        node: ["24.15", "26"]
+    steps:
+      - uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Did every part succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/check-parts.mjs part
 
   # The evaluation's hidden tests run the agent's code inside macOS's sandbox-exec, which exists nowhere else. This job tries every way out of
   # that sandbox for real, and runs the poisoned tasks' hidden tests through it, so a weaker profile fails here and not in an evaluation.
@@ -117,6 +152,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
+          no-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.15"
@@ -168,6 +204,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
+          no-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.15"
@@ -266,6 +303,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
+          no-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.15"

@@ -18,6 +18,9 @@
     "check": "bun run lint && bun run verify:ai && bun run naming && bun run pairs && bun run rule-scopes && bun run sql && bun run architecture && bun run english && bun run markdown && bun run comments && bun run headers && bun run codegen:check && bun run typecheck && bun run knip",
     "test": "bun run --cwd server test",
     "verify": "bun run check && bun run bundle && bun run sql:reach && bun run sql:live && bun run hooks:live && bun run codex-trust:live && bun run acceptance",
+    "ci:static": "bun run check && bun run bundle && bun run sql:live && bun run hooks:live && bun run codex-trust:live",
+    "ci:unit": "bun run sql:reach",
+    "ci:acceptance": "bun run acceptance",
     "bundle": "node scripts/bundle.mjs",
     "release:plan": "node scripts/release-plan.mjs",
     "release:status": "node scripts/release-status.mjs",
@@ -32,6 +35,6 @@
     "pairs": "node scripts/check-pairs.mjs",
     "rule-scopes": "node scripts/check-rule-scopes.mjs",
     "sql": "node scripts/check-sql.mjs",
-    "acceptance": "node --test --test-timeout=60000 server/evals/acceptance/shard-*.ts"
+    "acceptance": "node --test --test-timeout=60000 server/evals/acceptance/shard-1.ts server/evals/acceptance/shard-2.ts server/evals/acceptance/shard-3.ts server/evals/acceptance/shard-4.ts server/evals/acceptance/shard-5.ts server/evals/acceptance/shard-6.ts server/evals/acceptance/shard-7.ts server/evals/acceptance/shard-8.ts"
   }
 }

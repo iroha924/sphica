@@ -42,25 +42,37 @@ base: main
   - 結果: `node --test --test-timeout=60000 --test-concurrency=<c> server/evals/acceptance/shard-*.ts` → N と並行数を変えて（この Mac 12 コア、caffeinate -i）全部 pass 148 / fail 0。N=8・既定の並行数（11）42 秒、N=12・11 で 50 秒、N=16・16 で 36 秒、N=4・3 で 116 秒、N=8・3 で 95 秒。N=8、並行数は既定を採った（CI の 4 vCPU では既定が 3）
   - 結果: `bun run acceptance` → 44 秒、tests 148 / pass 148 / fail 0（基準 271 秒）。`bun run --cwd server acceptance` → 250 秒、pass 148。`node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → pass 6。`bun run sql:reach` → 266 / 266。knip・english・lint・typecheck → 0
 
+- [x] T08: bun run acceptance がシャードのファイルを名指しし、どれかが無ければ落ちるようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（シャードのファイルと acceptance のスクリプトが要る）
+  - 変更: `package.json`, `server/test/acceptance-cases.test.ts`
+  - red: `node --test --test-timeout=60000 server/evals/acceptance/does-not-exist-*.ts` → tests 0 で exit 0（glob が何にも当たらないと 0 件で成功する。bun run の Bun Shell 経由でも同じく rc=0 を実測）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → package.json の acceptance が shard-1..N をちょうど名指しするテストが pass
+  - コミット: `ci: split check into parallel part jobs behind the required check names (T03, T04, T08)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → pass 7 / fail 0。存在しないファイルを名指しすると node --test は exit 1（Codex のレビューで確認）
+
 ## P2: CI の check を部分ごとの並行のジョブにする
 
 check の壁時計を、部分（static / unit / acceptance）のうち最も長いものにする。必須の check 名と、verify と同じ検査の集合は保つ。
 
-- [ ] T03: 部分ジョブの結果をまとめる判定スクリプト
+- [x] T03: 部分ジョブの結果をまとめる判定スクリプト
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `scripts/check-parts.mjs`, `scripts/lib/check-parts.mjs`, `server/test/check-parts.test.ts`
+  - 変更: `scripts/check-parts.mjs`, `scripts/lib/check-parts.mjs`, `scripts/lib/check-parts.d.mts`, `server/test/check-parts.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/check-parts.test.ts` → 全部 success で 0、failure / cancelled / skipped / 欠けのそれぞれで失敗するケースが pass
   - コミット: `ci: add the check that every part job succeeded (T03)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/check-parts.test.ts` → pass 3 / fail 0（success で 0、failure / cancelled / skipped / 欠け / 想定外 / 壊れた NEEDS で失敗）。knip が check.yml から呼ばれるまで未使用と出すので T04 と同じコミットにした
 
-- [ ] T04: check.yml を部分ジョブと集約に分け、check-pairs で verify との一致・lychee・no-cache を見る
+- [x] T04: check.yml を部分ジョブと集約に分け、check-pairs で verify との一致・lychee・no-cache を見る
   - 種別: 変更
   - 計画: S2, S3
   - 依存: T03（集約ジョブが判定スクリプトを呼ぶ）
-  - 変更: `.github/workflows/check.yml`, `scripts/check-pairs.mjs`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - 変更: `.github/workflows/check.yml`, `package.json`, `scripts/check-pairs.mjs`, `scripts/lib/verify-pairs.mjs`, `scripts/lib/verify-pairs.d.mts`, `server/test/verify-pairs.test.ts`
   - 完了条件: `bun run pairs` → 0。`mise exec -- actionlint .github/workflows/check.yml` → 0。`cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → 部分・コマンド・lychee・no-cache を消した写しで失敗するケースが pass
   - コミット: `ci: split check into parallel part jobs behind the required check names (T04)`
+  - 結果: `bun run pairs` → 0。`mise exec -- actionlint .github/workflows/check.yml` → 0。`cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → pass 7 / fail 0（部分・コマンド・重複・lychee の欠落と条件と版・no-cache・集約の if とスクリプトを消した写しで失敗）。lint・typecheck・knip・english・headers・comments・markdown・verify:ai・rule-scopes → 0
 
 ## P3: release の prepare を bundle の経路にする
 
@@ -100,3 +112,5 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
 ## 記録
 
 - 2026-10-16 / T02 / 変更欄の `shard-*.ts` は検査が実在のパスを要るので `shard-1.ts` で代表させ、knip.json（シャードを入口に）と check-english.mjs（cases-run.ts を English だけのファイルに）を足した / 変更欄を直した
+- 2026-10-16 / T01, T02 / Codex のレビュー（high）: F1「glob に当たるシャードが 0 件だと受け入れテストが走らずに成功する」を採った。Codex は Bun Shell なら失敗すると書いたが、手元で `bun run` の当たらない glob が tests 0・rc=0 になるのを確かめた / 修正タスク T08 を足した
+- 2026-10-16 / T03, T04 / T03 の変更欄に `scripts/lib/check-parts.d.mts`、T04 の変更欄に `package.json`（ci:<part>）と `scripts/lib/verify-pairs.d.mts` を足した（既存の .mjs は .d.mts で型を持つ）。T03 は knip の未使用を避けるため T04 と同じコミット / 変更欄を直した

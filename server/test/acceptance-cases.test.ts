@@ -12,6 +12,8 @@ import { inShard, selectCases, shardCount, shardOf } from "../evals/acceptance/c
 import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 import { tempDir } from "./temp-dir.ts";
 
+const ROOT = path.join(import.meta.dirname, "..", "..");
+
 const PER_LAYER = {
   capture: 18,
   status: 9,
@@ -95,4 +97,13 @@ test("a shard number comes only from a file named shard-<k>.ts, and the numbers 
   assert.throws(() => shardCount(dir), /without gaps, found \[\]/);
   files("shard-1.ts", "shard-x.ts");
   assert.throws(() => shardCount(dir), /not named shard-<k>\.ts/);
+});
+
+test("bun run acceptance names every shard file, so a moved or missing one fails instead of running nothing", () => {
+  const script = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts
+    .acceptance as string;
+  const named = script.split(" ").filter((a) => a.endsWith(".ts"));
+  const want = Array.from({ length: shardCount() }, (_, k) => `server/evals/acceptance/shard-${k + 1}.ts`);
+  assert.deepEqual(named, want);
+  for (const f of named) assert.ok(fs.existsSync(path.join(ROOT, f)), f);
 });
