@@ -323,6 +323,56 @@ async function sheet(
   }
 }
 
+const LABELS = ["useful", "irrelevant", "unknown"] as const;
+const CLASSES = ["finished-plan", "open-plan", "plan-unknown", "standing", "other"] as const;
+
+export type Labelled = { n: number; settled: (typeof LABELS)[number]; class: (typeof CLASSES)[number] };
+
+export type Decision = {
+  n: number;
+  F: number;
+  I: number;
+  U: number;
+  R: number;
+  verdict: "too few" | "go" | "not adopted" | "undecided";
+  classes: Record<(typeof CLASSES)[number], Record<(typeof LABELS)[number], number>>;
+};
+
+/**
+ * The bar fixed before labelling, over the finished-plan pairs (I irrelevant, U unknown, R useful, F all of them): go only if every way the
+ * unknowns resolve still passes (5I >= 4F and R + U <= 1), not adopted if none does, undecided otherwise. Fewer than 8 decide nothing.
+ */
+export function decide(labels: Labelled[]): Decision {
+  labels.forEach((l, i) => {
+    if (l.n !== i + 1)
+      throw new Error(`labels must run 1, 2, 3, … without gaps or repeats; found ${l.n} at ${i + 1}`);
+    if (!LABELS.includes(l.settled))
+      throw new Error(`label ${l.n}: ${l.settled} is not ${LABELS.join(", ")}`);
+    if (!CLASSES.includes(l.class))
+      throw new Error(`label ${l.n}: class ${l.class} is not ${CLASSES.join(", ")}`);
+  });
+  const classes = Object.fromEntries(
+    CLASSES.map((c) => [
+      c,
+      Object.fromEntries(
+        LABELS.map((k) => [k, labels.filter((l) => l.class === c && l.settled === k).length]),
+      ),
+    ]),
+  ) as Decision["classes"];
+  const f = classes["finished-plan"];
+  const [I, U, R] = [f.irrelevant, f.unknown, f.useful];
+  const F = I + U + R;
+  const verdict =
+    F < 8
+      ? "too few"
+      : 5 * I >= 4 * F && R + U <= 1
+        ? "go"
+        : 5 * (I + U) < 4 * F || R >= 2
+          ? "not adopted"
+          : "undecided";
+  return { n: labels.length, F, I, U, R, verdict, classes };
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -338,12 +388,18 @@ async function main(): Promise<void> {
       sheet: { type: "string" },
       claude: { type: "string" },
       codex: { type: "string" },
+      decide: { type: "string" },
     },
   });
   const need = (mode: string, keys: (keyof typeof values)[]) => {
     const missing = keys.filter((k) => !values[k]);
     if (missing.length) throw new Error(`${mode} needs ${missing.map((k) => `--${k}`).join(", ")}`);
   };
+  if (values.decide) {
+    const labels = (JSON.parse(fs.readFileSync(values.decide, "utf8")) as { labels: Labelled[] }).labels;
+    console.log(JSON.stringify(decide(labels), null, 2));
+    return;
+  }
   if (values.sample) {
     need("--sample", ["population", "seed", "size", "out"]);
     const population = JSON.parse(fs.readFileSync(values.population as string, "utf8")) as Population;
@@ -382,7 +438,7 @@ async function main(): Promise<void> {
     return;
   }
   throw new Error(
-    "pass --db to pin a population, --sample to draw from it, or --sheet to write labelling sheets",
+    "pass --db to pin a population, --sample to draw from it, --sheet to write labelling sheets, or --decide to apply the bar",
   );
 }
 

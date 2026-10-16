@@ -50,13 +50,14 @@ base: main
   - コミット: `feat(eval): sample delivered records and write labelling sheets (T02)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 9 件 pass（同じ seed で同じ 80 組・同じ順、2 回の `--sample` の出力が一致、sha256 を書き換えた母集団で止まる、Claude Code の main とサブエージェント・Codex の会話から依頼と動きがシートに入り、記録の無い組は no transcript found）
 
-- [ ] T03: ラベルから判定を出す（`--decide`）
+- [x] T03: ラベルから判定を出す（`--decide`）
   - 種別: 追加
   - 計画: S1
   - 依存: T01（sample.ts の引数の受け方が要る）
   - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
   - 完了条件: `node --test server/test/delivery-sample.test.ts` → (8,7,1,0) は進む、(10,8,2,0) と (8,0,8,0) は undecided、F < 8 は判定できない、R >= 2 は進まない
   - コミット: `feat(eval): decide the finished-plan gate from settled labels (T03)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 12 件 pass（(F,I,U,R)=(8,7,1,0) は go、(10,8,2,0) と (8,0,8,0) は undecided、F=7 は too few、R>=2 は not adopted。F=8〜30 の全ての分け方で unknown を両方に解決した結果と一致。順番の飛びと語彙の外を名指しで拒む）。`bun run check` → 0
 
 ## P2: 測定と報告
 

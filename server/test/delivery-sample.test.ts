@@ -11,10 +11,12 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   around,
+  decide,
   differences,
   digest,
   draw,
   extract,
+  type Labelled,
   type Population,
   readTimeline,
 } from "../evals/delivery/sample.ts";
@@ -494,4 +496,62 @@ test("the script draws the same sample twice and writes a sheet with each conver
     await db.done();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/** Labels numbered in order: finished-plan pairs with the given irrelevant, unknown, and useful counts, then standing ones to pad */
+function labelled(I: number, U: number, R: number, pad = 0): Labelled[] {
+  const settled = [
+    ...Array<Labelled["settled"]>(I).fill("irrelevant"),
+    ...Array<Labelled["settled"]>(U).fill("unknown"),
+    ...Array<Labelled["settled"]>(R).fill("useful"),
+  ];
+  return [
+    ...settled.map((s, i): Labelled => ({ n: i + 1, settled: s, class: "finished-plan" })),
+    ...Array.from(
+      { length: pad },
+      (_, i): Labelled => ({ n: settled.length + i + 1, settled: "useful", class: "standing" }),
+    ),
+  ];
+}
+
+test("the bar goes only when every way the unknowns resolve passes, and decides nothing on fewer than 8", () => {
+  assert.equal(decide(labelled(7, 1, 0)).verdict, "go");
+  assert.equal(decide(labelled(8, 0, 0)).verdict, "go");
+  assert.equal(decide(labelled(8, 2, 0)).verdict, "undecided");
+  assert.equal(decide(labelled(0, 8, 0)).verdict, "undecided");
+  assert.equal(decide(labelled(6, 0, 2)).verdict, "not adopted");
+  assert.equal(decide(labelled(5, 1, 2)).verdict, "not adopted");
+  assert.equal(decide(labelled(5, 0, 3)).verdict, "not adopted");
+  assert.equal(decide(labelled(7, 0, 0, 73)).verdict, "too few");
+  const d = decide(labelled(7, 1, 0, 2));
+  assert.deepEqual({ n: d.n, F: d.F, I: d.I, U: d.U, R: d.R }, { n: 10, F: 8, I: 7, U: 1, R: 0 });
+  assert.deepEqual(d.classes.standing, { useful: 2, irrelevant: 0, unknown: 0 });
+});
+
+test("the bar's verdict agrees with resolving every unknown both ways, for every split of 8 to 30 finished-plan pairs", () => {
+  const passes = (I: number, R: number) => 5 * I >= 4 * (I + R) && R <= 1;
+  for (let F = 8; F <= 30; F++)
+    for (let U = 0; U <= F; U++)
+      for (let R = 0; R + U <= F; R++) {
+        const I = F - U - R;
+        const outcomes = Array.from({ length: U + 1 }, (_, k) => passes(I + k, R + U - k));
+        const expected = outcomes.every(Boolean)
+          ? "go"
+          : outcomes.some(Boolean)
+            ? "undecided"
+            : "not adopted";
+        assert.equal(decide(labelled(I, U, R)).verdict, expected, `I=${I} U=${U} R=${R}`);
+      }
+});
+
+test("labels out of order or outside the vocabulary are refused by name", () => {
+  assert.throws(() => decide([{ n: 2, settled: "useful", class: "standing" }]), /found 2 at 1/);
+  assert.throws(
+    () => decide([{ n: 1, settled: "noise" as Labelled["settled"], class: "standing" }]),
+    /label 1: noise is not useful, irrelevant, unknown/,
+  );
+  assert.throws(
+    () => decide([{ n: 1, settled: "useful", class: "plan" as Labelled["class"] }]),
+    /label 1: class plan is not finished-plan/,
+  );
 });
