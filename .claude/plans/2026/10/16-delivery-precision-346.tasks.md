@@ -22,13 +22,14 @@ base: main
 
 母集団を保存して同じ 80 組を出し直せ、ラベル用のシートが出て、ラベルから判定が出るスクリプトができる。
 
-- [ ] T01: 母集団を抽出して保存し、保存したものと照合する（`--db`）
+- [x] T01: 母集団を抽出して保存し、保存したものと照合する（`--db`）
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`, `knip.json`
   - 完了条件: `node --test server/test/delivery-sample.test.ts` → 一時 DB から窓・project・outcome で絞った (delivery.id, unit_id) の一覧と sha256 が保存され、行を消した DB で抽出し直すと違いを報告して 0 以外で終わる
   - コミット: `feat(eval): extract and pin the delivery population for the #346 sample (T01)`
+  - 結果: `node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts`（server/）→ 4 件 pass（窓・project・outcome の絞り込みと並び、照合の 4 種の違い、子プロセスで 2 回目は同じと報告・行を消した DB では 0 以外で終わり保存ファイルは変わらない、足りない引数の名指し）。`bun run check` → 0
 
 - [ ] T02: 保存した母集団から seed で 80 組を抜き取り、ラベル用のシートを出す（`--sample`）
   - 種別: 追加
