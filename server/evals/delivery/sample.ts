@@ -166,8 +166,9 @@ function claudeLine(d: Record<string, unknown>, at: string): Entry[] {
   return text.trim() ? [{ at, kind: "prompt", text }] : [];
 }
 
-/** The tags Codex wraps context it adds to a user message in, as its session logs show them; a request of the user's may start with a tag */
-const INJECTED = /^\s*<(environment_context|skill|external_codex_apps_open_page|user_instructions)>/;
+/** How the context Codex adds as a user message starts in its session logs (tags, and AGENTS.md's text); a request of the user's may start with a tag */
+const INJECTED =
+  /^\s*(<(environment_context|skill|external_codex_apps_open_page|user_instructions)>|# AGENTS\.md instructions\b)/;
 
 /** A Codex session log's user and assistant messages (not the context Codex injects) and tool calls */
 function codexLine(d: Record<string, unknown>, at: string): Entry[] {

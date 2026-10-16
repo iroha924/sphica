@@ -604,6 +604,8 @@ test("only the context Codex injects is left out of its prompts, not a request t
         user(2, "<external_codex_apps_open_page>p</external_codex_apps_open_page>"),
         user(3, "<user_instructions>AGENTS.md</user_instructions>"),
         user(4, "<task>Fix search ranking</task>"),
+        user(5, "# AGENTS.md instructions for /Users/o/r\n\n<INSTRUCTIONS>\nrules\n</INSTRUCTIONS>"),
+        user(6, "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nrules\n</INSTRUCTIONS>"),
       ]),
     );
     assert.deepEqual(

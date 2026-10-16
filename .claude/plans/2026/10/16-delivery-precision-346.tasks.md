@@ -69,6 +69,16 @@ base: main
   - コミット: `fix(eval): read Codex child threads and whole turns in labelling sheets (T07)`
   - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は 3 件が落ちた（配信の後 actual 10 / expected 13、`<task>` の依頼が actual []、子スレッドの配信に親の rollout を選んだ）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 15 件 pass。`bun run check` → 0。配信の後は 30 行まで出し、残りは件数を書く
 
+- [x] T08: Codex が差し込む AGENTS.md の本文をプロンプトから外す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象の差し込みの判定）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → `# AGENTS.md instructions for ...` で始まる user メッセージがプロンプトに残り、差し込みのテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。AGENTS.md の差し込みは外れ、その後の本当の依頼がターンの始まりになる
+  - コミット: `fix(eval): leave the AGENTS.md text Codex injects out of prompts (T08)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は差し込みのテストが落ちた（`# AGENTS.md instructions for /Users/o/r` と `# AGENTS.md instructions` の 2 件がプロンプトに残った）。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 15 件 pass。`bun run check` → 0
+
 ## P2: 測定と報告
 
 持ち主の DB の直近 7 日から 80 組を抜き取ってラベルを付け、判定と防げた例を #346 に出す。
@@ -85,13 +95,15 @@ base: main
 - [ ] T05: 2 者のラベルと原因の分類を付けて判定し、結果を #346 に書く
   - 種別: 追加
   - 計画: S2, S3
-  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）
+  - 依存: T03（判定が要る）, T04（抜き取った 80 組が要る）, T07（ラベルに使うシートの直し）, T08（ラベルに使うシートの直し）
   - 変更: `server/evals/delivery/precision-baseline.json`
   - 完了条件: `jq '[.sample[] | select(.claude and .codex and .settled and .class and .class_reason)] | length' server/evals/delivery/precision-baseline.json` → 80。#346 のコメント（文面は持ち主の承認の後）の URL が JSON の note にある
   - コミット: `test(eval): record the #346 delivery precision baseline and its gate (T05)`
 
 ## 記録
 
+- 2026-10-16 / T08 / ラベルを付け始めて、Codex が AGENTS.md の本文を `# AGENTS.md instructions` で始まる user メッセージとして差し込み、シートがそれを依頼と読んで本当の依頼の手前でターンを切ることに気付いた（直近 400 ログで 401 回、シートの 6 項目）。古いシートで始めた Codex のラベルは止めた / 修正タスク T08 を足し、T05 の依存に T08 を足した（前: T03, T04, T07、新: T03, T04, T07, T08）
+- 2026-10-16 / T07 / Codex のレビューは指摘なし
 - 2026-10-16 / T07 / T06・T02 の Codex のレビューで P2 が 3 件（Codex の子スレッドに親のログを使う、配信の後の動きを 10 件で切る、`<` で始まる依頼を全部外す）。どれも再現できる指摘として採る。窓の Codex の配信に子スレッドの行は 0 件なので今回の測定には響かない。差し込みのタグは直近のログで environment_context 302、skill 5、external_codex_apps_open_page 2 だった / 修正タスク T07 を足し、T05 の依存に T07 を足した（前: T03, T04、新: T03, T04, T07）
 - 2026-10-16 / T03 / Codex のレビューは指摘なし（91,881 通りで判定式を直接確かめた）
 - 2026-10-16 / T04 / 抜き取った 80 組のうち 18 組は Codex の 16 セッションで、~/.codex/sessions と archived_sessions のどこにもその id のログが無い（ephemeral の codex exec と推測、未確認） / 計画どおり除かずに「記録なし」で残し、件数を結果に書く
