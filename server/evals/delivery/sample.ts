@@ -206,12 +206,19 @@ export function readTimeline(file: string, host: string): Entry[] {
     } catch {
       continue;
     }
-    if (!isObject(d) || typeof d.timestamp !== "string") continue;
-    // The way transcript.ts tells a prompt from a local command's output or an interruption marker: the model answers only a prompt
-    if (host !== "codex" && (d.type === "user" || d.type === "assistant")) {
+    if (!isObject(d)) continue;
+    // The model answers only a prompt, not a local command's output or an interruption marker; a meta line (a Skill's text) sits between
+    // a prompt and its answer, and a line without a time still counts
+    if (
+      host !== "codex" &&
+      (d.type === "user" || d.type === "assistant") &&
+      d.isMeta !== true &&
+      d.isCompactSummary !== true
+    ) {
       for (const i of waiting) (out[i] as Entry).kind = d.type === "assistant" ? "prompt" : "notice";
       waiting = [];
     }
+    if (typeof d.timestamp !== "string") continue;
     const lines: (Entry & { unmarked?: true })[] =
       host === "codex" ? codexLine(d, d.timestamp) : claudeLine(d, d.timestamp);
     for (const { unmarked, ...e } of lines) {

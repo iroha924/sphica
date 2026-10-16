@@ -141,10 +141,20 @@ base: main
   - コミット: `fix(eval): count an unmarked user line as a prompt only when the model answers it (T12)`
   - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前は `[Request interrupted by user for tool use]` と `<bash-stdout>ok</bash-stdout>` が prompt になり落ちた。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 19 件 pass。`bun run check` → 0
 
+- [x] T14: origin の無い行を依頼と決める「次の行」から meta 行を除き、timestamp の無い行も数える
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T12（直す対象の決め方）
+  - 変更: `server/evals/delivery/sample.ts`, `server/test/delivery-sample.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → サブエージェントの最初の依頼（次が isMeta の行）が notice になる、timestamp の無い user 行を挟むと中断の印が prompt になる、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 全件 pass。次の行の判定は timestamp の有無によらず、isMeta と isCompactSummary の行を飛ばす
+  - コミット: `fix(eval): skip meta lines and keep timeless lines when judging unmarked prompts (T14)`
+  - 結果: red: `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 直す前はサブエージェントの依頼が notice になり落ちた（actual notice review this change）。timestamp の無い行を挟む入力は、直す前の readTimeline で `prompt [Request interrupted by user]` になった。直した後 `cd server && node --import ./test/isolate-home.ts --test test/delivery-sample.test.ts` → 20 件 pass。`bun run check` → 0
+
 - [ ] T13: 直したシートで変わった項目を 2 者がラベルし直し、u386 を standing に直して判定し直す
   - 種別: 修正
   - 計画: S2, S3
-  - 依存: T11（直したシート）, T12（直したシート）
+  - 依存: T11（直したシート）, T12（直したシート）, T14（直したシート）
   - 変更: `server/evals/delivery/precision-baseline.json`
   - red: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → u386 の 3 組を finished-plan に数えた (23,11,9,3) が出る
   - 完了条件: `jq -c '(.result | {F, I, U, R}), .verdict' server/evals/delivery/precision-baseline.json` → 作り直したシートと直した分類での値が出て、`node server/evals/delivery/sample.ts --decide` の出力と一致する。ラベルし直した項目と前のラベルが JSON に残り、#346 に差分を書いたコメントの URL が note にある
@@ -152,6 +162,7 @@ base: main
 
 ## 記録
 
+- 2026-10-16 / T14 / T12 の後に作り直したシートで、サブエージェントの最初の依頼（直後が Skill を差し込む isMeta の行）が notice になり 7 項目で依頼が消えた。T11・T12 の Codex のレビューは、timestamp の無い行を判定の前に飛ばす件（P2、再現あり）を出した。どちらも採る。古いシートで始めた付け直しは止めた / 修正タスク T14 を T13 の前に足し、T13 の依存に T14 を足した（前: T11, T12、新: T11, T12, T14）
 - 2026-10-16 / T11, T12, T13 / 全差分の Codex のレビューで P2 が 3 件（30 行で切ると最後の返答が消える、u386 は続く条件なので standing、origin の無い host の行が依頼になる）。どれも採る。u386 を直しても判定は not adopted のまま（(20,10,8,2)）/ 修正タスク T11〜T13 を足した。T08〜T10 は個別のレビューを頼まず、この全差分のレビューで見てもらった
 - 2026-10-16 / T10 / 直したシートで、セッションの開始の配信など 7 項目は最初の依頼より前に届くので、依頼が無く配信の後も空になり、ラベルの材料が無かった / 修正タスク T10 を足し、T05 の依存に T10 を足した（前: T03, T04, T07, T08, T09、新: T03, T04, T07, T08, T09, T10）
 - 2026-10-16 / T09 / 直したシートで、Claude Code の 11 項目のターンの始まりが `<task-notification>`（origin が task-notification）だった。サブエージェントの報告（origin が peer）も同じ形で入る / 修正タスク T09 を足し、T05 の依存に T09 を足した（前: T03, T04, T07, T08、新: T03, T04, T07, T08, T09）

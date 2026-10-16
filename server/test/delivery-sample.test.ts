@@ -810,3 +810,42 @@ test("a user line without an origin starts a turn only when the model answers it
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an unmarked line is judged by the next message line, skipping meta lines but not lines without a time", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-timeline-"));
+  try {
+    const at = (s: number) => `2026-10-10T00:00:0${s}.000Z`;
+    fs.writeFileSync(
+      path.join(dir, "sub.jsonl"),
+      jsonl([
+        { type: "user", timestamp: at(0), message: { content: "review this change" } },
+        { type: "attachment", timestamp: at(1), attachment: { type: "skill_listing" } },
+        {
+          type: "user",
+          timestamp: at(2),
+          isMeta: true,
+          message: { content: [{ type: "text", text: "<command-message>skill</command-message>" }] },
+        },
+        { type: "assistant", timestamp: at(3), message: { content: [{ type: "text", text: "reading it" }] } },
+      ]),
+    );
+    assert.deepEqual(
+      readTimeline(path.join(dir, "sub.jsonl"), "claude-code").map((e) => `${e.kind} ${e.text}`),
+      ["prompt review this change", "reply reading it"],
+    );
+    fs.writeFileSync(
+      path.join(dir, "timeless.jsonl"),
+      jsonl([
+        { type: "user", timestamp: at(0), message: { content: "[Request interrupted by user]" } },
+        { type: "user", message: { content: "next request" } },
+        { type: "assistant", timestamp: at(2), message: { content: [{ type: "text", text: "answer" }] } },
+      ]),
+    );
+    assert.deepEqual(
+      readTimeline(path.join(dir, "timeless.jsonl"), "claude-code").map((e) => `${e.kind} ${e.text}`),
+      ["notice [Request interrupted by user]", "reply answer"],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
