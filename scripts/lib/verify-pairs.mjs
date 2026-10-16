@@ -35,6 +35,15 @@ function steps(lines) {
 }
 
 const isLychee = (step) => step[0] === "      - name: Install lychee";
+/** Whether a step has an if, as its first key or a later one */
+const conditional = (step) => step.some((l) => /^ {6}- if:|^ {8}if:/.test(l));
+/** The values of a job's `<key>: [...]` matrix line, or null when it has none in that form */
+const matrixOf = (lines, key) => {
+  const m = lines
+    .map((l) => new RegExp(`^ {8}${key}: \\[([^\\]]*)\\]$`).exec(l)?.[1])
+    .find((v) => v !== undefined);
+  return m === undefined ? null : m.split(",").map((v) => v.trim().replace(/^"(.*)"$/, "$1"));
+};
 
 /** What is wrong with the Install lychee step a job needs before the step at index `before` */
 function lycheeProblems(where, all, before, version) {
@@ -42,7 +51,7 @@ function lycheeProblems(where, all, before, version) {
   if (at === -1) return [`${where}: no Install lychee step`];
   if (at > before) return [`${where}: Install lychee comes after the step that needs it`];
   const step = all[at];
-  if (step.some((l) => /^ {8}if:/.test(l))) return [`${where}: Install lychee runs only under a condition`];
+  if (conditional(step)) return [`${where}: Install lychee runs only under a condition`];
   if (
     !step.some((l) => /\/lychee-v\$\{LYCHEE\}\//.test(l)) ||
     !step.some((l) => l.includes("sha256sum -c -")) ||
@@ -84,9 +93,8 @@ export function verifyProblems({ pkg, check, release, lychee }) {
   const part = job(check, "part");
   if (!part) problems.push("check.yml has no part job");
   else {
-    const matrix = part.map((l) => /^ {8}part: \[([^\]]*)\]$/.exec(l)?.[1]).find((m) => m !== undefined);
-    const listed = matrix?.split(",").map((p) => p.trim()) ?? [];
-    if (!matrix) problems.push("check.yml part job: cannot read its `part: [...]` matrix");
+    const listed = matrixOf(part, "part");
+    if (!listed) problems.push("check.yml part job: cannot read its `part: [...]` matrix");
     else if ([...listed].sort().join() !== [...parts].sort().join())
       problems.push(
         `check.yml part matrix [${listed.join(", ")}] differs from package.json ci:<part> [${parts.join(", ")}]`,
@@ -100,19 +108,33 @@ export function verifyProblems({ pkg, check, release, lychee }) {
     const at = all.findIndex((s) => s.includes(CI_RUN));
     if (at === -1) problems.push(`check.yml part job: no step with \`${CI_RUN.trim()}\``);
     else {
-      if (all[at].some((l) => /^ {8}if:/.test(l)))
+      if (conditional(all[at]))
         problems.push("check.yml part job: the verify step runs only under a condition");
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
+      if (!all[at].includes("          PART: ${{ matrix.part }}"))
+        problems.push("check.yml part job: the verify step does not take PART from matrix.part");
       problems.push(...lycheeProblems("check.yml part job", all, at, lychee));
     }
   }
   const gate = job(check, "check");
   if (!gate) problems.push("check.yml has no check job");
-  else if (
-    !gate.includes("    needs: part") ||
-    !gate.includes("    if: always()") ||
-    !gate.includes("        run: node scripts/check-parts.mjs part")
-  )
-    problems.push("check.yml check job does not run always after part and check that every part succeeded");
+  else {
+    const judge = steps(gate).find((s) => s.includes("        run: node scripts/check-parts.mjs part"));
+    if (
+      !gate.includes("    needs: part") ||
+      !gate.includes("    if: always()") ||
+      !judge ||
+      conditional(judge)
+    )
+      problems.push("check.yml check job does not run always after part and check that every part succeeded");
+    // Each required check stands for every Node line, so the part job must run on the same lines
+    const lines = matrixOf(gate, "node");
+    const partLines = part && matrixOf(part, "node");
+    if (!lines?.length || !partLines || [...lines].sort().join() !== [...partLines].sort().join())
+      problems.push(
+        `check.yml part job runs on Node [${partLines?.join(", ") ?? "?"}], the check job on [${lines?.join(", ") ?? "?"}]`,
+      );
+  }
 
   const prepare = job(release, "prepare");
   if (!prepare) problems.push("release.yml has no prepare job");

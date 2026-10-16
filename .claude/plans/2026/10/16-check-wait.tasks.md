@@ -74,6 +74,16 @@ check の壁時計を、部分（static / unit / acceptance）のうち最も長
   - コミット: `ci: split check into parallel part jobs behind the required check names (T04)`
   - 結果: `bun run pairs` → 0。`mise exec -- actionlint .github/workflows/check.yml` → 0。`cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → pass 7 / fail 0（部分・コマンド・重複・lychee の欠落と条件と版・no-cache・集約の if とスクリプトを消した写しで失敗）。lint・typecheck・knip・english・headers・comments・markdown・verify:ai・rule-scopes → 0
 
+- [x] T09: check-pairs が、PART と matrix.part の切断、先頭キーの if、node の軸の欠け、判定ステップの if を見逃さないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（verify-pairs と分割した check.yml が要る）
+  - 変更: `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → 足した 2 つのテストが、直す前の verify-pairs では 4 つの写しのどれにも問題を返さずに落ちる（Codex がメモリ上で 4 件とも verifyProblems が [] になるのを再現）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → 4 つの写しでそれぞれ失敗するケースが pass
+  - コミット: `ci: catch part jobs cut off from their part, Node line, or judge in check-pairs (T09)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/verify-pairs.test.ts` → pass 9 / fail 0。`bun run pairs`・lint・english・comments → 0
+
 ## P3: release の prepare を bundle の経路にする
 
 タグの push の prepare から verify の重複（約 10 分）を外し、PR の dry run で同じ経路を実走する。
@@ -119,3 +129,5 @@ setup は依存の install scripts を流さず、hook はメインの作業ツ�
 - 2026-10-16 / T02 / 変更欄の `shard-*.ts` は検査が実在のパスを要るので `shard-1.ts` で代表させ、knip.json（シャードを入口に）と check-english.mjs（cases-run.ts を English だけのファイルに）を足した / 変更欄を直した
 - 2026-10-16 / T01, T02 / Codex のレビュー（high）: F1「glob に当たるシャードが 0 件だと受け入れテストが走らずに成功する」を採った。Codex は Bun Shell なら失敗すると書いたが、手元で `bun run` の当たらない glob が tests 0・rc=0 になるのを確かめた / 修正タスク T08 を足した
 - 2026-10-16 / T03, T04 / T03 の変更欄に `scripts/lib/check-parts.d.mts`、T04 の変更欄に `package.json`（ci:<part>）と `scripts/lib/verify-pairs.d.mts` を足した（既存の .mjs は .d.mts で型を持つ）。T03 は knip の未使用を避けるため T04 と同じコミット / 変更欄を直した
+- 2026-10-16 / T04 / Codex のレビュー（high）: F1〜F4（PART と matrix.part の切断、`- if:` の先頭キー、part の node の軸、判定ステップの if を verify-pairs が見逃す）を 4 件とも採った。どれも再現付き / 修正タスク T09 を足した
+- 2026-10-16 / T05 / Codex のレビュー（high）: 指摘なし。tarball の新旧比較は sandbox で未実行なので、A9 の計測の clone で verify の前後の pack を比べる / 記録だけ

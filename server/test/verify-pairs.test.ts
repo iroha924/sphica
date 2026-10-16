@@ -163,3 +163,31 @@ test("a setup-bun step without no-cache fails, in either workflow", () => {
     /release.yml: a setup-bun step restores Bun/,
   );
 });
+
+test("a verify step cut off from matrix.part, or skipped by an if written as its first key, fails", () => {
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under edit holds an expression
+  fails(edit("check", "PART: ${{ matrix.part }}", "PART: static"), /does not take PART from matrix.part/);
+  fails(
+    edit(
+      "check",
+      "      - name: This part of verify\n",
+      "      - if: matrix.part == 'static'\n        name: This part of verify\n",
+    ),
+    /verify step runs only under a condition/,
+  );
+});
+
+test("a part job on fewer Node lines than the required checks, or a judge step that can be skipped, fails", () => {
+  fails(
+    edit("check", '        node: ["24.15", "26"]\n        part:', '        node: ["24.15"]\n        part:'),
+    /part job runs on Node \[24\.15\], the check job on \[24\.15, 26\]/,
+  );
+  fails(
+    edit(
+      "check",
+      "      - name: Did every part succeed\n",
+      "      - name: Did every part succeed\n        if: github.event_name == 'push'\n",
+    ),
+    /check job does not run always/,
+  );
+});
