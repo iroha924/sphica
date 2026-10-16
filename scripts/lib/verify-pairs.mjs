@@ -128,9 +128,9 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       // Reach is counted on every line but the first (the engines floor), and nowhere else is it skipped
       const nodes = matrixOf(part, "node") ?? [];
       const floor = nodes[0];
-      if (nodes.length < 2)
+      if (!nodes.some((n) => n !== floor))
         problems.push(
-          `check.yml part job: Node [${nodes.join(", ")}] leaves no line after the first, so SQL reach and coverage are counted nowhere`,
+          `check.yml part job: Node [${nodes.join(", ")}] has no line other than the first, so SQL reach and coverage are counted nowhere`,
         );
       const unitMode = `          SPHICA_UNIT_MODE: \${{ matrix.node == '${floor}' && 'tests-only' || 'full' }}`;
       if (!floor || !all[at].includes(unitMode))

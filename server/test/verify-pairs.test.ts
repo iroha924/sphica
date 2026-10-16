@@ -231,8 +231,10 @@ test("a unit mode that skips reach on another line, on every line, or on none fa
   );
 });
 
-test("a part matrix with only the floor line, where nothing counts SQL reach, fails", () => {
-  const files = real();
-  files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', '        node: ["24.15"]\n');
-  fails(files, /leaves no line after the first, so SQL reach and coverage are counted nowhere/);
+test("a part matrix with only the floor line, once or repeated, where nothing counts SQL reach, fails", () => {
+  for (const only of ['["24.15"]', '["24.15", "24.15"]']) {
+    const files = real();
+    files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', `        node: ${only}\n`);
+    fails(files, /has no line other than the first, so SQL reach and coverage are counted nowhere/);
+  }
 });
