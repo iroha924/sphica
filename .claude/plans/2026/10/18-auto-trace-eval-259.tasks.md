@@ -121,13 +121,14 @@ base: main
   - コミット: `test(eval): pin the 2026-10-04..18 automatic trace population and its usage (T05)`
   - 結果: `--freeze`（窓 2026-10-04T00:00Z〜10-18T06:00Z、root /Users/shunichi/Projects/sphica、固定先は scratchpad の frozen-259、417 MB）→ 68 runs, 149 records, 41 spans, 2 unmatched。`--usage` → Claude Code の空振りの割合 output 0.085〜0.192・全トークン 0.257〜0.552・gap 0、Codex output 0〜0.113・全トークン 0〜0.153。`--sample --seed 20261018 --size 40` → 40 件・追加の AI の決定 5 件・監査 65 行。`jq -c '{runs: (.population.runs | length), records: .population.units, sample: (.sample | length), audit: (.audit | length)}' server/evals/trace/auto-trace-baseline.json` → {"runs":68,"records":149,"sample":40,"audit":65}。もう一度本番のデータから抽出 → 同じと報告。窓の中の自動の呼び出し 147 件のうち --root で外れたものは 0 件。`bun run check` → 0（baseline は Biome で整形）
 
-- [ ] T06: Claude と Codex がラベルと監査を付け、持ち主が確定し、判定して #259 に書く
+- [x] T06: Claude と Codex がラベルと監査を付け、持ち主が確定し、判定して #259 に書く
   - 種別: 追加
   - 計画: S5, S6
   - 依存: T04（判定が要る）, T05（抜き取った 40 件と監査の一覧が要る）, T10（直した判定が要る）
   - 変更: `server/evals/trace/auto-trace-baseline.json`
-  - 完了条件: `jq '[.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq -c '.verdict, .actions' server/evals/trace/auto-trace-baseline.json` → 3 つの基準の判定と次の手が出る。#259 のコメント（文面は持ち主の承認の後）の URL が note にある
+  - 完了条件: `jq '[.labels.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq -c '.verdict, .actions' server/evals/trace/auto-trace-baseline.json` → 3 つの基準の判定と次の手が出る。#259 のコメント（文面は持ち主の承認の後）の URL が note にある
   - コミット: `test(eval): record the #259 automatic trace baseline and its verdict (T06)`
+  - 結果: Claude と Codex が 40 件・追加 5 件・監査 65 行を別々にラベルし、抜き取りの 33 件が一致、監査は 63 行が一致。持ち主が食い違いと問題ありの行（S4・S12・S14・S18・S24・S25・S39・X42・A14・A65）をおすすめどおり確定し、40 件を確認した。`--decide --labels` → 役に立つ 31/40 pass、持ち主の採用の取り違え 1（A65）fail、空振りのトークンは undecided（Claude Code の output 0.085〜0.192、全トークン 0.257〜0.552）。持ち主の判断: 絞り込みの実験には今は進まない、取り違えは issue にする（#355）。`--decide --frozen --baseline`（ラベルなし）→ 同じ結果と報告して 0。`jq '[.labels.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq -c '.result.adoption.bar, .result.actions' server/evals/trace/auto-trace-baseline.json` → "fail" と次の手。#259 のコメントの URL は note にある
 
 ## 記録
 
@@ -139,3 +140,4 @@ base: main
 - 2026-10-18 / T05 / 依存の欄を変えた。前: T02, T03、新: T02, T03, T09 / 本番のデータは直した区間の決め方で数えるため
 - 2026-10-18 / T10 / T04 の Codex のレビューで P2 が 2 件（28 件の基準を件数の 7 割で出すので 40 件でない抜き取りでも pass が出る、再現あり。計画にある判定できない run の数が結果に無い）。どちらも採る / 修正タスク T10 を足し、T06 の依存を変えた。前: T04, T05、新: T04, T05, T10
 - 2026-10-18 / T11 / T03 の Codex のレビューで P2 が 1 件と P3 が 1 件（直前の発言を先頭 1500 バイトで切るので、採用の「1」が答えた末尾の選択肢が消える。前後 400 バイトで切るので UTF-8 の文字が壊れ、本番のシートで 6 か所 11 文字）。どちらも再現あり、採る。抜き取りの偏りや監査の行の過不足は無かった（本番で 40 件・追加 5 件・監査 65 行） / 修正タスク T11 を足し、T05 の依存を変えた。前: T02, T03, T09、新: T02, T03, T09, T11
+- 2026-10-18 / T06 / 完了条件の欄を変えた。前: `jq '[.sample[] | …]'`、新: `jq '[.labels.sample[] | …]'`。`jq -c '.verdict, .actions'` も結果の置き場に合わせて `.result` の下で確かめた / ラベルは labels の下、判定は result の下に置く作りにしたため

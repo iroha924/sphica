@@ -121,7 +121,7 @@ approved_at: 2026-10-18
 
 - A1: `bun run verify` → 通る
 - A2: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。次を含む: 同じ message.id の行が何行あっても usage を 1 回だけ数える、Codex の累積値の重なりを落とし差の不一致を欠測にする、1 つの応答が 2 つの run を処理すると下限と上限に分かれる、開いている run が 1 つの間のツールだけの応答はその run に、2 つの間は帰属不明に、No run のやり直しが費用の母集団に入る、保存した母集団と seed で 2 回抜き取ると同じ順、違う母集団では違いを報告して 0 以外で終わる、2 軸の組み合わせごとの集約、28 件と 0.3 の境目
-- A3: `jq '[.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq '[.audit[] | select(.settled)] | length' server/evals/trace/auto-trace-baseline.json` → 採用の行の数（固定した入力から再計算した値。2026-10-18 の見込みは 65）
+- A3: `jq '[.labels.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq '[.labels.audit[] | select(.settled)] | length' server/evals/trace/auto-trace-baseline.json` → 採用の行の数（固定した入力から再計算した値。2026-10-18 の見込みは 65）
 - A4: `cd server && node evals/trace/auto-trace.ts --decide --frozen "$FROZEN" --baseline evals/trace/auto-trace-baseline.json` → 固定した入力とラベルから出し直した result・verdict・actions が baseline と一致すると報告して 0 で終わる（`$FROZEN` は S5 の固定先）
 - A5: `gh issue view 259 --comments` → 結果と次の手を書いたコメントがある
 
@@ -137,3 +137,4 @@ approved_at: 2026-10-18
 なし
 
 ## 変更履歴
+- 2026-10-18 / A3 の jq を `.sample[]`・`.audit[]` から `.labels.sample[]`・`.labels.audit[]` に直した / ラベルは抜き取りの行とは別に labels の下に置く作りにしたため / 完了条件のコマンドの誤りで範囲は変わらないので Go は不要

@@ -1,5 +1,5 @@
 {
-  "note": "#259 stage 1: the automatic trace runs of 0.6.30 and later, pinned from the owner's database and logs; see .claude/plans for the bars fixed before labelling",
+  "note": "#259 stage 1: the automatic trace runs of 0.6.30 and later, pinned from the owner's database and logs; see .claude/plans for the bars fixed before labelling. Result and next steps: https://github.com/iroha924/sphica/issues/259#issuecomment-6247619700 (the misattributed adoption: https://github.com/iroha924/sphica/issues/355)",
   "inputs": {
     "commit": "794b50ba3dd81b7834f0b27e112bb37ee62d8602",
     "snapshot": {
@@ -9755,5 +9755,2227 @@
       "route": "owner_statement",
       "source": 3573
     }
-  ]
+  ],
+  "labels": {
+    "sample": [
+      {
+        "n": 1,
+        "unit": 512,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "「2は…直接pushしよう」は直前の案 2（CLAUDE.md に 1 行足す）への答えで採用は正しい。中身は CLAUDE.md に入った 1 回きりの作業で、理由も無く、後のセッションは CLAUDE.md を読めば足りる"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s2898 explicitly selects item 2 and direct main push. This is a one-off documentation chore; the underlying cleanup rule was already recorded."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 2,
+        "unit": 620,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AI の「今は立てなくてよい」の直後に持ち主が「OK、そしたら#218やるか？」と受けて次へ進んだ。見送った理由と見直す条件があり、同じ提案を繰り返さずに済む"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3390 accepts s3389's recommendation against an issue. The rationale and conditions for reconsideration prevent repeating the same proposal."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 3,
+        "unit": 534,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。必要性を確かめずに計画を作って止めた失敗で、次の作業選びに効く教訓"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2978–s2982 describe stopping unsupported work and deleting the branch. This preserves a concrete planning failure and its cause."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 4,
+        "unit": 670,
+        "claude": {
+          "correctness": "unknown",
+          "value": "useful",
+          "reason": "中身は正しく持ち主も採用しているが、引用した「issue作成して」(s3573) はサブエージェントも含む広い提案への返事で、記録の範囲（codex exec とメイン以外の開始、サブエージェントは外す）を採ったのは後の「OK」(s3575)。採用の引用が別の発言。数字付きの理由は後で使う"
+        },
+        "codex": {
+          "correctness": "wrong",
+          "value": "useful",
+          "reason": "s3573 answers the earlier review-process proposal; the specific codex-exec/non-main-start scope is introduced afterward in s3574. The experiment and measurements are useful, but this adoption does not establish that scope."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 5,
+        "unit": 657,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AskUserQuestion の回答そのもの。断った案として残り、同じ提案の繰り返しを防ぐ"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3514 explicitly excludes docs-only skipping from this PR. This preserves an intentional scope exclusion."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 6,
+        "unit": 510,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "AI の提案に持ち主の返事が無いだけの問い。決めることも理由も無く、後で要る場面がほぼ無い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s2794 proposes README wording without an owner response, matching question. It is an optional cosmetic suggestion rather than a settled project requirement."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 7,
+        "unit": 626,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。CI の一度きりの失敗の記録で、再発したときに既知かどうか判断できる"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3363 reports EPIPE and a successful isolated rerun. Keeping the failure signature and explicitly speculative cause can guide a recurrence."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 8,
+        "unit": 597,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主の言葉で採用。外したバッジの理由が残り、README の見た目の判断に使える"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3204 requests the layout and badges; s3207 describes the resulting choices and reasons. This preserves the intended README presentation."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 9,
+        "unit": 451,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり（後に原因が分かり置き換え済み）。保存時点では未解決の問題として要る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2562 establishes the same failure on main and s2577 identifies #309. At saving, this was an unresolved evaluation failure worth carrying forward."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 10,
+        "unit": 541,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "AI が判断を任せ持ち主の返事が無いだけの問い。決めた事も理由も無い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s2984 and s2986 leave both questions unanswered. The record primarily preserves pending board and issue housekeeping."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 11,
+        "unit": 568,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "出荷した中身と範囲（codex.json を変えていない）。後の作業の前提になる"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3121 reports shipping 0.6.53 and closing #333; s3110 confirms unchanged codex.json. This identifies delivered functionality and host limitations."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 12,
+        "unit": 614,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "「OK、#218やろう」で採用。次の作業の決定と、候補ごとの見送りの理由は、次の作業を選ぶときに読み返されている"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s3320 explicitly chooses #218. The next-ticket selection is a short-lived scheduling state rather than a lasting implementation decision."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 13,
+        "unit": 619,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AskUserQuestion の回答。試用のデータの切り日が判定に効く"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3380 selects immediate release and cutting the trial beforehand; s3385 supplies the cutoff. This boundary is necessary to interpret trial results."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 14,
+        "unit": 602,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。macOS の一度きりの時間切れで、再発時の判断材料"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s3229 reports the isolated timeout and successful rerun. With no logs or established cause, this is mainly a completed CI incident note."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 15,
+        "unit": 651,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "「issueにして」で issue を作っただけの作業。issue #350 が残り、記録に足す判断が無い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s3500 requests the issue and s3504 reports #350. The substantive failure is already preserved in the earlier u650 finding, sampled as S32."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 16,
+        "unit": 660,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。CI の待ち時間の計測値で、次に縮めるときの基準"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3532 and s3534 report the measured improvement and remaining bottleneck. These numbers provide a baseline for further CI work."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 17,
+        "unit": 638,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり（持ち主の問いを explains にした役割は気になるが中身は正しい）。advisory は消せないという事実で、同じ問いの調べ直しを防ぐ"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3436 and s3438 explain the advisories' resolved status and deletion limits. This prevents treating published advisories as outstanding fixes."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 18,
+        "unit": 540,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "CLAUDE.md と Skill の文面を直して push した作業。中身は CLAUDE.md にそのまま書かれていて、記録に足すものが無い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2992 authorizes the change and s2993 reports pushing it. The revised rule about reading reviews and requesting @codex review affects later releases."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 19,
+        "unit": 645,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主の言葉で採用。出品を断る判断と理由が残る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3455 conditionally chooses declining after further research; s3456 concludes the condition holds. This preserves the commercialization decision and its reason, without claiming the email was sent."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 20,
+        "unit": 582,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。タグの push で出る行が害の無いものだという知見で、次のリリースで迷わない"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3142 says the tag existed and the release started despite the warning. The record keeps the explanation explicitly speculative and helps interpret a recurring warning."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 21,
+        "unit": 424,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AI 自身の一人称の判断（見送ります）。後の #353 の前段として理由が使われた"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2186 contains the AI's own decision to defer the delivery concern for lack of demonstrated harm. This preserves a deliberate non-action and its reason."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 22,
+        "unit": 449,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。直せない理由のあるセキュリティの見送りで、同じ指摘が来たときに使う"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2557 supplies the Node.js limitation; the record describes the bounded impact and declined finding. This prevents reopening the same race without new evidence."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 23,
+        "unit": 452,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。並行の呼び出しでログが壊れた直し方で、そのコードに触れるときに要る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2586 describes both fixes and s2587 identifies T19. This records the concurrency fix and cache-pruning behavior that were built."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 24,
+        "unit": 509,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。調べ直しの手間を省く比較の数字と、言えないことの線引き"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s2792 contains the comparison and explicitly declines a percentile claim. These external score comparisons are incidental and quickly become dated."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 25,
+        "unit": 567,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "「3. issueにしよう」で issue #336 を作っただけ。issue に中身が残る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3111 approves the issue and s3114 reports #336. The record also preserves the concrete parseDiff failure and its impact."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 26,
+        "unit": 537,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "PR #332 の直しの中身。同じ検査が落ちたときに要る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2965–s2967 report the test-only fixes and merge. The changed timing assertions and retry boundary explain how these tests are intended to work."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 27,
+        "unit": 655,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AskUserQuestion の回答。CI の構成の判断で、変えるときに要る"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3507 selects one-sided coverage and s3508 names Node 24.15's tests-only behavior. This explains the intentional CI matrix asymmetry."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 28,
+        "unit": 562,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。実機で確かめた事実と未検証の範囲"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3081 reports the interactive/headless forget results and review entrances. The version, single-run scope, and untested routes delimit useful compatibility evidence."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 29,
+        "unit": 642,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり（推測と明記）。worktree で hook が書き換わる罠"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3452 explains shared hooks and why adding installation to setup would not prevent rewriting. The cause remains marked as a guess rather than a reproduced fact."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 30,
+        "unit": 445,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "「Go」で計画を採用。後に置き換えられたが保存時点では作業の前提"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2551 approves the plan in s2550. The matching mechanism, default-off trial, and adoption thresholds are needed to evaluate the experiment."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 31,
+        "unit": 538,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。CI の失敗の内訳と設計どおりの挙動、原因不明の 1 件"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2965 corrects the count to seven; s2960 explains lock behavior and the unresolved timeout. This preserves diagnostic boundaries and prevents treating expected behavior as a defect."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 32,
+        "unit": 650,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。Node 26 の権限の挙動の違い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3499 distinguishes Node's ERR_ACCESS_DENIED from OS EPERM. This explains the version-dependent test failure and the security layer actually exercised."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 33,
+        "unit": 665,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "バッジを差し替えて push しただけの作業で、判断と理由は同じセッションの decision（license-badge-npm）にある"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s3580 reports both badge changes and the push. The substantive choice is already captured in earlier u664, sampled as X45; the extra content is completion status."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 34,
+        "unit": 639,
+        "claude": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "issue を作るという作業の決定。issue が残り、記録に足す判断が無い"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s3443, s3445, and s3447 request these issues, and s3449 reports creation. This is chiefly issue-filing progress rather than the improvements' settled design."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 35,
+        "unit": 641,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。待ち時間の計測値と原因で、後の改善の基準になった"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3449 reports sequential acceptance tests, repeated verify runs, and timings. These measurements establish the performance problem and its cause."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 36,
+        "unit": 447,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。問い合わせの形で 16.6 秒が 22 ms になった性能の知見"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2562 contrasts 16.6 seconds with 22 ms after changing the query strategy. This is concrete evidence against repeating the slow approach."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 37,
+        "unit": 624,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。deny の理由が両ホストでモデルに届くという実測"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3347 reports the interactive denial/retry result and five passing host checks. This establishes feasibility of the cross-host delivery mechanism."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 38,
+        "unit": 456,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "引用どおり。SDK v2 を止めている上流の状況"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2534–s2536 identify the upstream blocker, pending fix, and resumption condition. This is an actionable dependency constraint as of saving."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      },
+      {
+        "n": 39,
+        "unit": 349,
+        "claude": {
+          "correctness": "unknown",
+          "value": "not-needed",
+          "reason": "「これ直して」は表示されていた 7 件を直す 1 回きりの依頼で、記録は「残っていたら Done に直す」という続く決まりに広げている。作業自体は終わっている"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "not-needed",
+          "reason": "s1830's own 'これ直して' requests the status correction and s1831 reports seven changes. This is completed board housekeeping."
+        },
+        "owner": {
+          "correctness": "wrong",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "wrong",
+          "value": "not-needed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 40,
+        "unit": 553,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "出荷した中身と残りの範囲"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3064 and s3070 describe shipped adoption/trace parity and remaining #333 items. This preserves delivered behavior and its explicit exclusions."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致し、持ち主が確認した"
+        }
+      }
+    ],
+    "extra": [
+      {
+        "n": 41,
+        "unit": 423,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が「あなたに判断任せる」と任せ、AI が一人称で決めた。却下した案と理由がある"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2186 explicitly chooses existing-issue comments and rejects unsupported anchor reassignment. The sequencing and reasons prevent repeating an unsafe workaround."
+        },
+        "owner": null,
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 42,
+        "unit": 450,
+        "claude": {
+          "correctness": "unknown",
+          "value": "useful",
+          "reason": "AI の一人称の判断だが、持ち主が Go を出した計画の「固定の CONFIRM」を AI だけで変えている。持ち主の決定を置き換える AI の採用に当たるかもしれない"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2579 states the AI changed the wording to ask whether to keep or undo. Its explanation establishes the important pre-change/post-change distinction."
+        },
+        "owner": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 43,
+        "unit": 539,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AI が自分の作業の決まりとして一人称で決めた（後に持ち主が直して置き換え）"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s2982 explicitly adopts checking observed need before recommending work. This is a reusable constraint grounded in the failed #209 planning effort."
+        },
+        "owner": null,
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 44,
+        "unit": 569,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "持ち主が「必要か見て、必要なら修正して」と任せ、AI が見送った。理由と実測がある"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3121 explicitly declines the case-variation fix and cites 1,228 consistently spelled reads. This preserves a deliberate compatibility limitation and its evidence."
+        },
+        "owner": null,
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 45,
+        "unit": 664,
+        "claude": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "AI の一人称の判断で、却下した案と理由がある"
+        },
+        "codex": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "s3580 reports choosing the npm badge and explicitly rejecting a fixed badge because it could become stale. Together these are the AI's own choice and rationale."
+        },
+        "owner": null,
+        "settled": {
+          "correctness": "correct",
+          "value": "useful",
+          "reason": "Claude と Codex が一致"
+        }
+      }
+    ],
+    "audit": [
+      {
+        "n": 1,
+        "adoption": 191,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「A」は直前の案 A（自分のコミットで取り込み #282 を閉じる）への答え"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's 'A' selects the preceding explicitly labelled own-commit proposal."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 2,
+        "adoption": 192,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の「英語にしてほしい」。Status の英語化を採る"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner directly requests English Project status names; this supports the Status portion of the combined record."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 3,
+        "adoption": 193,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「Phase・Kind・Result も英語にしますか？」への「うん、お願い」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'うん、お願い' answers the explicit question about translating the remaining Project fields."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 4,
+        "adoption": 196,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「1 を進めてよいか」への「1でいこう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'1でいこう' selects dismissing both alerts with the displayed rationale."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 5,
+        "adoption": 202,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主が貼った AI の文の後に自分の言葉で「これ直して」。採用の話者と提案は合っている（記録の広げ方は S39 側の問題）"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The quoted status description is followed by the owner's own 'これ直して', which adopts the correction."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 6,
+        "adoption": 232,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主が判断を任せた後の AI の一人称の決定"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "After delegated judgment, the AI explicitly chooses comments on two existing issues rather than a new issue."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 7,
+        "adoption": 233,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AI の一人称の決定（見送ります）"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The AI explicitly chooses deferral and states the absence of evidence of harm."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 8,
+        "adoption": 240,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「この勧めのとおりでよければ」への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' answers the specific recommendation to delete the stash and retain the unmerged SDK branch."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 9,
+        "adoption": 241,
+        "claude": {
+          "verdict": "correct",
+          "reason": "E4 を勧める返事への「OK、それで進めよう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'それで進めよう' directly accepts the preceding E4 recommendation."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 10,
+        "adoption": 242,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner directly states the no-compromise/root-fix constraint after delegating the approach."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 11,
+        "adoption": 243,
+        "claude": {
+          "verdict": "correct",
+          "reason": "測り直しの結果（#213 は作らない）とコメントの承認を求めた返事への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the displayed comments, including the explicit #213 not-adopted result and closure rationale."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 12,
+        "adoption": 244,
+        "claude": {
+          "verdict": "correct",
+          "reason": "選択肢 A への「A」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'A' selects the listed same-branch, same-PR continuation for #219."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 13,
+        "adoption": 245,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の依頼への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' directly approves the shell-write plan and trial criteria presented in s2550."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 14,
+        "adoption": 246,
+        "claude": {
+          "verdict": "unknown",
+          "reason": "AI の一人称の判断だが、持ち主が Go を出した計画の「固定の CONFIRM」を AI だけで変えた。持ち主の決定を置き換える AI の採用に当たるかもしれない"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "s2579's '形に変えました' is the AI's own choice, explained by the change already having happened at Post time."
+        },
+        "owner": {
+          "verdict": "correct",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "verdict": "correct",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      },
+      {
+        "n": 15,
+        "adoption": 273,
+        "claude": {
+          "verdict": "correct",
+          "reason": "返事待ちの 1 番（上限を issue にするか）への持ち主の答え"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly says to skip item 1, the proposed record_context size-bound issue."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 16,
+        "adoption": 274,
+        "claude": {
+          "verdict": "correct",
+          "reason": "返事待ちの 2 番への持ち主の答え"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly selects item 2 and specifies direct main push."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 17,
+        "adoption": 283,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉（直前に同じ文が重複して記録されている）"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's own words reject the work and say the issue can be closed as overimplementation."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 18,
+        "adoption": 284,
+        "claude": {
+          "verdict": "correct",
+          "reason": "#209 を閉じるコメントの文面への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the displayed #209 closure comment and checklist treatment."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 19,
+        "adoption": 285,
+        "claude": {
+          "verdict": "correct",
+          "reason": "#206・#218・#260 を閉じる案と文面への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' answers the explicit request to close the three named issues using the displayed comments."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 20,
+        "adoption": 286,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AI が自分の作業の決まりとして一人称で決めた"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The AI explicitly commits its future recommendation process to checking observed need first."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 21,
+        "adoption": 296,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「2. 立てない」は番号付きの問いへの持ち主の答え"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'2. 立てない' selects the daemon-related no-issue option; read-only source s3074 confirms that numbered proposal."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 22,
+        "adoption": 297,
+        "claude": {
+          "verdict": "correct",
+          "reason": "選択肢 1（#333 の項目 4 と 5 を 1 つの計画に）への「1」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'1' selects combining #333 items 4 and 5 in one plan, PR, and release."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 23,
+        "adoption": 298,
+        "claude": {
+          "verdict": "correct",
+          "reason": "hook を足すかの選択肢 1（足さない）への「1」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'1' selects not adding the record-tool hook and retaining the open question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 24,
+        "adoption": 299,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の確認への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' answers the explicit Go request for the six-task own-thread capture and review plan."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 25,
+        "adoption": 300,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly chooses not recording ephemeral sessions in response to that precise compatibility question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 26,
+        "adoption": 301,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's selected answer explicitly limits detection to one plain command, matching the displayed question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 27,
+        "adoption": 302,
+        "claude": {
+          "verdict": "correct",
+          "reason": "問い 2（GHSA を出すか）への「2. 出さない」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'2. 出さない' answers the numbered GHSA publication question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 28,
+        "adoption": 303,
+        "claude": {
+          "verdict": "correct",
+          "reason": "問い 3（issue にするか）への「3. issueにしよう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'3. issueにしよう' answers the numbered parseDiff issue question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 29,
+        "adoption": 304,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主が見て判断するよう任せた後の AI の一人称の見送り"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The AI explicitly says it declined the Windows case-variation finding and supplies its own rationale."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 30,
+        "adoption": 305,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の依頼への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' approves the preceding parseDiff fix, tests, release, and unchanged interfaces."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 31,
+        "adoption": 312,
+        "claude": {
+          "verdict": "correct",
+          "reason": "選択肢 2 への「2で進める」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'2で進める' selects the README-only version-check exception; later details are separately approved in A32."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 32,
+        "adoption": 313,
+        "claude": {
+          "verdict": "correct",
+          "reason": "範囲が変わった計画の Go の依頼への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the revised plan explicitly including doctor comparison behavior and the release."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 33,
+        "adoption": 314,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner directly requests centering the README header; the words are outside the pasted reference content."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 34,
+        "adoption": 315,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's own words endorse a Sphica version badge, outside the pasted material."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 35,
+        "adoption": 316,
+        "claude": {
+          "verdict": "correct",
+          "reason": "README の外に出すかの話への持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner directly says content need not be forced outside the README if removal would weaken it."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 36,
+        "adoption": 317,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AI が足した決まり（不要なら外す）を含む計画への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the plan that explicitly includes withholding README pushes during a release."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 37,
+        "adoption": 318,
+        "claude": {
+          "verdict": "correct",
+          "reason": "同上"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the same plan's explicit released-behavior-only restriction."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 38,
+        "adoption": 319,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's A2 explicitly selects not rerunning history-sync, matching Q2."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 39,
+        "adoption": 320,
+        "claude": {
+          "verdict": "correct",
+          "reason": "#342 を勧める返事への「OK、#342やろう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly names #342 as the next task."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 40,
+        "adoption": 321,
+        "claude": {
+          "verdict": "correct",
+          "reason": "方針の確認への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' accepts the presented revision-recheck policy, including connection roles and unchanged revision."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 41,
+        "adoption": 322,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の確認への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' approves the tasks implementing the same revision-recheck plan."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 42,
+        "adoption": 323,
+        "claude": {
+          "verdict": "correct",
+          "reason": "「1 で進めてよければ」への「OK、そしたらこのままリリースに進もう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'このままリリースに進もう' accepts the immediately preceding recommendation not to fix retained-statement replay."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 43,
+        "adoption": 324,
+        "claude": {
+          "verdict": "correct",
+          "reason": "#218 を勧める返事への「OK、#218やろう」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly chooses #218 after the assistant repeats that recommendation."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 44,
+        "adoption": 325,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly selects stopping the command once per conversation."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 45,
+        "adoption": 326,
+        "claude": {
+          "verdict": "correct",
+          "reason": "方針の確認への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' accepts the detailed command-anchor policy, including matching, commit-before-deny, budget, and secrets."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 46,
+        "adoption": 327,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の確認への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' approves the tasks for that same command-dead-end plan."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 47,
+        "adoption": 328,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly selects measuring effectiveness in real use after release."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 48,
+        "adoption": 329,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の確認への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' approves the revised plan spelling out 14 days, one extension, and owner judgment."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 49,
+        "adoption": 330,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly chooses immediate release and cutting the trial before it; s3385 supplies the operational cutoff."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 50,
+        "adoption": 331,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AI の「今は立てなくてよい」への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' accepts the directly preceding recommendation not to file the curl-masking issue before moving to #218."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 51,
+        "adoption": 336,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner quotes the improvement list but adds their own 'これはissueにしても良さそう', adopting issue creation."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 52,
+        "adoption": 337,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner directly requests an additional issue for CI waiting time."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 53,
+        "adoption": 338,
+        "claude": {
+          "verdict": "correct",
+          "reason": "#348 に追記する勧めと文面への「ok」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'ok' approves the precise #348 comment and same-PR recommendation shown immediately before it."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 54,
+        "adoption": 339,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主自身の言葉"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner conditionally chooses a decline after further research; s3456 confirms the stated difficulty and prepares that response."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 55,
+        "adoption": 340,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's A1 selects choosing five existing Features bullets."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 56,
+        "adoption": 341,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's A2 explicitly selects shipping with #348 in the same PR."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 57,
+        "adoption": 342,
+        "claude": {
+          "verdict": "correct",
+          "reason": "原因と直し方の報告への「issueにして」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'issueにして' directly follows the Node 26 failure explanation and requests filing it."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 58,
+        "adoption": 343,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner selects one-sided coverage in direct response to the unit-duration scope question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 59,
+        "adoption": 344,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の複数選択の回答。docs だけの案は後で外したが、記録の範囲は選んだものの中にある"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly selects lighter pre-push and avoiding duplicate main runs. The additional docs-only selection is subsequently withdrawn, rather than negating these selections."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 60,
+        "adoption": 345,
+        "claude": {
+          "verdict": "correct",
+          "reason": "Go の確認への「Go」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'Go' approves tasks explicitly specifying main-only verify and same-tree skipping."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 61,
+        "adoption": 346,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner explicitly excludes docs-only job skipping in response to that exact question."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 62,
+        "adoption": 347,
+        "claude": {
+          "verdict": "correct",
+          "reason": "AskUserQuestion の回答"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The owner's selected answer directly adds macos to the merge gate."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 63,
+        "adoption": 348,
+        "claude": {
+          "verdict": "correct",
+          "reason": "持ち主の報告を受けた AI の一人称の判断"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "The rejection is the AI's own first-person choice; its surrounding s3580 message explicitly identifies npm as the chosen badge source."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 64,
+        "adoption": 349,
+        "claude": {
+          "verdict": "correct",
+          "reason": "方針の確認への「OK」"
+        },
+        "codex": {
+          "verdict": "correct",
+          "reason": "'OK' approves the policy limiting this plan to measurement and separating later delivery changes."
+        },
+        "owner": null,
+        "settled": {
+          "verdict": "correct",
+          "reason": "Claude と Codex が一致"
+        }
+      },
+      {
+        "n": 65,
+        "adoption": 350,
+        "claude": {
+          "verdict": "unknown",
+          "reason": "「issue作成して」(s3573) はサブエージェントも含む「レビュー役への配信」の広い提案への返事。記録の範囲（codex exec とメイン以外の開始、サブエージェントは外す）は直後の s3574 で AI が狭め、持ち主は s3575 の「OK」で採った。引用した発言が別の提案への答え"
+        },
+        "codex": {
+          "verdict": "misattributed",
+          "reason": "'issue作成して' answers the general review-process experiment proposal in s3572. The specific codex-exec/non-main-start scope is introduced only afterward in s3574, so this quote cannot establish that choice."
+        },
+        "owner": {
+          "verdict": "misattributed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        },
+        "settled": {
+          "verdict": "misattributed",
+          "reason": "持ち主が確認した（2026-10-18、2 者のラベルとおすすめを見て OK）"
+        }
+      }
+    ],
+    "owner_work": []
+  },
+  "result": {
+    "useful": {
+      "size": 40,
+      "need": 28,
+      "confirmed": 31,
+      "possible": 31,
+      "bar": "pass"
+    },
+    "adoption": {
+      "owner_rows": 59,
+      "misattributed": 1,
+      "unknown": 0,
+      "bar": "fail",
+      "agent": {
+        "audited": 6,
+        "misattributed": 0,
+        "unknown": 0
+      }
+    },
+    "empty": {
+      "host": "claude-code",
+      "output": [0.08465511090473575, 0.19160159236209814],
+      "all": [0.25679245989353894, 0.5516355415939366],
+      "gaps": 0,
+      "bar": "undecided"
+    },
+    "runs": {
+      "total": 68,
+      "saved": 30,
+      "confirmed_useful": 17,
+      "sampled": 21,
+      "undetermined": 13
+    },
+    "actions": [
+      "file an issue for the misattributed owner adoptions",
+      "the owner decides the empty-run token share"
+    ]
+  }
 }
