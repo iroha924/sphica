@@ -83,6 +83,17 @@ base: main
   - 結果: red: `node server/evals/scale/run-red.ts --sizes 359 --no-drain --no-delivery-view` → exit 1、stress 10000 の subagent start が `missing trace:ext-b198/k9915`
   - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain --no-delivery-view` → exit 0、uniform 359 と stress 10000 の subagent start が none
 
+- [x] T07: 検査とテストが実行環境の親の印を受け継いで落ちる箇所と、古いコメントを直す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（判定が入ってから環境の漏れが効く）
+  - 変更: `scripts/check-tarball.mjs`, `server/test/deliver-codex.test.ts`, `server/src/deliver.ts`
+  - red: `CODEX_THREAD_ID=codex-runner-thread node --test test/deliver-codex.test.ts` → 直す前は tests 6 / fail 3。`CLAUDE_CODE_ENTRYPOINT=sdk-cli node scripts/check-tarball.mjs <tgz>` → 直す前は exit 1
+  - 完了条件: `CODEX_THREAD_ID=codex-runner-thread node --test test/deliver-codex.test.ts` → fail 0。`CLAUDE_CODE_ENTRYPOINT=sdk-cli node scripts/check-tarball.mjs <tgz>` → 55 files の行で終わる
+  - コミット: `fix(deliver): keep checks from inheriting an agent's marker and drop stale start comments`
+  - 結果: red: `CODEX_THREAD_ID=codex-runner-thread node --test test/deliver-codex.test.ts` → tests 6 / pass 3 / fail 3。`CLAUDE_CODE_ENTRYPOINT=sdk-cli node scripts/check-tarball.mjs <tgz>` → exit 1
+  - 結果: `CODEX_THREAD_ID=codex-runner-thread node --test test/deliver-codex.test.ts` → pass 6 / fail 0。`CLAUDE_CODE_ENTRYPOINT=sdk-cli node scripts/check-tarball.mjs <tgz>` → 「tarball: 55 files matching the shipped list. ... answered SubagentStart」
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
@@ -92,3 +103,5 @@ base: main
 - 2026-10-18 / T03 / 新しい SQL の呼び出し箇所は無く、review の確認を review-bridge.test.ts に足した / 変更欄を直した（前: deliver.ts, deliver.test.ts, scripts/lib/sql-call-sites.mjs → 後: deliver.ts, deliver.test.ts, review-bridge.test.ts）。writer への outcome は Plan の欄 `outcome` で渡した（plan の「引数で受け取る」と同じ働き）
 - 2026-10-18 / T03 / Codex のタスクごとのレビュー（80f2c36a、high）: 指摘 0。テストは sandbox の EPERM で流せず、手元で 184 件通ったことを確かめた / 対応なし
 - 2026-10-18 / T04 / Codex のタスクごとのレビュー（a234c1fd、medium）: F2（scale の SubagentStart が constraints を期待）は受け入れて T06 を足した。F1（agent_id 付きの Codex の SessionStart も検索の 1 行になる）は断った。agent_id はホストがサブエージェントの呼び出しと示す欄で、読みの数え方もすでにその会話ごとに分けている。plan の「サブエージェントの起動」に当たる / T06 を足した。check-ai-config.mjs の SubagentStart のコメントが古い説明のままだったので T06 で直した
+- 2026-10-18 / T07 / review-shipping（ブランチ全体）: 出荷して壊れるものは無し。指摘 1・1b（親の印を受け継いだ runner で check-tarball と deliver-codex のテストが落ちる。CI には無い変数）と 2・2b（deliver.ts の冒頭と、到達しない `name !== "SubagentStart"` のコメント）を受け入れた / T07 を足した。review-bridge.test.ts の CODEX_THREAD_ID での 3 件の失敗は main でも同じなので対象外
+- 2026-10-18 / 完了条件 / A4・A5 を実機で流した（codex-cli 0.163.0、Claude Code の `claude -p` と端末、使い捨ての DB と CODEX_HOME、パックした deliver.js）: 結果は PR 本文に書く

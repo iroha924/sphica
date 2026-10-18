@@ -2,7 +2,8 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
+// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints; a subagent or child
+// thread gets one line asking it to search, and a run another agent started gets nothing at its start or on its reads), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // A shell call that runs a dead end's command is stopped once per conversation, with the dead end as the reason. Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
@@ -1449,15 +1450,12 @@ async function deliverOne(
                         // how it started, or a headless, SDK, or unknown one never traces on its own
                         auto: newInteractive ? session : null,
                         ...(skill ? { skill } : {}),
-                        // A subagent's start is never the owner's, even when the host leaves out its agent id
-                        owner:
-                          name !== "SubagentStart" &&
-                          isOwnerTurn(
-                            input,
-                            undefined,
-                            undefined,
-                            host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                          ),
+                        owner: isOwnerTurn(
+                          input,
+                          undefined,
+                          undefined,
+                          host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                        ),
                       })),
                       reason: startReason,
                     };
