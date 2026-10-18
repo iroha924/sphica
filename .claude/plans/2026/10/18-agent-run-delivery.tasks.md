@@ -72,6 +72,17 @@ base: main
   - コミット: `docs(deliver): describe what agent-started runs and subagent starts receive`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-view.test.ts` → tests 12 / pass 12 / fail 0（suppressed の行が `| session_start | suppressed | 1 | 0 | 0 | - | 0 |` で出て keyless は `-`）。`rg -n "not written today" server/src` → 0 件。`bun run verify` → exit 0（acceptance 148 / pass 148）
 
+- [x] T06: スケールの計測がサブエージェントの起動に constraints を期待している箇所を直す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（起動を検索の 1 行にした変更に合わせる）
+  - 変更: `server/evals/scale/run.ts`, `scripts/check-ai-config.mjs`
+  - red: `node server/evals/scale/run-red.ts --sizes 359 --no-drain --no-delivery-view` → 直す前の run.ts の写しで、stress 10000 の subagent start が `missing trace:ext-b198/k9915` で exit 1
+  - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-drain --no-delivery-view` → subagent start が両方の fixture で problems none、exit 0
+  - コミット: `fix(eval): expect the search line at a subagent start in the scale run`
+  - 結果: red: `node server/evals/scale/run-red.ts --sizes 359 --no-drain --no-delivery-view` → exit 1、stress 10000 の subagent start が `missing trace:ext-b198/k9915`
+  - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain --no-delivery-view` → exit 0、uniform 359 と stress 10000 の subagent start が none
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
@@ -79,3 +90,5 @@ base: main
 - 2026-10-18 / T02 / startedByAgent は isOwnerTurn と agentRun のテストで通るので capture.test.ts は変えなかった / 変更欄から `server/test/capture.test.ts` を外した（前: capture.ts, deliver.ts, capture.test.ts, deliver.test.ts, 4 つのバージョンのファイル）
 - 2026-10-18 / T02 / Codex のタスクごとのレビュー（77c3d65d、high）: 指摘 0。isOwnerTurn の前後 1,152 通りの一致と agentRun 128 通りを確かめた。テストは sandbox の EPERM で流せず、手元で 136 件通ったことを確かめた / 対応なし
 - 2026-10-18 / T03 / 新しい SQL の呼び出し箇所は無く、review の確認を review-bridge.test.ts に足した / 変更欄を直した（前: deliver.ts, deliver.test.ts, scripts/lib/sql-call-sites.mjs → 後: deliver.ts, deliver.test.ts, review-bridge.test.ts）。writer への outcome は Plan の欄 `outcome` で渡した（plan の「引数で受け取る」と同じ働き）
+- 2026-10-18 / T03 / Codex のタスクごとのレビュー（80f2c36a、high）: 指摘 0。テストは sandbox の EPERM で流せず、手元で 184 件通ったことを確かめた / 対応なし
+- 2026-10-18 / T04 / Codex のタスクごとのレビュー（a234c1fd、medium）: F2（scale の SubagentStart が constraints を期待）は受け入れて T06 を足した。F1（agent_id 付きの Codex の SessionStart も検索の 1 行になる）は断った。agent_id はホストがサブエージェントの呼び出しと示す欄で、読みの数え方もすでにその会話ごとに分けている。plan の「サブエージェントの起動」に当たる / T06 を足した。check-ai-config.mjs の SubagentStart のコメントが古い説明のままだったので T06 で直した

@@ -349,7 +349,8 @@ const CASES: Case[] = [
     name: "subagent start",
     event: "SubagentStart",
     input: { agent_id: "a1", agent_type: "Explore" },
-    expect: (f) => (f.keys.broad ? [f.keys.broad] : []),
+    // A subagent starts with the search line only, never the broad constraints
+    expect: () => ["search Sphica's past records"],
   },
 ];
 
