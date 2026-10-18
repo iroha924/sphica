@@ -338,7 +338,7 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
-test("SubagentStart gives the subagent the session-start records and a search line, every time, without restarting its reads", async () => {
+test("SubagentStart and a Codex child thread's start give only the search line, every time, without restarting reads", async () => {
   const db = tempDb();
   const repo = checkout();
   try {
@@ -373,9 +373,7 @@ test("SubagentStart gives the subagent the session-start records and a search li
         ...(agent ? { agent_id: agent } : {}),
       });
     const first = await start();
-    assert.match(first, /Work: Rework CSV export/);
-    assert.match(first, /trace:ext-s1\/no-telemetry/);
-    assert.match(first, /search Sphica's past records/);
+    assert.equal(first, "Sphica: before choosing an approach, search Sphica's past records for it.");
     assert.match(await read("sub-1"), /trace:ext-s1\/sqlite/);
     // The host sends SubagentStart again when the subagent resumes with its context, so it says the set again but keeps the reads
     assert.equal(await start(), first);
@@ -388,6 +386,41 @@ test("SubagentStart gives the subagent the session-start records and a search li
         .all()
         .map((r) => `${r.agent_id ?? "main"}:${r.reason}`),
       ["sub-1:subagent", "sub-1:subagent", "main:resume"],
+    );
+    // A start the host sent without its agent id is a subagent's still, and the main conversation's start keeps its records
+    assert.equal(await at({ hook_event_name: "SubagentStart" }), first);
+    assert.match(
+      await at({ hook_event_name: "SessionStart", source: "startup", session_id: "other" }),
+      /trace:ext-s1\/no-telemetry/,
+    );
+    // A Codex child thread (the built-in review's) starts with the same line, logged under its own thread with its start source
+    const log = childLog("cx-subs", "cx-child");
+    try {
+      assert.equal(
+        await deliver(
+          {
+            hook_event_name: "SessionStart",
+            source: "startup",
+            session_id: "cx-subs",
+            cwd: repo,
+            transcript_path: log,
+          },
+          "codex",
+          db.file,
+        ),
+        first,
+      );
+    } finally {
+      fs.rmSync(path.dirname(log), { recursive: true, force: true });
+    }
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select d.agent_id, d.reason, d.outcome, d.chars, (select count(*) from delivery_unit x where x.delivery_id = d.id) as units from delivery d join session s on s.id = d.session_id where s.external_id = 'cx-subs'",
+        )
+        .all()
+        .map((r) => `${r.agent_id}:${r.reason}:${r.outcome}:${r.chars}:${r.units}`),
+      ["cx-child:startup:emitted:0:0"],
     );
   } finally {
     await db.done();

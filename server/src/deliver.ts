@@ -73,8 +73,20 @@ const leftOut = (n: number) =>
   n > 0
     ? `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`
     : "";
-/** Sphica's own line for a subagent, which starts without the conversation where Sphica's tools were introduced. */
-const SEARCH_FIRST = "- Before choosing an approach, search Sphica's past records for it.";
+/**
+ * All a subagent or child thread is given at its start, in Sphica's own words: it starts without the conversation where Sphica's tools were
+ * introduced, and the work items and broad constraints shown there were seldom of use to it.
+ */
+const SEARCH_FIRST = "Sphica: before choosing an approach, search Sphica's past records for it.";
+const SUBAGENT_START: Plan = {
+  text: SEARCH_FIRST,
+  note: SEARCH_FIRST,
+  units: [],
+  eligible: 0,
+  omitted: 0,
+  path: null,
+  reason: null,
+};
 const workLeftOut = (n: number) =>
   n > 0
     ? `- ${n} more work item${n === 1 ? "" : "s"} not shown: Sphica's status lists the 5 most recently updated.`
@@ -965,7 +977,6 @@ async function atStart(
     key: string;
     host: Host;
     owner: boolean;
-    subagent: boolean;
     auto: string | null;
     skill?: string;
   },
@@ -1033,7 +1044,6 @@ async function atStart(
       leftOut(broadLeft),
       workLeftOut(workLeft),
       await waiting(db, projectId, place),
-      place.subagent ? SEARCH_FIRST : "",
     ]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
@@ -1428,28 +1438,29 @@ async function deliverOne(
               ? await beforeReview(reader, pid, place.root, call, known.reviewUntil)
               : held
                 ? { ...HELD, reason: startReason }
-                : {
-                    ...(await atStart(reader, pid, branchOf(place.root), {
-                      file,
-                      key: place.key,
-                      host,
-                      subagent: name === "SubagentStart",
-                      // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
-                      // how it started, or a headless, SDK, or unknown one never traces on its own
-                      auto: newInteractive ? session : null,
-                      ...(skill ? { skill } : {}),
-                      // A subagent's start is never the owner's, even when the host leaves out its agent id
-                      owner:
-                        name !== "SubagentStart" &&
-                        isOwnerTurn(
-                          input,
-                          undefined,
-                          undefined,
-                          host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                        ),
-                    })),
-                    reason: startReason,
-                  };
+                : name === "SubagentStart" || who !== null
+                  ? { ...SUBAGENT_START, reason: startReason }
+                  : {
+                      ...(await atStart(reader, pid, branchOf(place.root), {
+                        file,
+                        key: place.key,
+                        host,
+                        // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
+                        // how it started, or a headless, SDK, or unknown one never traces on its own
+                        auto: newInteractive ? session : null,
+                        ...(skill ? { skill } : {}),
+                        // A subagent's start is never the owner's, even when the host leaves out its agent id
+                        owner:
+                          name !== "SubagentStart" &&
+                          isOwnerTurn(
+                            input,
+                            undefined,
+                            undefined,
+                            host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                          ),
+                      })),
+                      reason: startReason,
+                    };
     const entry: Entry = {
       projectId: pid,
       host,

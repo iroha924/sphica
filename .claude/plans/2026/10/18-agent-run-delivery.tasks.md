@@ -54,13 +54,14 @@ base: main
   - コミット: `feat(deliver): hold back session start and read delivery for agent-started runs`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/review-bridge.test.ts test/delivery-sample.test.ts test/capture.test.ts test/agent-runs.test.ts` → tests 184 / pass 184 / fail 0（開始は suppressed・unit 0・reason startup / compact、Read とシェルの名指しは出力も行も無し、停止 → compact → 再び停止、編集の前と review は配信、suppressed の行は sample.ts の抽出に入らない）。`bun run check` → exit 0
 
-- [ ] T04: サブエージェントと Codex の子スレッドの起動を検索の 1 行だけにする
+- [x] T04: サブエージェントと Codex の子スレッドの起動を検索の 1 行だけにする
   - 種別: 変更
   - 計画: S3
   - 依存: T01（起動の縮小の塊が採用されていないと変える理由が無い）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → SubagentStart とログで確かめた Codex の子スレッドの開始が SEARCH_FIRST だけで unit 無し、reason と agent_id は今どおり、サブエージェントの読みの数え方は起動で戻らない、対話の本体の開始は今どおり
   - コミット: `feat(deliver): start subagents and child threads with the search line only`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/review-bridge.test.ts` → tests 85 / pass 85 / fail 0（SubagentStart・agent id の無い SubagentStart・ログで確かめた Codex の子スレッドの開始が検索の 1 行だけ、unit 0・chars 0・reason は subagent / startup、読みは起動で戻らない、本体の開始は記録を出す）。`bun run check` → exit 0
 
 - [ ] T05: delivery-view の suppressed の扱いと README の配信の節を直す
   - 種別: 変更
