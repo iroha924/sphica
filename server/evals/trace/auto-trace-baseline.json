@@ -13,202 +13,242 @@
         {
           "host": "claude-code",
           "file": "0575e67d-804a-4b17-8540-dcb876f9c848.jsonl",
-          "sha256": "683f8a9957cd57050d458d64be97a1c63c2c7b2c1404ceda8f0c1b756e8d4068"
+          "sha256": "683f8a9957cd57050d458d64be97a1c63c2c7b2c1404ceda8f0c1b756e8d4068",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "08ebee5c-0d4b-407d-ae50-30aa74c14ff9.jsonl",
-          "sha256": "df27274a148081868c7f76141093cd8e624147d8d1310bb008cc90fa87e3d65d"
+          "sha256": "df27274a148081868c7f76141093cd8e624147d8d1310bb008cc90fa87e3d65d",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "09baa1c4-0d4f-46a2-8e7b-03c65c196917.jsonl",
-          "sha256": "085c2fa28d27a958a331749a029acb1a6040b8497a2d3e539951fb73a8642d39"
+          "sha256": "085c2fa28d27a958a331749a029acb1a6040b8497a2d3e539951fb73a8642d39",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97.jsonl",
-          "sha256": "c9f6ac03e879089fb456bae4ee93584db3a2bec033bd41badc7319b34171d747"
+          "sha256": "c9f6ac03e879089fb456bae4ee93584db3a2bec033bd41badc7319b34171d747",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "1c20fe6a-d7c2-448e-9d8d-855d9c32359b.jsonl",
-          "sha256": "43eae49c80315d4574a88170d82c83997cadb76372ffbbb0f9b863f39a770373"
+          "sha256": "43eae49c80315d4574a88170d82c83997cadb76372ffbbb0f9b863f39a770373",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "20394fc9-a502-41e0-9768-719e31a6d1df.jsonl",
-          "sha256": "2459a6ed0354ea28759748d51788121f5ed82ba3b534b524e0464d3d84401c99"
+          "sha256": "2459a6ed0354ea28759748d51788121f5ed82ba3b534b524e0464d3d84401c99",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "25ef2428-6a71-4e45-b68a-ac591226abd4.jsonl",
-          "sha256": "f6a54f1424225c96b0aeeb7d7a7e145ec8c7e5de8f78f01bee74286483d54ab0"
+          "sha256": "f6a54f1424225c96b0aeeb7d7a7e145ec8c7e5de8f78f01bee74286483d54ab0",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "32dfbb23-b477-431b-a076-f698bf1ed269.jsonl",
-          "sha256": "4e680fe7464fd26298839201c20f75c5fe45ed0e46d7946cdab68ac37c28b0ef"
+          "sha256": "4e680fe7464fd26298839201c20f75c5fe45ed0e46d7946cdab68ac37c28b0ef",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "4a0aae45-19e3-4c6f-ba3f-c848c69fe97d.jsonl",
-          "sha256": "d3baafa3bdaf95f8d6e1281d84bb632568e0289458fe0ea1d080242622d462b8"
+          "sha256": "d3baafa3bdaf95f8d6e1281d84bb632568e0289458fe0ea1d080242622d462b8",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "4a4adbcb-446d-4e44-b72e-ade112506bea.jsonl",
-          "sha256": "c9bb463ff7ab23076af4d2fe160de7ffde11cfa91d86ad58cdc758c78eaacc3c"
+          "sha256": "c9bb463ff7ab23076af4d2fe160de7ffde11cfa91d86ad58cdc758c78eaacc3c",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "561cb964-3601-4669-b312-ac865715b286.jsonl",
-          "sha256": "bdbfaa23e525f1951e0dc943c2cd2c61ef94ec200ec15aac6d3ad061776e7c15"
+          "sha256": "bdbfaa23e525f1951e0dc943c2cd2c61ef94ec200ec15aac6d3ad061776e7c15",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "6ad15fda-e1c5-43cc-8a8a-b7af530a51bb.jsonl",
-          "sha256": "d1a25f0f51d259e052f784b0fe3459a1013621b4121a2840afab1e8660d0d328"
+          "sha256": "d1a25f0f51d259e052f784b0fe3459a1013621b4121a2840afab1e8660d0d328",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "71af7849-6d0f-4c6e-8f8e-f3373c573739.jsonl",
-          "sha256": "498442e21b69afafd74b12288dbabd0121e4849ab23902898e2993b5a08e65cf"
+          "sha256": "498442e21b69afafd74b12288dbabd0121e4849ab23902898e2993b5a08e65cf",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "77f97b60-5970-412b-a043-1b4ac23ea65a.jsonl",
-          "sha256": "a2ed351ed756490243d6e906d8d8700622c715f7a382d774cc8d40b4f70829de"
+          "sha256": "a2ed351ed756490243d6e906d8d8700622c715f7a382d774cc8d40b4f70829de",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "81c18773-84f2-42fd-919a-f95aaed315a9.jsonl",
-          "sha256": "d34a2e4c3166357934701bbad7bb09f81e37955145a5b52fb48c84270c88ed5d"
+          "sha256": "d34a2e4c3166357934701bbad7bb09f81e37955145a5b52fb48c84270c88ed5d",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "8513fede-c574-4120-8903-f05ee0e606fa.jsonl",
-          "sha256": "413bb01b045d19f15d45f807d5870c4f463f4cd90099eddce22d5ed9ecc9371e"
+          "sha256": "413bb01b045d19f15d45f807d5870c4f463f4cd90099eddce22d5ed9ecc9371e",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "85a3dee0-7e47-40a5-b10a-a3b5c2434727.jsonl",
-          "sha256": "5892320ab2f8399c319f5bed6978ee22154dec279889b72a3adb1cfd452bab91"
+          "sha256": "5892320ab2f8399c319f5bed6978ee22154dec279889b72a3adb1cfd452bab91",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "88e10cd3-817e-41df-a3f4-d53a44e7b83d.jsonl",
-          "sha256": "088199028e246a88464a4ac71ee68f6142f3106f87228891bc62cc57c835b6c0"
+          "sha256": "088199028e246a88464a4ac71ee68f6142f3106f87228891bc62cc57c835b6c0",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "8a5d7c8e-0c74-4321-b34b-a8731bdab744.jsonl",
-          "sha256": "72e4fc32a6e7b9df6cd9f20c3a36b04100d67cdfc4acd27dcd254659bf8909aa"
+          "sha256": "72e4fc32a6e7b9df6cd9f20c3a36b04100d67cdfc4acd27dcd254659bf8909aa",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "8c8dba6b-9f75-4ccb-b27f-661f99549b19.jsonl",
-          "sha256": "fe6ea2bc97e862b13be40d6a3b09d5a3792fc4df895760125eaef711098964c8"
+          "sha256": "fe6ea2bc97e862b13be40d6a3b09d5a3792fc4df895760125eaef711098964c8",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "8f0eeeac-4006-40bc-b7d7-c39373a02d43.jsonl",
-          "sha256": "029d1e75ffe05d9ef15cdff3c11d64103b09f20895e8c1de6568434bb9ebd230"
+          "sha256": "029d1e75ffe05d9ef15cdff3c11d64103b09f20895e8c1de6568434bb9ebd230",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "90b8695c-fee6-4a25-aaae-f2ed5e95ecc7.jsonl",
-          "sha256": "f3c9e138d459a3a748373c326075d30236d3a2096658e0e8b4f273a2857032fe"
+          "sha256": "f3c9e138d459a3a748373c326075d30236d3a2096658e0e8b4f273a2857032fe",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "9c5f9114-e991-43fa-b3f9-7de9054b1a9d.jsonl",
-          "sha256": "4542f315b18665ffed3901a6ae5c0f6b70393e193886cc4182200dacd6d4856e"
+          "sha256": "4542f315b18665ffed3901a6ae5c0f6b70393e193886cc4182200dacd6d4856e",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "9df4eb61-d4cb-4bc1-92dc-c6a2b96bee83.jsonl",
-          "sha256": "622d26ae64d6d45ecbdbd5a48733bf121fda77f27b0a992d56f6286968743118"
+          "sha256": "622d26ae64d6d45ecbdbd5a48733bf121fda77f27b0a992d56f6286968743118",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "add3b453-aa2c-4778-9f75-879b009d54c0.jsonl",
-          "sha256": "b23c20e715f24165ca0bc60adb6cb6dfc16ed1b9c3ae783df1d010885c5bdd20"
+          "sha256": "b23c20e715f24165ca0bc60adb6cb6dfc16ed1b9c3ae783df1d010885c5bdd20",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "b0a5e96c-75bb-4261-b2e6-9cd864b1db9b.jsonl",
-          "sha256": "b3737d99de87f970b344e650e88f19d3485d23bf403cc80a4896ececed91bbf5"
+          "sha256": "b3737d99de87f970b344e650e88f19d3485d23bf403cc80a4896ececed91bbf5",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "bd134cd6-e5ba-4fdf-bcf1-2e21ee79aded.jsonl",
-          "sha256": "7db47f28ae82a9d767f4bbe71abc5ccaba6837783b089dbd5f64f97d314123d5"
+          "sha256": "7db47f28ae82a9d767f4bbe71abc5ccaba6837783b089dbd5f64f97d314123d5",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "bde30996-796f-4809-8e30-e5a0c2f92066.jsonl",
-          "sha256": "a33db0a3c9d9ae6dc8144daf7c44136a57f59e0beb54f42353848b89054ae758"
+          "sha256": "a33db0a3c9d9ae6dc8144daf7c44136a57f59e0beb54f42353848b89054ae758",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "c275d21c-803b-4066-aaf3-9f29b72f2fbd.jsonl",
-          "sha256": "cc163c9c47d0511e5d8e10e46629e4b88bec9931018d09984d09ddb8f31af332"
+          "sha256": "cc163c9c47d0511e5d8e10e46629e4b88bec9931018d09984d09ddb8f31af332",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "cbc0dbe8-014d-4719-9165-5a39fdb1e53f.jsonl",
-          "sha256": "5e879328573d9b92d3e189166385e8e09c3ccd025cbf46188a204550ce7bacbb"
+          "sha256": "5e879328573d9b92d3e189166385e8e09c3ccd025cbf46188a204550ce7bacbb",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "d16a1bbd-95ba-45dd-afc7-1496165c661a.jsonl",
-          "sha256": "942df83ce6adccdc8943867c768ee7eabc2e3409e4d41c15732d01c2f33cb92b"
+          "sha256": "942df83ce6adccdc8943867c768ee7eabc2e3409e4d41c15732d01c2f33cb92b",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "d4d84a7c-b41c-496b-a402-8017d2acdbf6.jsonl",
-          "sha256": "a1b3cd886ce0d4afa96e5a17eaaffd22107b700e6729932f87f14de6c757dc2f"
+          "sha256": "a1b3cd886ce0d4afa96e5a17eaaffd22107b700e6729932f87f14de6c757dc2f",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "d77d025c-bb0c-4bde-98ce-83bcafd8d024.jsonl",
-          "sha256": "68a37e7e6572d3fa9b41f25403c0d1946e46241a206b7e2a8ac1165db68031d4"
+          "sha256": "68a37e7e6572d3fa9b41f25403c0d1946e46241a206b7e2a8ac1165db68031d4",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "ddaa270f-07bd-4d5a-85d0-43e9e78db0f9.jsonl",
-          "sha256": "f6e20d9c86c93b6201c0eb2b4dd8ae1b44a14b54f09689a97a8bef9b12787714"
+          "sha256": "f6e20d9c86c93b6201c0eb2b4dd8ae1b44a14b54f09689a97a8bef9b12787714",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "e72fe6bd-3b20-4ccd-8d2c-c8f135f384c9.jsonl",
-          "sha256": "d5967a0421a6b4ec3df955dc95f0a816cc0a41d5f84db630eaa997373a86c6a5"
+          "sha256": "d5967a0421a6b4ec3df955dc95f0a816cc0a41d5f84db630eaa997373a86c6a5",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "e967dcef-33f2-4a09-9c52-5d6c37ffd529.jsonl",
-          "sha256": "fc97188b0b8da8145d6cdd09f27ca29790f15aecb2df36eb1586514cd22436fe"
+          "sha256": "fc97188b0b8da8145d6cdd09f27ca29790f15aecb2df36eb1586514cd22436fe",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "eda6bd24-a2dc-4d18-b1be-9489edcf3838.jsonl",
-          "sha256": "710298367ed9b23f24cefeeba7fdc76e90526f5e348551e9763ff456c93d5fca"
+          "sha256": "710298367ed9b23f24cefeeba7fdc76e90526f5e348551e9763ff456c93d5fca",
+          "unreadable": []
         },
         {
           "host": "claude-code",
           "file": "fddc1eb4-e29e-4fc4-8b2a-6a2886f0c0ec.jsonl",
-          "sha256": "25f46816d2574c57d617046c015f7e5957b9906e3e8591090d8f9fa9dcac8dc4"
+          "sha256": "25f46816d2574c57d617046c015f7e5957b9906e3e8591090d8f9fa9dcac8dc4",
+          "unreadable": []
         },
         {
           "host": "codex",
           "file": "2026/10/12/rollout-2026-10-12T23-45-28-01a13093-660b-7161-b947-bc2e29fcb05b.jsonl",
-          "sha256": "2aaf6acd60d27d8b8e3fc1d2f3e5ebed7b50d8c11e4aab3623c3588fd2d3aca5"
+          "sha256": "2aaf6acd60d27d8b8e3fc1d2f3e5ebed7b50d8c11e4aab3623c3588fd2d3aca5",
+          "unreadable": []
         },
         {
           "host": "codex",
           "file": "2026/10/14/rollout-2026-10-14T15-06-43-01a13905-2d74-7301-952c-cb1b28ac99e3.jsonl",
-          "sha256": "4596fb30f5c5a75d766114229ad998712917c0d61d09ab5107a5d5a46a949d15"
+          "sha256": "4596fb30f5c5a75d766114229ad998712917c0d61d09ab5107a5d5a46a949d15",
+          "unreadable": []
         }
       ]
     }

@@ -140,6 +140,16 @@ base: main
   - コミット: `fix(eval): count a lost final usage as a gap, tie settled to owner labels, recheck usage (T12)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 3 件が落ちた（最後の行に usage が無い応答が output 3 のまま、持ち主と違う settled が通る、span_seconds_merged を 0 にした baseline でも出し直しが 0 で終わる）。直した後、同じコマンド → 24 件 pass。今の baseline で `--decide --frozen --baseline` → 同じと報告して 0。`bun run check` → 0
 
+- [x] T13: 抜き取りの全件に持ち主のラベルを求め、固定先をリポジトリの外に限り、読めなかった行を baseline に残す
+  - 種別: 修正
+  - 計画: S1, S4
+  - 依存: T12（直す対象のラベルの検査と出し直し）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`, `server/evals/trace/auto-trace-baseline.json`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 持ち主のラベルが無い抜き取りの行で判定が出る、--repo の下の --frozen に写しを書く、読めない行のあるログを固定しても baseline に行番号が残らない、の 3 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。抜き取りの行は owner が null なら拒む、--frozen が --repo の中（実体のパスで比べる）なら何も書かずに止まる、inputs.logs.files に読めない行番号があり、出し直しは読み直した行番号と違えば止まる。今の baseline で `--decide --frozen --baseline` が 0 で終わる
+  - コミット: `fix(eval): require owner labels, keep frozen copies outside the repo, pin unreadable lines (T13)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 件が落ちた（持ち主のラベルの無い抜き取りの行が通る、--repo の下の --frozen への固定が 0 で終わる。読めない行の欄はその後の assert で、欄が無いので必ず落ちる）。直した後、同じコマンド → 26 件 pass。今の baseline には、固定した写しを sha256 で確かめて読み直した行番号を足した（40 本とも 0 行）。`--decide --frozen --baseline` → 同じと報告して 0。`bun run check` → 0
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
@@ -153,3 +163,4 @@ base: main
 - 2026-10-18 / T06 / 完了条件の欄を変えた。前: `jq '[.sample[] | …]'`、新: `jq '[.labels.sample[] | …]'`。`jq -c '.verdict, .actions'` も結果の置き場に合わせて `.result` の下で確かめた / ラベルは labels の下、判定は result の下に置く作りにしたため
 - 2026-10-18 / T12 / 全差分の Codex のレビュー（high）で P2 が 3 件（応答の最後の行に usage が無いと前の行の値が残り gap にならない、settled が持ち主のラベルと食い違っても通る、出し直しが result だけを比べトークンと時間の書き換えを見逃す）。3 件とも再現あり、採る。今の baseline はどれにも当たらない（同じレビューで固定した入力と一致を確認） / 修正タスク T12 を足した
 - 2026-10-18 / T12 / 修正の差分の Codex の再レビューは指摘なし
+- 2026-10-18 / T13 / PR #356 の GitHub の Codex のレビューで P2 が 3 件（抜き取りの行に持ち主のラベルが無くても判定が出る、--frozen がリポジトリの中でも DB の写しと会話を書く、読めないログの行が baseline に残らず欠けた計測と見分けられない）。3 件とも採る。3 件目は計画の方針（読めなかった行を baseline に残す）の書き漏れ。今の baseline は 40 件とも持ち主のラベルがあり、固定先は scratchpad / 修正タスク T13 を足した

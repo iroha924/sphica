@@ -500,8 +500,21 @@ export function differences(pinned: Population, fresh: Population): string[] {
 type Inputs = {
   commit: string;
   snapshot: { file: string; sha256: string };
-  logs: { count: number; sha256: string; files: { host: Host; file: string; sha256: string }[] };
+  /** unreadable: the lines of each log that could not be read, so a result missing them is not taken as complete */
+  logs: {
+    count: number;
+    sha256: string;
+    files: { host: Host; file: string; sha256: string; unreadable: number[] }[];
+  };
 };
+
+/** The real path of p, or of its nearest existing parent with the rest appended, so a link cannot hide where p is */
+function realPath(p: string): string {
+  const abs = path.resolve(p);
+  if (fs.existsSync(abs)) return fs.realpathSync(abs);
+  const parent = path.dirname(abs);
+  return parent === abs ? abs : path.join(realPath(parent), path.basename(abs));
+}
 
 const logDir = (frozen: string, host: Host) => path.join(frozen, "logs", host);
 
@@ -524,6 +537,10 @@ async function freeze(o: {
   if (dirty.trim())
     throw new Error(`server/ has uncommitted changes; commit before a run that saves a result:\n${dirty}`);
   const commit = execFileSync("git", ["-C", o.repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  // The copies hold the owner's whole database and conversations, which must never be committed
+  const [repo, frozen] = [realPath(o.repo), realPath(o.frozen)];
+  if (frozen === repo || frozen.startsWith(`${repo}${path.sep}`))
+    throw new Error(`--frozen ${o.frozen} is inside the repository; freeze outside it`);
   if (fs.existsSync(o.frozen) && fs.readdirSync(o.frozen).length)
     throw new Error(`${o.frozen} is not empty; freeze into a new directory`);
   fs.mkdirSync(o.frozen, { recursive: true });
@@ -547,7 +564,12 @@ async function freeze(o: {
     fs.copyFileSync(path.join(l.host === "claude-code" ? o.dirs.claude : o.dirs.codex, l.file), to);
     if (sha256(fs.readFileSync(to)) !== l.sha256) throw new Error(`${l.file} changed while it was read`);
   }
-  const files = o.logs.map((l) => ({ host: l.host, file: l.file, sha256: l.sha256 }));
+  const files = o.logs.map((l) => ({
+    host: l.host,
+    file: l.file,
+    sha256: l.sha256,
+    unreadable: l.unreadable,
+  }));
   return {
     commit,
     snapshot: { file: "sphica.db", sha256: sha256(fs.readFileSync(snapshot)) },
@@ -568,6 +590,8 @@ function thaw(frozen: string, inputs: Inputs): { db: string; logs: Log[] } {
     const dir = logDir(frozen, f.host);
     const l = f.host === "claude-code" ? readClaude(dir, f.file) : readCodex(dir, f.file);
     if (l.sha256 !== f.sha256) throw new Error(`${f.file} does not hash to the pinned sha256`);
+    if (JSON.stringify(l.unreadable) !== JSON.stringify(f.unreadable))
+      throw new Error(`${f.file} does not have the unreadable lines the baseline pins`);
     return l;
   });
   return { db, logs };
@@ -1117,6 +1141,8 @@ export function checkLabels(
   ] as const)
     for (const l of list) {
       for (const who of ["claude", "codex", "settled"] as const) record(l[who], `${name} ${l.n} ${who}`);
+      if (l.owner === null && name === "sample")
+        throw new Error(`sample ${l.n}: the owner has not confirmed it`);
       if (l.owner !== null) {
         record(l.owner, `${name} ${l.n} owner`);
         if (l.owner.correctness !== l.settled.correctness || l.owner.value !== l.settled.value)

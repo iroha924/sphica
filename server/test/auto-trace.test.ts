@@ -1069,7 +1069,7 @@ function labelled(size: number, pairs: [string, string][], audit: [string, strin
       unit: d.unit,
       claude: settled(i),
       codex: settled(i),
-      owner: null,
+      owner: settled(i),
       settled: settled(i),
     })),
     extra: [],
@@ -1356,4 +1356,48 @@ test("a settled label must be the owner's where the owner labelled the row", () 
   assert.throws(() => checkLabels(owned, f.drawn), /sample 1: settled is not the owner's label/);
   (owned.sample[0] as Rec).settled = label("correct", "useful");
   checkLabels(owned, f.drawn);
+});
+
+test("every sampled record needs the owner's label before the bars are applied", () => {
+  const f = labelled(2, []);
+  const unconfirmed = structuredClone(f.labels);
+  (unconfirmed.sample[1] as Rec).owner = null;
+  assert.throws(() => checkLabels(unconfirmed, f.drawn), /sample 2: the owner has not confirmed it/);
+});
+
+test("freezing refuses a directory inside the repository, and the baseline keeps the lines it could not read", async () => {
+  const db = tempDb();
+  const dirs = logsDir();
+  try {
+    writeLogs(dirs);
+    fixture(db);
+    const repo = repoAt(dirs.root);
+    const args = (frozen: string, out: string) => [
+      SCRIPT,
+      "--freeze",
+      ...["--db", db.file, "--claude", dirs.claude, "--codex", dirs.codex, "--project", KEY, "--root", "/r"],
+      ...["--from", WINDOW.from, "--to", WINDOW.to, "--repo", repo, "--frozen", frozen, "--out", out],
+    ];
+    const inside = path.join(repo, "frozen");
+    const refused = spawnSync(process.execPath, args(inside, path.join(dirs.root, "in.json")), {
+      encoding: "utf8",
+    });
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /--frozen .* is inside the repository/);
+    assert.ok(!fs.existsSync(inside));
+    const out = path.join(dirs.root, "baseline.json");
+    const ok = spawnSync(process.execPath, args(path.join(dirs.root, "frozen"), out), { encoding: "utf8" });
+    assert.equal(ok.status, 0, ok.stderr);
+    const files = JSON.parse(fs.readFileSync(out, "utf8")).inputs.logs.files;
+    assert.deepEqual(
+      files.map((f: { file: string; unreadable: number[] }) => [f.file, f.unreadable]),
+      [
+        ["main.jsonl", [10]],
+        [path.join("2026", "10", "14", "rollout-a.jsonl"), []],
+      ],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
 });
