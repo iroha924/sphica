@@ -44,6 +44,8 @@ type Response = {
   key: string | null;
   line: number;
   at: string | null;
+  /** When its last line was written: a Claude Code response's lines can be minutes apart */
+  until: string | null;
   turn: string | null;
   usage: Usage | null;
   gap: string | null;
@@ -145,9 +147,10 @@ export function readClaude(dir: string, file: string): Log {
         typeof message.id === "string" ? message.id : typeof d.requestId === "string" ? d.requestId : null;
       let r = key === null ? undefined : byKey.get(key);
       if (r === undefined) {
-        r = log.responses.push({ key, line: n, at, turn: null, usage: null, gap: null }) - 1;
+        r = log.responses.push({ key, line: n, at, until: at, turn: null, usage: null, gap: null }) - 1;
         if (key !== null) byKey.set(key, r);
       }
+      if (at) (log.responses[r] as Response).until = at;
       // Every line of a response repeats its usage, and the last line holds the final counts
       const response = log.responses[r] as Response;
       const u = isObject(message.usage) ? message.usage : null;
@@ -282,6 +285,7 @@ export function readCodex(dir: string, file: string): Log {
         key,
         line: n,
         at,
+        until: at,
         turn,
         ...codexUsage(p, model, turn === lastTurn ? turnTotal : null),
       });
@@ -646,11 +650,13 @@ export function attribute(
     let last = rs;
     for (let r = rs; r < stop; r++) if (record(r).length) last = r;
     const closed = last + 1 < stop;
-    const end = closed ? last + 1 : stop - 1;
-    const endAt = log.responses[end]?.at ?? null;
+    const whole = closed ? last + 1 : stop - 1;
+    // Responses from the window's end on are not counted: the span is cut there
+    let end = whole;
+    while (end > rs && (log.responses[end]?.at ?? "") >= population.window.to) end--;
+    const endAt = log.responses[end]?.until ?? null;
     const unanswered = record(last).some((c) => c.result === null);
-    const truncated =
-      unanswered || !endAt || endAt >= population.window.to || (!closed && stop === log.responses.length);
+    const truncated = end < whole || unanswered || !endAt || (!closed && stop === log.responses.length);
     const span = spans.length;
     const open = new Set<string>();
     const touchedRuns = new Set<number>();

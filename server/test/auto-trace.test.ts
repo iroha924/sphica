@@ -1002,3 +1002,39 @@ test("the script draws once into the baseline, refuses another seed after that, 
     fs.rmSync(dirs.root, { recursive: true, force: true });
   }
 });
+
+test("a span ends at the last line of its closing response, and responses from the window's end on are cut off", () => {
+  const dirs = logsDir();
+  try {
+    spanLog(dirs.claude);
+    const lines = fs.readFileSync(path.join(dirs.claude, "span.jsonl"), "utf8").trimEnd().split("\n");
+    // The closing response m10 (line 21) goes on in a second line written 30 seconds later
+    lines.splice(21, 0, JSON.stringify(spent("m10", "2026-10-05T00:00:49Z", 512)));
+    fs.writeFileSync(path.join(dirs.claude, "span.jsonl"), `${lines.join("\n")}\n`);
+    const log = readClaude(dirs.claude, "span.jsonl");
+    const runs: [number, string, number[]][] = [
+      [1, "dA", []],
+      [2, "dB", [7]],
+    ];
+    const whole = attribute(spanPopulation([{ file: "span.jsonl", line: 2, call: "p" }], runs), [log]);
+    assert.equal(whole.spans[0]?.to, at("2026-10-05T00:00:49Z"));
+    const early = {
+      ...spanPopulation([{ file: "span.jsonl", line: 2, call: "p" }], runs),
+      window: { from: WINDOW.from, to: at(t(13)) },
+    };
+    const cut = attribute(early, [log]);
+    assert.deepEqual(
+      cut.responses.map((r) => r.key),
+      ["m1", "m2", "m3", "m4", "m5", "m6"],
+    );
+    assert.equal(cut.spans[0]?.truncated, true);
+    assert.equal(cut.spans[0]?.to, at(t(12)));
+    assert.deepEqual(
+      cut.responses.filter((r) => r.lower).map((r) => r.key),
+      [],
+      "a run cut off by the window is not known empty",
+    );
+  } finally {
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});

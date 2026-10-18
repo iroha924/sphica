@@ -59,7 +59,7 @@ base: main
   - コミット: `feat(eval): sample automatic trace records and list adoptions to audit (T03)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 14 件 pass（同じ seed で同じ抜き取り・別の seed で別、抜き取りに入らなかった AI の採用の記録だけが追加の組、監査は自動の run が書いた採用の行だけで後の run の行は入らない、シートは根拠と採用をバイトの範囲で引き、採用の前後と直前の発言を出す、CLI は 1 回だけ抜き取り別の seed を拒み、数でない seed と足りない引数を名指し）。`bun run check` → 0
 
-- [ ] T08: 応答の時刻をその最後の行で取り、窓の終わりより後の応答を区間から外す
+- [x] T08: 応答の時刻をその最後の行で取り、窓の終わりより後の応答を区間から外す
   - 種別: 修正
   - 計画: S2
   - 依存: T02（直す対象の区間と時間）
@@ -67,6 +67,7 @@ base: main
   - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 行に分かれた最後の応答で区間の終わりが最初の行の時刻になる、窓の終わりの後の応答が区間と上限に入る、の 2 件が落ちる
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。区間の終わりと時間は応答の最後の行の時刻、窓の終わり以降の応答は数えず区間は打ち切り
   - コミット: `fix(eval): end responses at their last line and cut spans at the window's end (T08)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 区間の終わりが 00:00:19（最初の行）で 00:00:49 にならず落ちた。窓の側は同じテストの順を入れ替えた写しを流し、窓の終わりの後の m7〜m10 が残って落ちた。直した後、同じコマンド → 15 件 pass。`bun run check` → 0
 
 - [ ] T04: 2 軸のラベルを集約し、3 つの基準と次の手を出す（`--decide`）
   - 種別: 追加
@@ -101,3 +102,4 @@ base: main
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
 - 2026-10-18 / T07 / T01 の Codex のレビューで P2 が 2 件（本番の DB から抽出してから別の接続で backup するので間の変更で再現できない、Codex のログはプロジェクトをまたぐので別のプロジェクトの自動 trace_pending が区間に入る。後者は再現あり）。どちらも採る / 修正タスク T07 を T03 の前に足した
 - 2026-10-18 / T08 / T02 の Codex のレビューで P2 が 2 件（Claude Code の応答の時刻を最初の行で取るので区間の終わりが早く出る、実ログで 33 秒、再現あり。窓の終わりで打ち切りの印を付けるだけで窓の外の応答も数える、再現あり）。どちらも採る / 修正タスク T08 を T04 の前に足した
+- 2026-10-18 / T07 / T07 の Codex のレビューで P2 が 1 件（--root の外にある worktree からの呼び出しが外れる。合成したログで再現）。断る: 同じレビューで実ログの自動の呼び出し 147 件は全部残り、外の worktree からの自動の呼び出しは 1 件も無かった。T05 で --root で外れた自動の呼び出しの数を数え、0 でなければ直す / 記録だけ残した
