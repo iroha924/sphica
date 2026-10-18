@@ -1387,7 +1387,8 @@ async function deliverOne(
       ran = await commandsRun(db, pid, shell);
       if (!rels.length && !ran.length) return "";
     }
-    if (event === "session_start" && input.source === "resume") {
+    // A held resume is logged even after a delivered start, so a run another agent resumes is still counted
+    if (event === "session_start" && input.source === "resume" && !held) {
       const said = await db
         .selectFrom("delivery")
         .select("id")

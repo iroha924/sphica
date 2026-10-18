@@ -3652,11 +3652,23 @@ test("a run another agent started gets no session start or records for what it r
     ]);
     // A held start is not a delivered one: a resume of the run holds back again rather than counting as already told
     assert.equal(await start("child", "resume"), "");
+    // A headless run another agent resumes from a session a person started is held back and logged, though that session's start was delivered
+    process.env.SPHICA_PARENT_SESSION = "resumed";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(String(await start("resumed-later", "startup")), /Rework CSV export/);
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start("resumed-later", "resume"), "");
+    assert.deepEqual(rows("resumed-later"), [
+      "session_start:emitted:startup:1",
+      "session_start:suppressed:resume:0",
+    ]);
+    process.env.SPHICA_PARENT_SESSION = "parent";
     // A held start has no record, so the delivery sample never draws it
     const held = db.owner
       .prepare("select count(*) as n from delivery where outcome = 'suppressed'")
       .get() as { n: number };
-    assert.equal(Number(held.n), 3);
+    assert.equal(Number(held.n), 4);
     assert.equal(
       (
         await extract(db.reader, p, { from: "2000-01-01T00:00:00.000Z", to: "2100-01-01T00:00:00.000Z" })
