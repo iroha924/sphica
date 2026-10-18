@@ -22,13 +22,15 @@ base: main
 
 固定した #346 標本で、塊ごとに外れるペアの内訳を出し、基準で採否を決める。不採用の塊は P2 で実装しない。
 
-- [ ] T01: 固定標本の代理の内訳を出すスクリプトと結果の JSON を足す
+- [x] T01: 固定標本の代理の内訳を出すスクリプトと結果の JSON を足す
   - 種別: 追加
   - 計画: S5
   - 依存: なし
-  - 変更: `server/evals/delivery/agent-runs.ts`, `server/evals/delivery/agent-runs-353.json`, `server/test/agent-runs.test.ts`
+  - 変更: `server/evals/delivery/agent-runs.ts`, `server/evals/delivery/agent-runs-353.json`, `server/test/agent-runs.test.ts`, `server/evals/delivery/sample.ts`
   - 完了条件: `node server/evals/delivery/agent-runs.ts --check` → JSON と同じ件数が出て 0 で終わり、塊ごとの useful / irrelevant / unknown と採否が基準どおり。`cd server && node --test test/agent-runs.test.ts` → 分類と基準の境界（useful 1、irrelevant 4 と 5、停止の行を外れる側に数えない）が通る
   - コミット: `feat(eval): count the #346 sample pairs agent-run delivery changes would drop`
+  - 結果: `node server/evals/delivery/agent-runs.ts --check server/evals/delivery/agent-runs-353.json` → agent-run {useful 0, irrelevant 17, unknown 22, adopted}、subagent-start {useful 0, irrelevant 5, unknown 2, adopted}、exit 0（手集計と一致）
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/agent-runs.test.ts` → pass 5 / fail 0。`bun run check` → 0 で終わる
 
 ## P2: 判定と配信
 
@@ -67,3 +69,5 @@ base: main
   - コミット: `docs(deliver): describe what agent-started runs and subagent starts receive`
 
 ## 記録
+
+- 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
