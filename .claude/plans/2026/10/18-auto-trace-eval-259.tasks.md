@@ -112,13 +112,14 @@ base: main
 
 持ち主の DB と会話の記録で測り、ラベルを確定して判定し、結果を #259 に出す。
 
-- [ ] T05: 本番のデータを固定し、トークンと時間を数え、40 件と監査の一覧を出す
+- [x] T05: 本番のデータを固定し、トークンと時間を数え、40 件と監査の一覧を出す
   - 種別: 追加
   - 計画: S5
   - 依存: T02（トークンの集計が要る）, T03（抜き取りが要る）, T09（本番のデータは区間の打ち切りを直した後で数える）, T11（ラベルに使うシートの直し）
   - 変更: `server/evals/trace/auto-trace-baseline.json`
   - 完了条件: `jq -c '{runs: .population.records.runs, records: .population.records.units, sample: (.sample | length), audit: (.audit | length)}' server/evals/trace/auto-trace-baseline.json` → 固定した入力からの値が出て、sample は 40。固定先はリポジトリの外で、transcript の写しをコミットしない
   - コミット: `test(eval): pin the 2026-10-04..18 automatic trace population and its usage (T05)`
+  - 結果: `--freeze`（窓 2026-10-04T00:00Z〜10-18T06:00Z、root /Users/shunichi/Projects/sphica、固定先は scratchpad の frozen-259、417 MB）→ 68 runs, 149 records, 41 spans, 2 unmatched。`--usage` → Claude Code の空振りの割合 output 0.085〜0.192・全トークン 0.257〜0.552・gap 0、Codex output 0〜0.113・全トークン 0〜0.153。`--sample --seed 20261018 --size 40` → 40 件・追加の AI の決定 5 件・監査 65 行。`jq -c '{runs: (.population.runs | length), records: .population.units, sample: (.sample | length), audit: (.audit | length)}' server/evals/trace/auto-trace-baseline.json` → {"runs":68,"records":149,"sample":40,"audit":65}。もう一度本番のデータから抽出 → 同じと報告。窓の中の自動の呼び出し 147 件のうち --root で外れたものは 0 件。`bun run check` → 0（baseline は Biome で整形）
 
 - [ ] T06: Claude と Codex がラベルと監査を付け、持ち主が確定し、判定して #259 に書く
   - 種別: 追加
