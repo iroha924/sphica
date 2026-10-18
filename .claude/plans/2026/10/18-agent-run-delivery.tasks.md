@@ -45,13 +45,14 @@ base: main
   - コミット: `feat(deliver): tell runs another agent started from the owner's sessions`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/capture.test.ts test/deliver.test.ts` → tests 136 / pass 136 / fail 0（isOwnerTurn の既存のテストは無変更で通る）。`bun run check` → exit 0。4 ファイルの version が 0.6.61
 
-- [ ] T03: エージェントが起動した実行の開始を suppressed の行にし、通常の読み取り配信を止める
+- [x] T03: エージェントが起動した実行の開始を suppressed の行にし、通常の読み取り配信を止める
   - 種別: 変更
   - 計画: S2
   - 依存: T02（判定の関数が要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `scripts/lib/sql-call-sites.mjs`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/review-bridge.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 判定を満たす実行で、開始は出力無し・unit 無し・outcome suppressed・reason は開始の種類、Read とシェルの名指しは出力も行も無し、シェルの停止とその context・編集の前・review は今どおり、停止 → compact → 同じコマンドで止まり直す、suppressed の行が sample.ts の抽出に入らない
   - コミット: `feat(deliver): hold back session start and read delivery for agent-started runs`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/review-bridge.test.ts test/delivery-sample.test.ts test/capture.test.ts test/agent-runs.test.ts` → tests 184 / pass 184 / fail 0（開始は suppressed・unit 0・reason startup / compact、Read とシェルの名指しは出力も行も無し、停止 → compact → 再び停止、編集の前と review は配信、suppressed の行は sample.ts の抽出に入らない）。`bun run check` → exit 0
 
 - [ ] T04: サブエージェントと Codex の子スレッドの起動を検索の 1 行だけにする
   - 種別: 変更
@@ -74,3 +75,5 @@ base: main
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
 - 2026-10-18 / T02 / 実装の前に (b) の前提を実測した（codex-cli 0.163.0、使い捨ての CODEX_HOME、入力を控える hook）: 永続の `codex exec` は transcript_path を渡しログの 1 行目は originator `codex_exec`・source `exec`、`--ephemeral` は transcript_path が null、どちらも子のフックに SPHICA_PARENT_SESSION が届き CLAUDE_CODE_ENTRYPOINT `cli` も受け継ぐ / (b) を予定どおり入れる
 - 2026-10-18 / T02 / startedByAgent は isOwnerTurn と agentRun のテストで通るので capture.test.ts は変えなかった / 変更欄から `server/test/capture.test.ts` を外した（前: capture.ts, deliver.ts, capture.test.ts, deliver.test.ts, 4 つのバージョンのファイル）
+- 2026-10-18 / T02 / Codex のタスクごとのレビュー（77c3d65d、high）: 指摘 0。isOwnerTurn の前後 1,152 通りの一致と agentRun 128 通りを確かめた。テストは sandbox の EPERM で流せず、手元で 136 件通ったことを確かめた / 対応なし
+- 2026-10-18 / T03 / 新しい SQL の呼び出し箇所は無く、review の確認を review-bridge.test.ts に足した / 変更欄を直した（前: deliver.ts, deliver.test.ts, scripts/lib/sql-call-sites.mjs → 後: deliver.ts, deliver.test.ts, review-bridge.test.ts）。writer への outcome は Plan の欄 `outcome` で渡した（plan の「引数で受け取る」と同じ働き）

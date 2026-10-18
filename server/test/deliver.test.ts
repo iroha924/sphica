@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { extract } from "../evals/delivery/sample.ts";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
@@ -3524,6 +3525,142 @@ test("dead ends shown without a stop spend the read budget's characters as they 
       `records shown as context took ${rows.reduce((a, b) => a + b, 0)} characters`,
     );
   } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a run another agent started gets no session start or records for what it reads, and still stops on a dead end and gets edits", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+  const made: string[] = [];
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file. No telemetry." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+        { ...decided("no-telemetry", m, "No telemetry."), kind: "constraint", stance: "dont" },
+      ],
+    });
+    await deadEnds(db, p, 1);
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
+    const call = (
+      session: string,
+      input: Record<string, unknown>,
+      host: "claude-code" | "codex" = "claude-code",
+    ) => respond({ session_id: session, cwd: repo, ...input }, host, db.file);
+    const start = (session: string, source: string, extra: Record<string, unknown> = {}, host?: "codex") =>
+      call(session, { hook_event_name: "SessionStart", source, ...extra }, host);
+    const read = (session: string) =>
+      call(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      });
+    const edit = (session: string) =>
+      call(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      });
+    const rows = (session: string) =>
+      db.owner
+        .prepare(
+          "select d.event, d.outcome, d.reason, (select count(*) from delivery_unit x where x.delivery_id = d.id) as units from delivery d join session s on s.id = d.session_id where s.external_id = ? order by d.id",
+        )
+        .all(session)
+        .map((r) => `${r.event}:${r.outcome}:${r.reason}:${r.units}`);
+
+    // claude -p started from Claude Code's Bash
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start("child", "startup"), "");
+    assert.equal(await read("child"), "");
+    assert.equal(
+      await shellCall(db, repo, "child", "cat src/db.ts"),
+      "",
+      "a path the command names is a read too",
+    );
+    assert.ok(
+      stopText(await shellCall(db, repo, "child", "npm run thumbs --worker")),
+      "a dead end still stops",
+    );
+    assert.equal(
+      await shellCall(db, repo, "child", "npm run thumbs --worker"),
+      "",
+      "run again, it goes through",
+    );
+    // A compaction still marks where the run's stops count from, so the same dead end stops once more after it
+    assert.equal(await start("child", "compact"), "");
+    assert.ok(
+      stopText(await shellCall(db, repo, "child", "npm run thumbs --worker")),
+      "stopped again after the compaction",
+    );
+    assert.match(String(await edit("child")), /trace:ext-s1\/sqlite/);
+    assert.deepEqual(rows("child"), [
+      "session_start:suppressed:startup:0",
+      "pre_read:emitted:command:1",
+      "session_start:suppressed:compact:0",
+      "pre_read:emitted:command:1",
+      "pre_edit:emitted:null:1",
+    ]);
+    // A held start is not a delivered one: a resume of the run holds back again rather than counting as already told
+    assert.equal(await start("child", "resume"), "");
+    // A held start has no record, so the delivery sample never draws it
+    const held = db.owner
+      .prepare("select count(*) as n from delivery where outcome = 'suppressed'")
+      .get() as { n: number };
+    assert.equal(Number(held.n), 3);
+    assert.equal(
+      (
+        await extract(db.reader, p, { from: "2000-01-01T00:00:00.000Z", to: "2100-01-01T00:00:00.000Z" })
+      ).filter(
+        ([d]) =>
+          db.owner.prepare("select outcome from delivery where id = ?").get(d)?.outcome === "suppressed",
+      ).length,
+      0,
+    );
+
+    // The same marker without a headless entrypoint is a person's, as is a marker that names the session itself
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(String(await start("person", "startup")), /Rework CSV export/);
+    assert.match(String(await read("person")), /trace:ext-s1\/sqlite/);
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    process.env.SPHICA_PARENT_SESSION = "self";
+    assert.match(String(await start("self", "startup")), /Rework CSV export/);
+
+    // Codex: codex exec --ephemeral names no log; a terminal session through a server that kept the marker names its own
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    assert.equal(await start("cx-exec", "startup", {}, "codex"), "");
+    const tui = codexLog("cx-tui");
+    made.push(path.dirname(tui));
+    assert.match(
+      String(await start("cx-tui", "startup", { transcript_path: tui }, "codex")),
+      /Rework CSV export/,
+    );
+    assert.deepEqual(rows("cx-exec"), ["session_start:suppressed:startup:0"]);
+  } finally {
+    for (const [k, v] of [
+      ["SPHICA_PARENT_SESSION", saved.parent],
+      ["CLAUDE_CODE_ENTRYPOINT", saved.entry],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }

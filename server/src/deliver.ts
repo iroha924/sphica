@@ -300,6 +300,8 @@ type Plan = {
   reason: string | null;
   /** What a review delivery is told once per session for: the change it read, or its text when no change was read */
   once?: string;
+  /** Set when the call was held back on purpose rather than finding nothing */
+  outcome?: "suppressed";
 };
 
 const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
@@ -842,6 +844,18 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
+/** A held-back session start: nothing shown, logged as suppressed */
+const HELD: Plan = {
+  text: "",
+  note: "",
+  units: [],
+  eligible: 0,
+  omitted: 0,
+  path: null,
+  reason: null,
+  outcome: "suppressed",
+};
+
 /** How long after a Codex hook starts its review may go on reading the change, inside the 5 seconds Codex gives a tool hook */
 const REVIEW_MS = 3500;
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
@@ -1133,7 +1147,7 @@ async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
       session_id: id,
       agent_id: e.agent,
       event: e.event,
-      outcome: plan.text ? "emitted" : "nothing",
+      outcome: plan.outcome ?? (plan.text ? "emitted" : "nothing"),
       reason: plan.reason,
       path: plan.path,
       eligible: plan.eligible,
@@ -1330,6 +1344,9 @@ async function deliverOne(
     !call && SHELL_TOOLS.has(input.tool_name ?? "") && !patch && typeof ti.command === "string"
       ? ti.command
       : null;
+  // A run another agent started gets no session start and no records for what it reads; its shell calls still stop on a recorded dead end
+  const held = (event === "session_start" || event === "pre_read") && agentRun(input, host);
+  if (held && event === "pre_read" && !shell) return "";
   const targets = patch
     ? patchPaths(patch)
     : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
@@ -1355,7 +1372,7 @@ async function deliverOne(
     if (pid === null) return "";
     let ran: number[] = [];
     if (shell) {
-      rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
+      rels = held ? [] : await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       ran = await commandsRun(db, pid, shell);
       if (!rels.length && !ran.length) return "";
     }
@@ -1385,6 +1402,14 @@ async function deliverOne(
     const skill = asksToTrace && host === "codex" && codexInteractive(input) ? traceSkill() : null;
     const newInteractive =
       asksToTrace && (host === "claude-code" ? process.env.CLAUDE_CODE_ENTRYPOINT === "cli" : skill !== null);
+    // The start source marks where reads count from, so it is logged even when the start delivered nothing or was held back. A subagent's
+    // start never restarts its count: the host also sends it when a subagent with its context resumes
+    const startReason =
+      name === "SubagentStart"
+        ? "subagent"
+        : input.source && START_SOURCES.has(input.source)
+          ? input.source
+          : null;
     const make = async (): Promise<Plan> =>
       event === "pre_edit"
         ? await beforeEdit(reader, pid, rels)
@@ -1401,35 +1426,30 @@ async function deliverOne(
             ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
               ? await beforeReview(reader, pid, place.root, call, known.reviewUntil)
-              : {
-                  ...(await atStart(reader, pid, branchOf(place.root), {
-                    file,
-                    key: place.key,
-                    host,
-                    subagent: name === "SubagentStart",
-                    // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
-                    // how it started, or a headless, SDK, or unknown one never traces on its own
-                    auto: newInteractive ? session : null,
-                    ...(skill ? { skill } : {}),
-                    // A subagent's start is never the owner's, even when the host leaves out its agent id
-                    owner:
-                      name !== "SubagentStart" &&
-                      isOwnerTurn(
-                        input,
-                        undefined,
-                        undefined,
-                        host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                      ),
-                  })),
-                  // The start source marks where reads count from, so it is logged even when the start delivered nothing. A subagent's
-                  // start never restarts its count: the host also sends it when a subagent with its context resumes
-                  reason:
-                    name === "SubagentStart"
-                      ? "subagent"
-                      : input.source && START_SOURCES.has(input.source)
-                        ? input.source
-                        : null,
-                };
+              : held
+                ? { ...HELD, reason: startReason }
+                : {
+                    ...(await atStart(reader, pid, branchOf(place.root), {
+                      file,
+                      key: place.key,
+                      host,
+                      subagent: name === "SubagentStart",
+                      // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
+                      // how it started, or a headless, SDK, or unknown one never traces on its own
+                      auto: newInteractive ? session : null,
+                      ...(skill ? { skill } : {}),
+                      // A subagent's start is never the owner's, even when the host leaves out its agent id
+                      owner:
+                        name !== "SubagentStart" &&
+                        isOwnerTurn(
+                          input,
+                          undefined,
+                          undefined,
+                          host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                        ),
+                    })),
+                    reason: startReason,
+                  };
     const entry: Entry = {
       projectId: pid,
       host,
