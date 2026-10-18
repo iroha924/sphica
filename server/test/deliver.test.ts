@@ -3710,3 +3710,37 @@ test("a run another agent started gets no session start or records for what it r
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("a run another agent started gets nothing at its start or on a read, even when the database is unavailable", async () => {
+  const repo = checkout();
+  const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+  try {
+    const missing = path.join(repo, "no-such.db");
+    const call = (session: string, input: Record<string, unknown>) =>
+      deliver({ session_id: session, cwd: repo, ...input }, "claude-code", missing);
+    const start = (session: string) => call(session, { hook_event_name: "SessionStart", source: "startup" });
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start(`held-${crypto.randomUUID()}`), "");
+    // An edit is still delivered in such a run, so it is still told when the records could not be checked
+    assert.match(
+      await call(`held-${crypto.randomUUID()}`, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      }),
+      /Sphica unavailable/,
+    );
+    // A person's session is told, as before
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(await start(`person-${crypto.randomUUID()}`), /Sphica unavailable/);
+  } finally {
+    for (const [k, v] of [
+      ["SPHICA_PARENT_SESSION", saved.parent],
+      ["CLAUDE_CODE_ENTRYPOINT", saved.entry],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

@@ -1486,6 +1486,8 @@ async function deliverOne(
     if (keep(plan)) await log(file, entry, plan).catch(() => {});
     return plan.text;
   } catch (e) {
+    // A held start or read shows nothing, not even that the records could not be checked
+    if (held) return "";
     // A database of another revision (a plugin update before init) is said on its own mark, so an earlier warning does not hide it, and on
     // the owner's prompt too, where a session already open when the plugin was updated first passes
     if (e instanceof RevisionMismatch)
