@@ -10,11 +10,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { extract } from "../evals/delivery/sample.ts";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import {
   AUTO_TRACE,
+  agentRun,
   CONFIRM,
   codexInteractive,
   deliver,
@@ -36,7 +38,7 @@ import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { hitsReply, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { codexLog } from "./codex-log-file.ts";
+import { childLog, codexLog } from "./codex-log-file.ts";
 import {
   aiDecided,
   at,
@@ -336,7 +338,7 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
-test("SubagentStart gives the subagent the session-start records and a search line, every time, without restarting its reads", async () => {
+test("SubagentStart and a Codex child thread's start give only the search line, every time, without restarting reads", async () => {
   const db = tempDb();
   const repo = checkout();
   try {
@@ -371,9 +373,7 @@ test("SubagentStart gives the subagent the session-start records and a search li
         ...(agent ? { agent_id: agent } : {}),
       });
     const first = await start();
-    assert.match(first, /Work: Rework CSV export/);
-    assert.match(first, /trace:ext-s1\/no-telemetry/);
-    assert.match(first, /search Sphica's past records/);
+    assert.equal(first, "Sphica: before choosing an approach, search Sphica's past records for it.");
     assert.match(await read("sub-1"), /trace:ext-s1\/sqlite/);
     // The host sends SubagentStart again when the subagent resumes with its context, so it says the set again but keeps the reads
     assert.equal(await start(), first);
@@ -386,6 +386,41 @@ test("SubagentStart gives the subagent the session-start records and a search li
         .all()
         .map((r) => `${r.agent_id ?? "main"}:${r.reason}`),
       ["sub-1:subagent", "sub-1:subagent", "main:resume"],
+    );
+    // A start the host sent without its agent id is a subagent's still, and the main conversation's start keeps its records
+    assert.equal(await at({ hook_event_name: "SubagentStart" }), first);
+    assert.match(
+      await at({ hook_event_name: "SessionStart", source: "startup", session_id: "other" }),
+      /trace:ext-s1\/no-telemetry/,
+    );
+    // A Codex child thread (the built-in review's) starts with the same line, logged under its own thread with its start source
+    const log = childLog("cx-subs", "cx-child");
+    try {
+      assert.equal(
+        await deliver(
+          {
+            hook_event_name: "SessionStart",
+            source: "startup",
+            session_id: "cx-subs",
+            cwd: repo,
+            transcript_path: log,
+          },
+          "codex",
+          db.file,
+        ),
+        first,
+      );
+    } finally {
+      fs.rmSync(path.dirname(log), { recursive: true, force: true });
+    }
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select d.agent_id, d.reason, d.outcome, d.chars, (select count(*) from delivery_unit x where x.delivery_id = d.id) as units from delivery d join session s on s.id = d.session_id where s.external_id = 'cx-subs'",
+        )
+        .all()
+        .map((r) => `${r.agent_id}:${r.reason}:${r.outcome}:${r.chars}:${r.units}`),
+      ["cx-child:startup:emitted:0:0"],
     );
   } finally {
     await db.done();
@@ -2427,6 +2462,55 @@ test("a Codex session is interactive only when its log's first line says the ter
   }
 });
 
+test("a run is another agent's only when it inherited a parent marker naming another session and the host shows no person runs it", () => {
+  const made: string[] = [];
+  const log = (...a: Parameters<typeof codexLog>) => {
+    const file = codexLog(...a);
+    made.push(path.dirname(file));
+    return file;
+  };
+  const child = () => {
+    const file = childLog("cx-1", "cx-child");
+    made.push(path.dirname(file));
+    return file;
+  };
+  const exec = { originator: "codex_exec", source: "exec" };
+  const codex = (transcript_path: string | undefined, env: NodeJS.ProcessEnv, session_id = "cx-1") =>
+    agentRun({ session_id, transcript_path }, "codex", env);
+  const claude = (env: NodeJS.ProcessEnv) => agentRun({ session_id: "cc-1" }, "claude-code", env);
+  try {
+    // Started from Claude Code's Bash (SPHICA_PARENT_SESSION) or from a Codex shell (CODEX_THREAD_ID): codex exec with a log, and
+    // --ephemeral, which names no log
+    for (const env of [{ SPHICA_PARENT_SESSION: "cc-parent" }, { CODEX_THREAD_ID: "cx-parent" }]) {
+      assert.equal(codex(log("cx-1", exec), env), true);
+      assert.equal(codex(undefined, env), true);
+      // A person's terminal through a background server that kept an agent's variables, a client not measured, a log that cannot be read,
+      // and a child thread of a logged run all stay a person's
+      assert.equal(codex(log("cx-1"), env), false);
+      assert.equal(codex(log("cx-1", { originator: "Codex Desktop" }), env), false);
+      assert.equal(codex(path.join(os.tmpdir(), "missing.jsonl"), env), false);
+      assert.equal(codex(child(), env), false);
+    }
+    // No marker, or one that names this session: the owner's own run, or an evaluation run with an allowlisted environment
+    assert.equal(codex(log("cx-1", exec), {}), false);
+    assert.equal(codex(undefined, {}), false);
+    assert.equal(codex(log("cx-1", exec), { SPHICA_PARENT_SESSION: "cx-1" }), false);
+    assert.equal(codex(log("cx-1", exec), { CODEX_THREAD_ID: "cx-1" }), false);
+    assert.equal(codex(undefined, { SPHICA_PARENT_SESSION: "cc-parent" }, ""), false, "no session id");
+    // Claude Code: claude -p from Bash says sdk-cli; an SDK run that inherited cli cannot be told from a person's
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), true);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-ts" }), true);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "cli" }), false);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent" }), false);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-1", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
+    assert.equal(claude({ CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
+    // CODEX_THREAD_ID is Codex's own: a Claude Code run that inherited it from a Codex shell is judged by its own marker
+    assert.equal(claude({ CODEX_THREAD_ID: "cx-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
+  } finally {
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a path is named in a notice only as it is: within 1,000 bytes and without a control character or a backtick", () => {
   const spaced = path.join(os.tmpdir(), "my plugins", 'it\'s "here"', "SKILL.md");
   assert.equal(namable(spaced), spaced);
@@ -3475,6 +3559,188 @@ test("dead ends shown without a stop spend the read budget's characters as they 
     );
   } finally {
     await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a run another agent started gets no session start or records for what it reads, and still stops on a dead end and gets edits", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+  const made: string[] = [];
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file. No telemetry." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+        { ...decided("no-telemetry", m, "No telemetry."), kind: "constraint", stance: "dont" },
+      ],
+    });
+    await deadEnds(db, p, 1);
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
+    const call = (
+      session: string,
+      input: Record<string, unknown>,
+      host: "claude-code" | "codex" = "claude-code",
+    ) => respond({ session_id: session, cwd: repo, ...input }, host, db.file);
+    const start = (session: string, source: string, extra: Record<string, unknown> = {}, host?: "codex") =>
+      call(session, { hook_event_name: "SessionStart", source, ...extra }, host);
+    const read = (session: string) =>
+      call(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      });
+    const edit = (session: string) =>
+      call(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      });
+    const rows = (session: string) =>
+      db.owner
+        .prepare(
+          "select d.event, d.outcome, d.reason, (select count(*) from delivery_unit x where x.delivery_id = d.id) as units from delivery d join session s on s.id = d.session_id where s.external_id = ? order by d.id",
+        )
+        .all(session)
+        .map((r) => `${r.event}:${r.outcome}:${r.reason}:${r.units}`);
+
+    // claude -p started from Claude Code's Bash
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start("child", "startup"), "");
+    assert.equal(await read("child"), "");
+    assert.equal(
+      await shellCall(db, repo, "child", "cat src/db.ts"),
+      "",
+      "a path the command names is a read too",
+    );
+    assert.ok(
+      stopText(await shellCall(db, repo, "child", "npm run thumbs --worker")),
+      "a dead end still stops",
+    );
+    assert.equal(
+      await shellCall(db, repo, "child", "npm run thumbs --worker"),
+      "",
+      "run again, it goes through",
+    );
+    // A compaction still marks where the run's stops count from, so the same dead end stops once more after it
+    assert.equal(await start("child", "compact"), "");
+    assert.ok(
+      stopText(await shellCall(db, repo, "child", "npm run thumbs --worker")),
+      "stopped again after the compaction",
+    );
+    assert.match(String(await edit("child")), /trace:ext-s1\/sqlite/);
+    assert.deepEqual(rows("child"), [
+      "session_start:suppressed:startup:0",
+      "pre_read:emitted:command:1",
+      "session_start:suppressed:compact:0",
+      "pre_read:emitted:command:1",
+      "pre_edit:emitted:null:1",
+    ]);
+    // A held start is not a delivered one: a resume of the run holds back again rather than counting as already told
+    assert.equal(await start("child", "resume"), "");
+    // A headless run another agent resumes from a session a person started is held back and logged, though that session's start was delivered
+    process.env.SPHICA_PARENT_SESSION = "resumed";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(String(await start("resumed-later", "startup")), /Rework CSV export/);
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start("resumed-later", "resume"), "");
+    assert.deepEqual(rows("resumed-later"), [
+      "session_start:emitted:startup:1",
+      "session_start:suppressed:resume:0",
+    ]);
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    // A held start has no record, so the delivery sample never draws it
+    const held = db.owner
+      .prepare("select count(*) as n from delivery where outcome = 'suppressed'")
+      .get() as { n: number };
+    assert.equal(Number(held.n), 4);
+    assert.equal(
+      (
+        await extract(db.reader, p, { from: "2000-01-01T00:00:00.000Z", to: "2100-01-01T00:00:00.000Z" })
+      ).filter(
+        ([d]) =>
+          db.owner.prepare("select outcome from delivery where id = ?").get(d)?.outcome === "suppressed",
+      ).length,
+      0,
+    );
+
+    // The same marker without a headless entrypoint is a person's, as is a marker that names the session itself
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(String(await start("person", "startup")), /Rework CSV export/);
+    assert.match(String(await read("person")), /trace:ext-s1\/sqlite/);
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    process.env.SPHICA_PARENT_SESSION = "self";
+    assert.match(String(await start("self", "startup")), /Rework CSV export/);
+
+    // Codex: codex exec --ephemeral names no log; a terminal session through a server that kept the marker names its own
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    assert.equal(await start("cx-exec", "startup", {}, "codex"), "");
+    const tui = codexLog("cx-tui");
+    made.push(path.dirname(tui));
+    assert.match(
+      String(await start("cx-tui", "startup", { transcript_path: tui }, "codex")),
+      /Rework CSV export/,
+    );
+    assert.deepEqual(rows("cx-exec"), ["session_start:suppressed:startup:0"]);
+  } finally {
+    for (const [k, v] of [
+      ["SPHICA_PARENT_SESSION", saved.parent],
+      ["CLAUDE_CODE_ENTRYPOINT", saved.entry],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a run another agent started gets nothing at its start or on a read, even when the database is unavailable", async () => {
+  const repo = checkout();
+  const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+  try {
+    const missing = path.join(repo, "no-such.db");
+    const call = (session: string, input: Record<string, unknown>) =>
+      deliver({ session_id: session, cwd: repo, ...input }, "claude-code", missing);
+    const start = (session: string) => call(session, { hook_event_name: "SessionStart", source: "startup" });
+    process.env.SPHICA_PARENT_SESSION = "parent";
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    assert.equal(await start(`held-${crypto.randomUUID()}`), "");
+    // An edit is still delivered in such a run, so it is still told when the records could not be checked
+    assert.match(
+      await call(`held-${crypto.randomUUID()}`, {
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      }),
+      /Sphica unavailable/,
+    );
+    // A person's session is told, as before
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    assert.match(await start(`person-${crypto.randomUUID()}`), /Sphica unavailable/);
+  } finally {
+    for (const [k, v] of [
+      ["SPHICA_PARENT_SESSION", saved.parent],
+      ["CLAUDE_CODE_ENTRYPOINT", saved.entry],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });

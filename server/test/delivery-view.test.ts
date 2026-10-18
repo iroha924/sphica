@@ -92,6 +92,8 @@ test("counts the project's logged rows in the period by event, outcome, and main
   delivery(db, s1, { at: ago(4), event: "session_start", reason: "subagent", units: [b] });
   delivery(db, s1, { at: ago(5), event: "session_start", reason: "startup", omitted: 2 });
   delivery(db, s1, { at: ago(6), event: "prompt", outcome: "nothing" });
+  // A run another agent started: its start is held back and logged with no record
+  delivery(db, s1, { at: ago(7), event: "session_start", reason: "startup", outcome: "suppressed" });
   // Outside the period: before it, at its end (the end is open), and another project's
   delivery(db, s1, { at: ago(24 * 7 + 1), units: [b] });
   delivery(db, s1, { at: iso(NOW), units: [b] });
@@ -105,6 +107,7 @@ test("counts the project's logged rows in the period by event, outcome, and main
     "| pre_read | emitted | 2 | 1 | 0 | 1 | 4 |",
     "| prompt | nothing | 1 | 0 | 0 | - | 0 |",
     "| session_start | emitted | 1 | 0 | 1 | 1 | 2 |",
+    "| session_start | suppressed | 1 | 0 | 0 | - | 0 |",
   ]);
   assert.ok(!out.includes("elsewhere"), out);
   // Versions before 0.6.16 logged empty reads and edits, so the limits say when that stopped

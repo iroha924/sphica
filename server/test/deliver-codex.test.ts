@@ -17,14 +17,14 @@ import { openRun } from "../src/trace.ts";
 import { childLog, codexLog } from "./codex-log-file.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
-const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+// Run from an agent's shell, these would make every hook call here look like that agent's run
+const ISOLATED = ["SPHICA_PARENT_SESSION", "CLAUDE_CODE_ENTRYPOINT", "CODEX_THREAD_ID"] as const;
+const saved = Object.fromEntries(ISOLATED.map((k) => [k, process.env[k]]));
 before(() => {
-  delete process.env.SPHICA_PARENT_SESSION;
-  delete process.env.CLAUDE_CODE_ENTRYPOINT;
+  for (const k of ISOLATED) delete process.env[k];
 });
 after(() => {
-  if (saved.parent !== undefined) process.env.SPHICA_PARENT_SESSION = saved.parent;
-  if (saved.entry !== undefined) process.env.CLAUDE_CODE_ENTRYPOINT = saved.entry;
+  for (const k of ISOLATED) if (saved[k] !== undefined) process.env[k] = saved[k];
 });
 
 function checkout(): string {

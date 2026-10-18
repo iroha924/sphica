@@ -46,7 +46,7 @@ export const DELIVERY_LIMITS_TEXT = [
   "Counted are the logged delivery rows only: since 0.6.16 a read or edit that showed nothing is not logged (older rows show it as nothing), and a delivery answered while the write lock was busy, or whose log write failed, is not either.",
   "A session's rows are dropped once its last delivery is older than 90 days, so a long period is not a rolling window.",
   "The text delivered then is not kept, only the record ids: a record shown now may have changed since.",
-  "Outcomes suppressed and unavailable are not written today, so only emitted and nothing appear.",
+  "suppressed is a session start held back for a run another agent started (claude -p or codex exec from an agent's shell): it shows nothing and keeps no record. The reads such a run held back are not logged. unavailable is not written yet.",
   "Rows without an agent id count as main, as the host reported them, except a subagent start logged without one: subagent, id unknown.",
   "named later: a captured reply of the same session, after the delivery, writes the key whole (questions asked with AskUserQuestion are not counted). An agent may use a record without naming it, naming it does not mean it helped, a reply may be missing, cut, or redacted in capture, and it may come from any agent of the session.",
 ];

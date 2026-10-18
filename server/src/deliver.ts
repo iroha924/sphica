@@ -2,7 +2,8 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
+// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints; a subagent or child
+// thread gets one line asking it to search, and a run another agent started gets nothing at its start or on its reads), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // A shell call that runs a dead end's command is stopped once per conversation, with the dead end as the reason. Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
@@ -14,7 +15,7 @@ import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
-import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
+import { branchOf, type HookInput, isOwnerTurn, readInput, startedByAgent } from "./capture.ts";
 import { childThread, codexThread, ownThread } from "./codex-log.ts";
 import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -73,8 +74,20 @@ const leftOut = (n: number) =>
   n > 0
     ? `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`
     : "";
-/** Sphica's own line for a subagent, which starts without the conversation where Sphica's tools were introduced. */
-const SEARCH_FIRST = "- Before choosing an approach, search Sphica's past records for it.";
+/**
+ * All a subagent or child thread is given at its start, in Sphica's own words: it starts without the conversation where Sphica's tools were
+ * introduced, and the work items and broad constraints shown there were seldom of use to it.
+ */
+const SEARCH_FIRST = "Sphica: before choosing an approach, search Sphica's past records for it.";
+const SUBAGENT_START: Plan = {
+  text: SEARCH_FIRST,
+  note: SEARCH_FIRST,
+  units: [],
+  eligible: 0,
+  omitted: 0,
+  path: null,
+  reason: null,
+};
 const workLeftOut = (n: number) =>
   n > 0
     ? `- ${n} more work item${n === 1 ? "" : "s"} not shown: Sphica's status lists the 5 most recently updated.`
@@ -300,6 +313,8 @@ type Plan = {
   reason: string | null;
   /** What a review delivery is told once per session for: the change it read, or its text when no change was read */
   once?: string;
+  /** Set when the call was held back on purpose rather than finding nothing */
+  outcome?: "suppressed";
 };
 
 const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
@@ -842,6 +857,18 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
+/** A held-back session start: nothing shown, logged as suppressed */
+const HELD: Plan = {
+  text: "",
+  note: "",
+  units: [],
+  eligible: 0,
+  omitted: 0,
+  path: null,
+  reason: null,
+  outcome: "suppressed",
+};
+
 /** How long after a Codex hook starts its review may go on reading the change, inside the 5 seconds Codex gives a tool hook */
 const REVIEW_MS = 3500;
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
@@ -862,6 +889,25 @@ export const AUTO_TRACE = (n: number, skill?: string) =>
 export function codexInteractive(input: Pick<HookInput, "session_id" | "transcript_path">): boolean {
   const thread = codexThread(input);
   return ownThread(input, thread) && thread?.originator === "codex-tui";
+}
+
+/**
+ * Whether a run another agent started from its shell made this call, and the host shows it is not a person's: Claude Code's headless and SDK
+ * entrypoints, or a Codex session log that says codex exec in the session's own thread. Codex names no log at all only for a thread without
+ * a rollout (--ephemeral) or when finding it failed; a log that is there but unreadable or names another client stays a person's.
+ */
+export function agentRun(
+  input: Pick<HookInput, "session_id" | "transcript_path">,
+  host: Host,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const codexParent = host === "codex" ? env.CODEX_THREAD_ID : undefined;
+  if (!input.session_id || !startedByAgent(input.session_id, env.SPHICA_PARENT_SESSION, codexParent))
+    return false;
+  if (host !== "codex") return Boolean(env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk-"));
+  if (typeof input.transcript_path !== "string") return true;
+  const thread = codexThread(input);
+  return ownThread(input, thread) && thread?.originator === "codex_exec";
 }
 
 /** A path the notice can name as it is, between backticks: nothing that would end them or break the notice's one line, and short enough to be read whole */
@@ -932,7 +978,6 @@ async function atStart(
     key: string;
     host: Host;
     owner: boolean;
-    subagent: boolean;
     auto: string | null;
     skill?: string;
   },
@@ -1000,7 +1045,6 @@ async function atStart(
       leftOut(broadLeft),
       workLeftOut(workLeft),
       await waiting(db, projectId, place),
-      place.subagent ? SEARCH_FIRST : "",
     ]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
@@ -1114,7 +1158,7 @@ async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
       session_id: id,
       agent_id: e.agent,
       event: e.event,
-      outcome: plan.text ? "emitted" : "nothing",
+      outcome: plan.outcome ?? (plan.text ? "emitted" : "nothing"),
       reason: plan.reason,
       path: plan.path,
       eligible: plan.eligible,
@@ -1311,6 +1355,9 @@ async function deliverOne(
     !call && SHELL_TOOLS.has(input.tool_name ?? "") && !patch && typeof ti.command === "string"
       ? ti.command
       : null;
+  // A run another agent started gets no session start and no records for what it reads; its shell calls still stop on a recorded dead end
+  const held = (event === "session_start" || event === "pre_read") && agentRun(input, host);
+  if (held && event === "pre_read" && !shell) return "";
   const targets = patch
     ? patchPaths(patch)
     : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
@@ -1336,11 +1383,12 @@ async function deliverOne(
     if (pid === null) return "";
     let ran: number[] = [];
     if (shell) {
-      rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
+      rels = held ? [] : await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       ran = await commandsRun(db, pid, shell);
       if (!rels.length && !ran.length) return "";
     }
-    if (event === "session_start" && input.source === "resume") {
+    // A held resume is logged even after a delivered start, so a run another agent resumes is still counted
+    if (event === "session_start" && input.source === "resume" && !held) {
       const said = await db
         .selectFrom("delivery")
         .select("id")
@@ -1366,6 +1414,14 @@ async function deliverOne(
     const skill = asksToTrace && host === "codex" && codexInteractive(input) ? traceSkill() : null;
     const newInteractive =
       asksToTrace && (host === "claude-code" ? process.env.CLAUDE_CODE_ENTRYPOINT === "cli" : skill !== null);
+    // The start source marks where reads count from, so it is logged even when the start delivered nothing or was held back. A subagent's
+    // start never restarts its count: the host also sends it when a subagent with its context resumes
+    const startReason =
+      name === "SubagentStart"
+        ? "subagent"
+        : input.source && START_SOURCES.has(input.source)
+          ? input.source
+          : null;
     const make = async (): Promise<Plan> =>
       event === "pre_edit"
         ? await beforeEdit(reader, pid, rels)
@@ -1382,35 +1438,28 @@ async function deliverOne(
             ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
               ? await beforeReview(reader, pid, place.root, call, known.reviewUntil)
-              : {
-                  ...(await atStart(reader, pid, branchOf(place.root), {
-                    file,
-                    key: place.key,
-                    host,
-                    subagent: name === "SubagentStart",
-                    // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
-                    // how it started, or a headless, SDK, or unknown one never traces on its own
-                    auto: newInteractive ? session : null,
-                    ...(skill ? { skill } : {}),
-                    // A subagent's start is never the owner's, even when the host leaves out its agent id
-                    owner:
-                      name !== "SubagentStart" &&
-                      isOwnerTurn(
-                        input,
-                        undefined,
-                        undefined,
-                        host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                      ),
-                  })),
-                  // The start source marks where reads count from, so it is logged even when the start delivered nothing. A subagent's
-                  // start never restarts its count: the host also sends it when a subagent with its context resumes
-                  reason:
-                    name === "SubagentStart"
-                      ? "subagent"
-                      : input.source && START_SOURCES.has(input.source)
-                        ? input.source
-                        : null,
-                };
+              : held
+                ? { ...HELD, reason: startReason }
+                : name === "SubagentStart" || who !== null
+                  ? { ...SUBAGENT_START, reason: startReason }
+                  : {
+                      ...(await atStart(reader, pid, branchOf(place.root), {
+                        file,
+                        key: place.key,
+                        host,
+                        // Only a new interactive session: a resumed one (even when it compacts later), a start that does not say
+                        // how it started, or a headless, SDK, or unknown one never traces on its own
+                        auto: newInteractive ? session : null,
+                        ...(skill ? { skill } : {}),
+                        owner: isOwnerTurn(
+                          input,
+                          undefined,
+                          undefined,
+                          host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                        ),
+                      })),
+                      reason: startReason,
+                    };
     const entry: Entry = {
       projectId: pid,
       host,
@@ -1437,6 +1486,8 @@ async function deliverOne(
     if (keep(plan)) await log(file, entry, plan).catch(() => {});
     return plan.text;
   } catch (e) {
+    // A held start or read shows nothing, not even that the records could not be checked
+    if (held) return "";
     // A database of another revision (a plugin update before init) is said on its own mark, so an earlier warning does not hide it, and on
     // the owner's prompt too, where a session already open when the plugin was updated first passes
     if (e instanceof RevisionMismatch)

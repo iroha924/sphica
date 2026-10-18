@@ -384,7 +384,7 @@ async function sheetEntry(
   return lines.join("\n");
 }
 
-function walk(dir: string): string[] {
+export function walk(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(dir, e.name);

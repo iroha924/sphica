@@ -40,6 +40,10 @@ delete parentEnv.SPHICA_DB;
 delete parentEnv.SPHICA_HOME;
 // doctor would start the Codex under the parent's CODEX_HOME, which writes there
 delete parentEnv.CODEX_HOME;
+// A runner started from an agent's shell would make the hook take this check for that agent's run and hold back its delivery
+delete parentEnv.SPHICA_PARENT_SESSION;
+delete parentEnv.CODEX_THREAD_ID;
+delete parentEnv.CLAUDE_CODE_ENTRYPOINT;
 // init reads the signed-in account through gh: a fake gh first on PATH answers, so the runner's gh never reaches api.github.com
 const bin = path.join(home, "fake-gh");
 fs.mkdirSync(bin);
@@ -298,9 +302,10 @@ try {
         }),
       }) || "{}",
     ).hookSpecificOutput;
+    // The whole reply, so a stale bundle that still adds the session-start set to the line does not pass
     if (
       sub?.hookEventName !== "SubagentStart" ||
-      !sub.additionalContext?.includes("search Sphica's past records")
+      sub.additionalContext !== "Sphica: before choosing an approach, search Sphica's past records for it."
     )
       throw new Error(
         `the delivery hook did not answer SubagentStart with the search line\n${JSON.stringify(sub)}`,

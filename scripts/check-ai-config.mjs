@@ -323,7 +323,7 @@ try {
       { hooks: [hook("capture", { timeout: 10 })] },
       { hooks: [hook("deliver", { timeout: 5 })] },
     ],
-    // A subagent starts without the main conversation's context, so it gets the session-start records too
+    // A subagent starts without the main conversation's context, so it is told to search Sphica's records first
     SubagentStart: [{ hooks: [hook("deliver", { timeout: 5 })] }],
     // Turn start and end are synchronous so the working tree is read before the model works and right as the turn ends. The timeout
     // leaves room for the git calls that find the project before the prompt is queued (5 seconds each at most)

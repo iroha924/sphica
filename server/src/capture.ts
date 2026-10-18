@@ -239,6 +239,13 @@ export type HookInput = {
   tool_response?: unknown;
 };
 
+/**
+ * Whether an agent started this process from its shell: it inherited a parent's marker that names another session. A child started from a
+ * Codex shell inherits the parent's CODEX_THREAD_ID, while the hook input carries the child's own session id.
+ */
+export const startedByAgent = (session: string, parent?: string, codexParent?: string): boolean =>
+  Boolean(codexParent && codexParent !== session) || Boolean(parent && parent !== session);
+
 /** Whether this is your turn. Drops subagents, children started by agents, and headless and Agent SDK runs. */
 export function isOwnerTurn(
   input: HookInput,
@@ -247,12 +254,9 @@ export function isOwnerTurn(
   codexParent?: string,
 ): boolean {
   if (!input.session_id || input.agent_id) return false;
-  // A child started from a Codex shell inherits the parent's CODEX_THREAD_ID, while the hook input carries the child's own session id.
-  if (codexParent && codexParent !== input.session_id) return false;
   // The SDK sets sdk-* only when the entrypoint is unset, so a matching marker with it is an SDK process that inherited the env file.
   if (entrypoint?.startsWith("sdk-")) return false;
-  if (parent) return parent === input.session_id;
-  return true;
+  return !startedByAgent(input.session_id, parent, codexParent);
 }
 
 /**

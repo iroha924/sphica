@@ -1,0 +1,741 @@
+{
+  "note": "Pairs of the #346 labelled sample the #353 change would drop, by a proxy: a Codex session whose log says codex_exec or that left no log stands for a run another agent started, and a subagent's start for a subagent's start. The shipped condition also needs the parent marker in the hook's environment, which no log keeps, so these counts are not what the change drops. The bar was fixed in the plan after the sample's breakdown by recipient was published on #353, so this is an exploratory call.",
+  "baseline": "server/evals/delivery/precision-baseline.json",
+  "extracted_at": "2026-10-18T03:37:04.846Z",
+  "blocks": {
+    "agent-run": {
+      "useful": 0,
+      "irrelevant": 17,
+      "unknown": 22,
+      "verdict": "adopted"
+    },
+    "subagent-start": {
+      "useful": 0,
+      "irrelevant": 5,
+      "unknown": 2,
+      "verdict": "adopted"
+    }
+  },
+  "pairs": [
+    {
+      "n": 1,
+      "delivery": 10213,
+      "unit": 189,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 2,
+      "delivery": 11889,
+      "unit": 450,
+      "event": "pre_edit",
+      "reason": "shell_write",
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 3,
+      "delivery": 13260,
+      "unit": 384,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 4,
+      "delivery": 10417,
+      "unit": 441,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 5,
+      "delivery": 9898,
+      "unit": 20,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 6,
+      "delivery": 12954,
+      "unit": 141,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 7,
+      "delivery": 13074,
+      "unit": 9,
+      "event": "review",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "useful"
+    },
+    {
+      "n": 8,
+      "delivery": 9481,
+      "unit": 140,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 9,
+      "delivery": 12766,
+      "unit": 232,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 10,
+      "delivery": 12039,
+      "unit": 543,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 11,
+      "delivery": 10911,
+      "unit": 258,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 12,
+      "delivery": 10016,
+      "unit": 428,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 13,
+      "delivery": 10133,
+      "unit": 68,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 14,
+      "delivery": 10064,
+      "unit": 223,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 15,
+      "delivery": 12131,
+      "unit": 290,
+      "event": "pre_edit",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 16,
+      "delivery": 9383,
+      "unit": 231,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 17,
+      "delivery": 9200,
+      "unit": 238,
+      "event": "session_start",
+      "reason": "compact",
+      "recipient": "claude-main",
+      "settled": "useful"
+    },
+    {
+      "n": 18,
+      "delivery": 9503,
+      "unit": 428,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 19,
+      "delivery": 11115,
+      "unit": 441,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 20,
+      "delivery": 12063,
+      "unit": 300,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 21,
+      "delivery": 11214,
+      "unit": 236,
+      "event": "pre_edit",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "unknown"
+    },
+    {
+      "n": 22,
+      "delivery": 13183,
+      "unit": 600,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 23,
+      "delivery": 12947,
+      "unit": 599,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 24,
+      "delivery": 10796,
+      "unit": 196,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 25,
+      "delivery": 10315,
+      "unit": 230,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 26,
+      "delivery": 11694,
+      "unit": 157,
+      "event": "pre_edit",
+      "reason": "shell_write",
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 27,
+      "delivery": 9820,
+      "unit": 329,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "unknown"
+    },
+    {
+      "n": 28,
+      "delivery": 10631,
+      "unit": 295,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 29,
+      "delivery": 9383,
+      "unit": 339,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 30,
+      "delivery": 10312,
+      "unit": 237,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 31,
+      "delivery": 11298,
+      "unit": 40,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 32,
+      "delivery": 11409,
+      "unit": 229,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 33,
+      "delivery": 11343,
+      "unit": 492,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 34,
+      "delivery": 13168,
+      "unit": 450,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 35,
+      "delivery": 11008,
+      "unit": 386,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 36,
+      "delivery": 10388,
+      "unit": 428,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 37,
+      "delivery": 12113,
+      "unit": 361,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 38,
+      "delivery": 12272,
+      "unit": 258,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 39,
+      "delivery": 9317,
+      "unit": 258,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 40,
+      "delivery": 10194,
+      "unit": 430,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 41,
+      "delivery": 11159,
+      "unit": 492,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-exec",
+      "settled": "unknown"
+    },
+    {
+      "n": 42,
+      "delivery": 11912,
+      "unit": 42,
+      "event": "pre_edit",
+      "reason": "shell_write",
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 43,
+      "delivery": 13434,
+      "unit": 536,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "useful"
+    },
+    {
+      "n": 44,
+      "delivery": 10492,
+      "unit": 428,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 45,
+      "delivery": 13253,
+      "unit": 25,
+      "event": "review",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 46,
+      "delivery": 9821,
+      "unit": 20,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 47,
+      "delivery": 11410,
+      "unit": 275,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "useful"
+    },
+    {
+      "n": 48,
+      "delivery": 12870,
+      "unit": 600,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-tui",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 49,
+      "delivery": 11034,
+      "unit": 196,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 50,
+      "delivery": 9350,
+      "unit": 339,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 51,
+      "delivery": 9201,
+      "unit": 317,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 52,
+      "delivery": 11010,
+      "unit": 386,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "useful"
+    },
+    {
+      "n": 53,
+      "delivery": 12977,
+      "unit": 141,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 54,
+      "delivery": 12924,
+      "unit": 600,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 55,
+      "delivery": 10407,
+      "unit": 191,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 56,
+      "delivery": 10497,
+      "unit": 273,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "useful"
+    },
+    {
+      "n": 57,
+      "delivery": 9391,
+      "unit": 137,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "unknown"
+    },
+    {
+      "n": 58,
+      "delivery": 12036,
+      "unit": 186,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 59,
+      "delivery": 12883,
+      "unit": 600,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 60,
+      "delivery": 9351,
+      "unit": 280,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 61,
+      "delivery": 9350,
+      "unit": 341,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 62,
+      "delivery": 13227,
+      "unit": 339,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 63,
+      "delivery": 12356,
+      "unit": 157,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "useful"
+    },
+    {
+      "n": 64,
+      "delivery": 10212,
+      "unit": 20,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 65,
+      "delivery": 13402,
+      "unit": 135,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 66,
+      "delivery": 9206,
+      "unit": 393,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "useful"
+    },
+    {
+      "n": 67,
+      "delivery": 10670,
+      "unit": 441,
+      "event": "session_start",
+      "reason": "subagent",
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 68,
+      "delivery": 10834,
+      "unit": 223,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "unknown"
+    },
+    {
+      "n": 69,
+      "delivery": 13496,
+      "unit": 99,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "useful"
+    },
+    {
+      "n": 70,
+      "delivery": 10503,
+      "unit": 59,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 71,
+      "delivery": 11034,
+      "unit": 157,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-no-log",
+      "settled": "unknown"
+    },
+    {
+      "n": 72,
+      "delivery": 9521,
+      "unit": 428,
+      "event": "session_start",
+      "reason": "startup",
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 73,
+      "delivery": 10847,
+      "unit": 189,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 74,
+      "delivery": 12841,
+      "unit": 386,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 75,
+      "delivery": 12063,
+      "unit": 516,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 76,
+      "delivery": 11908,
+      "unit": 135,
+      "event": "pre_edit",
+      "reason": "shell_write",
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 77,
+      "delivery": 11620,
+      "unit": 189,
+      "event": "prompt",
+      "reason": null,
+      "recipient": "claude-main",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 78,
+      "delivery": 11271,
+      "unit": 68,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 79,
+      "delivery": 10844,
+      "unit": 189,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "claude-subagent",
+      "settled": "irrelevant"
+    },
+    {
+      "n": 80,
+      "delivery": 9599,
+      "unit": 231,
+      "event": "pre_read",
+      "reason": null,
+      "recipient": "codex-exec",
+      "settled": "unknown"
+    }
+  ]
+}

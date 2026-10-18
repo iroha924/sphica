@@ -154,8 +154,12 @@ test("a typed or model-called review gets the decisions its change touches, with
     process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
     try {
       assert.match(await w.typed("review"), /trace:ext-s1\/sqlite/);
+      // A run another agent started gets no session start or reads, but a review still gets its decisions
+      process.env.SPHICA_PARENT_SESSION = "another-session";
+      assert.match(await w.typed("review"), /trace:ext-s1\/sqlite/);
     } finally {
       delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      delete process.env.SPHICA_PARENT_SESSION;
     }
   } finally {
     await w.done();
