@@ -1262,6 +1262,9 @@ test("the script takes the labels once, then gives the same result again from th
       run("--decide", "--baseline", out, "--frozen", frozen, "--labels", labelsFile).stderr,
       /already holds labels/,
     );
+    fs.writeFileSync(out, JSON.stringify({ ...decided, time: { ...decided.time, span_seconds_merged: 0 } }));
+    const retimed = run("--decide", "--baseline", out, "--frozen", frozen);
+    assert.notEqual(retimed.status, 0, "the published times must come out of the frozen inputs too");
     fs.writeFileSync(out, JSON.stringify({ ...decided, result: { ...decided.result, actions: [] } }));
     const tampered = run("--decide", "--baseline", out, "--frozen", frozen);
     assert.notEqual(tampered.status, 0);
@@ -1331,4 +1334,26 @@ test("the sheet keeps the end of a long message before an adoption, and cuts the
   } finally {
     await db.done();
   }
+});
+
+test("a response whose last line lost its usage is a gap, not the counts an earlier line held", () => {
+  const dirs = logsDir();
+  try {
+    const last = said("m1", t(2));
+    fs.writeFileSync(path.join(dirs.claude, "lost.jsonl"), jsonl([spent("m1", t(1), 3), last]));
+    const log = readClaude(dirs.claude, "lost.jsonl");
+    assert.deepEqual([log.responses[0]?.usage, log.responses[0]?.gap], [null, "no usage"]);
+  } finally {
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+test("a settled label must be the owner's where the owner labelled the row", () => {
+  const f = labelled(2, []);
+  const owned = structuredClone(f.labels);
+  (owned.sample[0] as Rec).owner = label("correct", "useful");
+  (owned.sample[0] as Rec).settled = label("wrong", "not-needed");
+  assert.throws(() => checkLabels(owned, f.drawn), /sample 1: settled is not the owner's label/);
+  (owned.sample[0] as Rec).settled = label("correct", "useful");
+  checkLabels(owned, f.drawn);
 });

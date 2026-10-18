@@ -162,9 +162,11 @@ export function readClaude(dir: string, file: string): Log {
           u.cache_read_input_tokens ?? 0,
           u.output_tokens,
         ].map(count);
-      if (key === null) response.gap = "no message.id or requestId";
-      else if (!counts || counts.some((c) => c === null)) response.gap = "no usage";
-      else {
+      // A last line without counts leaves the earlier ones stale, so the response becomes a gap
+      if (key === null || !counts || counts.some((c) => c === null)) {
+        response.usage = null;
+        response.gap = key === null ? "no message.id or requestId" : "no usage";
+      } else {
         const [input, cacheCreation, cacheRead, output] = counts as number[];
         response.usage = {
           model: String(message.model ?? ""),
@@ -1115,11 +1117,19 @@ export function checkLabels(
   ] as const)
     for (const l of list) {
       for (const who of ["claude", "codex", "settled"] as const) record(l[who], `${name} ${l.n} ${who}`);
-      if (l.owner !== null) record(l.owner, `${name} ${l.n} owner`);
+      if (l.owner !== null) {
+        record(l.owner, `${name} ${l.n} owner`);
+        if (l.owner.correctness !== l.settled.correctness || l.owner.value !== l.settled.value)
+          throw new Error(`${name} ${l.n}: settled is not the owner's label`);
+      }
     }
   for (const l of labels.audit) {
     for (const who of ["claude", "codex", "settled"] as const) audit(l[who], `audit ${l.n} ${who}`);
-    if (l.owner !== null) audit(l.owner, `audit ${l.n} owner`);
+    if (l.owner !== null) {
+      audit(l.owner, `audit ${l.n} owner`);
+      if (l.owner.verdict !== l.settled.verdict)
+        throw new Error(`audit ${l.n}: settled is not the owner's label`);
+    }
   }
 }
 
@@ -1410,15 +1420,21 @@ async function decideBars(values: Record<string, string | undefined>): Promise<v
   const { responses, spans } = attribute(baseline.population, logs, labels.owner_work);
   const hosts = shares(responses);
   const result = decide(labels, drawn, baseline.population, hosts);
+  const usage = { rule: USAGE_RULE, hosts, spans, responses };
+  const time = times(baseline.population, spans);
   if (baseline.result) {
-    if (JSON.stringify(baseline.result) !== JSON.stringify(result))
+    // Every published number is checked, not only the verdict built from them
+    if (
+      JSON.stringify([baseline.result, baseline.usage, baseline.time]) !==
+      JSON.stringify([result, usage, time])
+    )
       throw new Error("the frozen inputs and labels no longer give the baseline's result");
     console.log("the frozen inputs and labels give the baseline's result again");
     return;
   }
   baseline.labels = labels;
-  baseline.usage = { rule: USAGE_RULE, hosts, spans, responses };
-  baseline.time = times(baseline.population, spans);
+  baseline.usage = usage;
+  baseline.time = time;
   baseline.result = result;
   fs.writeFileSync(file, `${JSON.stringify(baseline, null, 2)}\n`);
   console.log(JSON.stringify(result, null, 2));

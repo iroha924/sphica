@@ -130,6 +130,16 @@ base: main
   - コミット: `test(eval): record the #259 automatic trace baseline and its verdict (T06)`
   - 結果: Claude と Codex が 40 件・追加 5 件・監査 65 行を別々にラベルし、抜き取りの 33 件が一致、監査は 63 行が一致。持ち主が食い違いと問題ありの行（S4・S12・S14・S18・S24・S25・S39・X42・A14・A65）をおすすめどおり確定し、40 件を確認した。`--decide --labels` → 役に立つ 31/40 pass、持ち主の採用の取り違え 1（A65）fail、空振りのトークンは undecided（Claude Code の output 0.085〜0.192、全トークン 0.257〜0.552）。持ち主の判断: 絞り込みの実験には今は進まない、取り違えは issue にする（#355）。`--decide --frozen --baseline`（ラベルなし）→ 同じ結果と報告して 0。`jq '[.labels.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq -c '.result.adoption.bar, .result.actions' server/evals/trace/auto-trace-baseline.json` → "fail" と次の手。#259 のコメントの URL は note にある
 
+- [x] T12: 最後の行に usage の無い応答を欠測にし、確定を持ち主のラベルに合わせ、出し直しでトークンと時間も比べる
+  - 種別: 修正
+  - 計画: S2, S4
+  - 依存: T06（直す対象の判定と baseline）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 最後の行に usage が無い応答が前の行の値で数えられ gap にならない、持ち主のラベルと違う settled が通る、トークンの合計を書き換えた baseline でも出し直しが同じと報告する、の 3 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。最後の行に usage が無ければ usage は null で gap、持ち主のラベルがある行は settled がそれと同じでないと拒む、出し直しは result・usage・time のどれかが違えば 0 以外で終わる。今の baseline で `--decide --frozen --baseline` が 0 で終わる
+  - コミット: `fix(eval): count a lost final usage as a gap, tie settled to owner labels, recheck usage (T12)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 3 件が落ちた（最後の行に usage が無い応答が output 3 のまま、持ち主と違う settled が通る、span_seconds_merged を 0 にした baseline でも出し直しが 0 で終わる）。直した後、同じコマンド → 24 件 pass。今の baseline で `--decide --frozen --baseline` → 同じと報告して 0。`bun run check` → 0
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
@@ -141,3 +151,4 @@ base: main
 - 2026-10-18 / T10 / T04 の Codex のレビューで P2 が 2 件（28 件の基準を件数の 7 割で出すので 40 件でない抜き取りでも pass が出る、再現あり。計画にある判定できない run の数が結果に無い）。どちらも採る / 修正タスク T10 を足し、T06 の依存を変えた。前: T04, T05、新: T04, T05, T10
 - 2026-10-18 / T11 / T03 の Codex のレビューで P2 が 1 件と P3 が 1 件（直前の発言を先頭 1500 バイトで切るので、採用の「1」が答えた末尾の選択肢が消える。前後 400 バイトで切るので UTF-8 の文字が壊れ、本番のシートで 6 か所 11 文字）。どちらも再現あり、採る。抜き取りの偏りや監査の行の過不足は無かった（本番で 40 件・追加 5 件・監査 65 行） / 修正タスク T11 を足し、T05 の依存を変えた。前: T02, T03, T09、新: T02, T03, T09, T11
 - 2026-10-18 / T06 / 完了条件の欄を変えた。前: `jq '[.sample[] | …]'`、新: `jq '[.labels.sample[] | …]'`。`jq -c '.verdict, .actions'` も結果の置き場に合わせて `.result` の下で確かめた / ラベルは labels の下、判定は result の下に置く作りにしたため
+- 2026-10-18 / T12 / 全差分の Codex のレビュー（high）で P2 が 3 件（応答の最後の行に usage が無いと前の行の値が残り gap にならない、settled が持ち主のラベルと食い違っても通る、出し直しが result だけを比べトークンと時間の書き換えを見逃す）。3 件とも再現あり、採る。今の baseline はどれにも当たらない（同じレビューで固定した入力と一致を確認） / 修正タスク T12 を足した
