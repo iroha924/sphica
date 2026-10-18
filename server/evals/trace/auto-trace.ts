@@ -1012,6 +1012,9 @@ export async function sheet(
   return out.join("\n");
 }
 
+/** Fixed with the owner before labelling: 40 records drawn, 70% of them is 28 */
+const SAMPLE_SIZE = 40;
+const USEFUL_NEED = 28;
 const CORRECTNESS = ["correct", "wrong", "unknown"] as const;
 const VALUE = ["useful", "not-needed", "unknown"] as const;
 const VERDICT = ["correct", "misattributed", "unknown"] as const;
@@ -1048,7 +1051,8 @@ export type Decision = {
     gaps: number;
     bar: "experiment" | "no experiment" | "undecided";
   };
-  runs: { total: number; saved: number; confirmed_useful: number; sampled: number };
+  /** undetermined: runs that saved records but no sampled record of theirs is confirmed useful */
+  runs: { total: number; saved: number; confirmed_useful: number; sampled: number; undetermined: number };
   actions: string[];
 };
 
@@ -1115,14 +1119,22 @@ export function decide(
   hosts: ReturnType<typeof shares>,
 ): Decision {
   const size = drawn.sample.length;
-  const need = Math.ceil(size * 0.7);
+  const need = USEFUL_NEED;
   const confirmed = labels.sample.filter(
     (l) => l.settled.correctness === "correct" && l.settled.value === "useful",
   );
   const possible = labels.sample.filter(
     (l) => l.settled.correctness !== "wrong" && l.settled.value !== "not-needed",
   );
-  const usefulBar: Bar = confirmed.length >= need ? "pass" : possible.length < need ? "fail" : "undecided";
+  // The bar was fixed for this sample size; any other sample leaves it to the owner
+  const usefulBar: Bar =
+    size !== SAMPLE_SIZE
+      ? "undecided"
+      : confirmed.length >= need
+        ? "pass"
+        : possible.length < need
+          ? "fail"
+          : "undecided";
   const route = new Map(drawn.audit.map((a) => [a.adoption, a.route]));
   const ownerRows = labels.audit.filter((l) => route.get(l.adoption) !== "agent");
   const agentRows = labels.audit.filter((l) => route.get(l.adoption) === "agent");
@@ -1145,6 +1157,8 @@ export function decide(
           ? "no experiment"
           : "undecided";
   const unitRun = new Map(population.runs.flatMap((r) => r.units.map((u) => [u, r.id])));
+  const saved = population.runs.filter((r) => r.units.length);
+  const useful = new Set(confirmed.map((l) => unitRun.get(l.unit)));
   const actions: string[] = [];
   if (usefulBar === "fail") actions.push("plan a fix of what the automatic trace extracts");
   if (adoptionBar === "fail") actions.push("file an issue for the misattributed owner adoptions");
@@ -1178,9 +1192,10 @@ export function decide(
     },
     runs: {
       total: population.runs.length,
-      saved: population.runs.filter((r) => r.units.length).length,
-      confirmed_useful: new Set(confirmed.map((l) => unitRun.get(l.unit))).size,
+      saved: saved.length,
+      confirmed_useful: useful.size,
       sampled: new Set(labels.sample.map((l) => unitRun.get(l.unit))).size,
+      undetermined: saved.filter((r) => !useful.has(r.id)).length,
     },
     actions,
   };

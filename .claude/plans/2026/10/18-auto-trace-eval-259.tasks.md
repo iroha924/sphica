@@ -88,6 +88,16 @@ base: main
   - コミット: `fix(eval): cut a span whose last response runs past the window's end (T09)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 始まり 00:00:19・最後の行 00:00:49 の m10 に窓の終わり 00:00:30 を当てると truncated が false で落ちた。直した後、同じコマンド → 20 件 pass（打ち切りで終わりは 00:00:30）。`bun run check` → 0
 
+- [x] T10: 役に立つ割合を 40 件の抜き取りのときだけ 28 件で判定し、判定できない run の数を結果に出す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す対象の判定）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 10 件の抜き取りで 7 件が useful だと pass になる、結果に判定できない run の数が無い、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。抜き取りが 40 件でなければ役に立つ割合は undecided、結果の runs に記録を残した run のうち確定した useful が抜き取りに無い run の数がある
+  - コミット: `fix(eval): judge the useful rate on 40 records only and count undetermined runs (T10)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 10 件の抜き取りで 7 件 useful が pass になり落ちた。直した後、同じコマンド → 21 件 pass（40 件でなければ undecided、runs に undetermined 1）。CLI のテストの 2 件の抜き取りは pass から undecided に直した。`bun run check` → 0
+
 ## P2: 測定と報告
 
 持ち主の DB と会話の記録で測り、ラベルを確定して判定し、結果を #259 に出す。
@@ -103,7 +113,7 @@ base: main
 - [ ] T06: Claude と Codex がラベルと監査を付け、持ち主が確定し、判定して #259 に書く
   - 種別: 追加
   - 計画: S5, S6
-  - 依存: T04（判定が要る）, T05（抜き取った 40 件と監査の一覧が要る）
+  - 依存: T04（判定が要る）, T05（抜き取った 40 件と監査の一覧が要る）, T10（直した判定が要る）
   - 変更: `server/evals/trace/auto-trace-baseline.json`
   - 完了条件: `jq '[.sample[] | select(.claude and .codex and .owner and .settled)] | length' server/evals/trace/auto-trace-baseline.json` → 40。`jq -c '.verdict, .actions' server/evals/trace/auto-trace-baseline.json` → 3 つの基準の判定と次の手が出る。#259 のコメント（文面は持ち主の承認の後）の URL が note にある
   - コミット: `test(eval): record the #259 automatic trace baseline and its verdict (T06)`
@@ -116,3 +126,4 @@ base: main
 - 2026-10-18 / T07 / T07 の Codex のレビューで P2 が 1 件（--root の外にある worktree からの呼び出しが外れる。合成したログで再現）。断る: 同じレビューで実ログの自動の呼び出し 147 件は全部残り、外の worktree からの自動の呼び出しは 1 件も無かった。T05 で --root で外れた自動の呼び出しの数を数え、0 でなければ直す / 記録だけ残した
 - 2026-10-18 / T09 / T08 の Codex のレビューで P2 が 1 件（始まりが窓の中で最後の行が窓の後の応答だと、打ち切りにならず窓の外の時間が入る。実ログに窓を当てて再現、計画の窓では観測なし）。採る: 計画の決まり（窓の終わりで打ち切り）に反する / 修正タスク T09 を足した。T03 と T08 のレビューは依頼文の SHA が空になり 2 件とも HEAD を見ていたので、T03 を SHA を付けて頼み直した
 - 2026-10-18 / T05 / 依存の欄を変えた。前: T02, T03、新: T02, T03, T09 / 本番のデータは直した区間の決め方で数えるため
+- 2026-10-18 / T10 / T04 の Codex のレビューで P2 が 2 件（28 件の基準を件数の 7 割で出すので 40 件でない抜き取りでも pass が出る、再現あり。計画にある判定できない run の数が結果に無い）。どちらも採る / 修正タスク T10 を足し、T06 の依存を変えた。前: T04, T05、新: T04, T05, T10

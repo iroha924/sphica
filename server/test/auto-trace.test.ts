@@ -1249,7 +1249,7 @@ test("the script takes the labels once, then gives the same result again from th
     const first = run("--decide", "--baseline", out, "--frozen", frozen, "--labels", labelsFile);
     assert.equal(first.status, 0, first.stderr);
     const decided = JSON.parse(fs.readFileSync(out, "utf8"));
-    assert.equal(decided.result.useful.bar, "pass");
+    assert.equal(decided.result.useful.bar, "undecided", "a sample of 2 is not the 40 the bar was fixed for");
     assert.equal(
       decided.result.empty.bar,
       "undecided",
@@ -1271,4 +1271,32 @@ test("the script takes the labels once, then gives the same result again from th
     await db.done();
     fs.rmSync(dirs.root, { recursive: true, force: true });
   }
+});
+
+test("the useful bar is judged only on the 40 records fixed in the plan, and the runs it leaves undetermined are counted", () => {
+  const ten = labelled(
+    10,
+    Array.from({ length: 7 }, () => ["correct", "useful"] as [string, string]),
+  );
+  assert.equal(decide(ten.labels, ten.drawn, ten.population, hostsAt(0.1, 0.2)).useful.bar, "undecided");
+  const f = labelled(
+    40,
+    Array.from({ length: 28 }, () => ["correct", "useful"] as [string, string]),
+  );
+  const population = spanPopulation(
+    [],
+    [
+      [1, "dA", f.drawn.sample.slice(0, 20).map((d) => d.unit)],
+      [2, "dB", f.drawn.sample.slice(20).map((d) => d.unit)],
+      [3, "dC", [999]],
+      [4, "dD", []],
+    ],
+  );
+  assert.deepEqual(decide(f.labels, f.drawn, population, hostsAt(0.1, 0.2)).runs, {
+    total: 4,
+    saved: 3,
+    confirmed_useful: 2,
+    sampled: 2,
+    undetermined: 1,
+  });
 });
