@@ -15,6 +15,7 @@ import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import {
   AUTO_TRACE,
+  agentRun,
   CONFIRM,
   codexInteractive,
   deliver,
@@ -36,7 +37,7 @@ import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { hitsReply, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { codexLog } from "./codex-log-file.ts";
+import { childLog, codexLog } from "./codex-log-file.ts";
 import {
   aiDecided,
   at,
@@ -2422,6 +2423,55 @@ test("a Codex session is interactive only when its log's first line says the ter
       fs.writeFileSync(file, text);
       assert.equal(says(file), false, text.slice(0, 40));
     }
+  } finally {
+    for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run is another agent's only when it inherited a parent marker naming another session and the host shows no person runs it", () => {
+  const made: string[] = [];
+  const log = (...a: Parameters<typeof codexLog>) => {
+    const file = codexLog(...a);
+    made.push(path.dirname(file));
+    return file;
+  };
+  const child = () => {
+    const file = childLog("cx-1", "cx-child");
+    made.push(path.dirname(file));
+    return file;
+  };
+  const exec = { originator: "codex_exec", source: "exec" };
+  const codex = (transcript_path: string | undefined, env: NodeJS.ProcessEnv, session_id = "cx-1") =>
+    agentRun({ session_id, transcript_path }, "codex", env);
+  const claude = (env: NodeJS.ProcessEnv) => agentRun({ session_id: "cc-1" }, "claude-code", env);
+  try {
+    // Started from Claude Code's Bash (SPHICA_PARENT_SESSION) or from a Codex shell (CODEX_THREAD_ID): codex exec with a log, and
+    // --ephemeral, which names no log
+    for (const env of [{ SPHICA_PARENT_SESSION: "cc-parent" }, { CODEX_THREAD_ID: "cx-parent" }]) {
+      assert.equal(codex(log("cx-1", exec), env), true);
+      assert.equal(codex(undefined, env), true);
+      // A person's terminal through a background server that kept an agent's variables, a client not measured, a log that cannot be read,
+      // and a child thread of a logged run all stay a person's
+      assert.equal(codex(log("cx-1"), env), false);
+      assert.equal(codex(log("cx-1", { originator: "Codex Desktop" }), env), false);
+      assert.equal(codex(path.join(os.tmpdir(), "missing.jsonl"), env), false);
+      assert.equal(codex(child(), env), false);
+    }
+    // No marker, or one that names this session: the owner's own run, or an evaluation run with an allowlisted environment
+    assert.equal(codex(log("cx-1", exec), {}), false);
+    assert.equal(codex(undefined, {}), false);
+    assert.equal(codex(log("cx-1", exec), { SPHICA_PARENT_SESSION: "cx-1" }), false);
+    assert.equal(codex(log("cx-1", exec), { CODEX_THREAD_ID: "cx-1" }), false);
+    assert.equal(codex(undefined, { SPHICA_PARENT_SESSION: "cc-parent" }, ""), false, "no session id");
+    // Claude Code: claude -p from Bash says sdk-cli; an SDK run that inherited cli cannot be told from a person's
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), true);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-ts" }), true);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent", CLAUDE_CODE_ENTRYPOINT: "cli" }), false);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-parent" }), false);
+    assert.equal(claude({ SPHICA_PARENT_SESSION: "cc-1", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
+    assert.equal(claude({ CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
+    // CODEX_THREAD_ID is Codex's own: a Claude Code run that inherited it from a Codex shell is judged by its own marker
+    assert.equal(claude({ CODEX_THREAD_ID: "cx-parent", CLAUDE_CODE_ENTRYPOINT: "sdk-cli" }), false);
   } finally {
     for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
   }

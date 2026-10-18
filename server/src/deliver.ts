@@ -14,7 +14,7 @@ import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
-import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
+import { branchOf, type HookInput, isOwnerTurn, readInput, startedByAgent } from "./capture.ts";
 import { childThread, codexThread, ownThread } from "./codex-log.ts";
 import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -862,6 +862,25 @@ export const AUTO_TRACE = (n: number, skill?: string) =>
 export function codexInteractive(input: Pick<HookInput, "session_id" | "transcript_path">): boolean {
   const thread = codexThread(input);
   return ownThread(input, thread) && thread?.originator === "codex-tui";
+}
+
+/**
+ * Whether a run another agent started from its shell made this call, and the host shows it is not a person's: Claude Code's headless and SDK
+ * entrypoints, or a Codex session log that says codex exec in the session's own thread. Codex names no log at all only for a thread without
+ * a rollout (--ephemeral) or when finding it failed; a log that is there but unreadable or names another client stays a person's.
+ */
+export function agentRun(
+  input: Pick<HookInput, "session_id" | "transcript_path">,
+  host: Host,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const codexParent = host === "codex" ? env.CODEX_THREAD_ID : undefined;
+  if (!input.session_id || !startedByAgent(input.session_id, env.SPHICA_PARENT_SESSION, codexParent))
+    return false;
+  if (host !== "codex") return Boolean(env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk-"));
+  if (typeof input.transcript_path !== "string") return true;
+  const thread = codexThread(input);
+  return ownThread(input, thread) && thread?.originator === "codex_exec";
 }
 
 /** A path the notice can name as it is, between backticks: nothing that would end them or break the notice's one line, and short enough to be read whole */

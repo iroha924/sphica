@@ -36,13 +36,14 @@ base: main
 
 エージェントが起動した非対話の実行を判定し、その開始と通常の読み取りを止め、サブエージェント・子スレッドの起動を検索の 1 行にする。
 
-- [ ] T02: 親の印の照合を切り出し、エージェントが起動した実行の判定を足す
+- [x] T02: 親の印の照合を切り出し、エージェントが起動した実行の判定を足す
   - 種別: 追加
   - 計画: S1
   - 依存: T01（実行の抑制の塊が採用されていないと判定を入れる理由が無い）
-  - 変更: `server/src/capture.ts`, `server/src/deliver.ts`, `server/test/capture.test.ts`, `server/test/deliver.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/capture.ts`, `server/src/deliver.ts`, `server/test/deliver.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/capture.test.ts test/deliver.test.ts` → 親の印なし / 一致 / 不一致、Codex の `codex_exec` / ログ無し / `codex-tui` / 読めないログ / 子スレッド、Claude の `sdk-cli` / `cli` で判定が表どおり。isOwnerTurn の既存のテストがそのまま通る。バージョンが 4 ファイルで同じ
   - コミット: `feat(deliver): tell runs another agent started from the owner's sessions`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/capture.test.ts test/deliver.test.ts` → tests 136 / pass 136 / fail 0（isOwnerTurn の既存のテストは無変更で通る）。`bun run check` → exit 0。4 ファイルの version が 0.6.61
 
 - [ ] T03: エージェントが起動した実行の開始を suppressed の行にし、通常の読み取り配信を止める
   - 種別: 変更
@@ -71,3 +72,5 @@ base: main
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
+- 2026-10-18 / T02 / 実装の前に (b) の前提を実測した（codex-cli 0.163.0、使い捨ての CODEX_HOME、入力を控える hook）: 永続の `codex exec` は transcript_path を渡しログの 1 行目は originator `codex_exec`・source `exec`、`--ephemeral` は transcript_path が null、どちらも子のフックに SPHICA_PARENT_SESSION が届き CLAUDE_CODE_ENTRYPOINT `cli` も受け継ぐ / (b) を予定どおり入れる
+- 2026-10-18 / T02 / startedByAgent は isOwnerTurn と agentRun のテストで通るので capture.test.ts は変えなかった / 変更欄から `server/test/capture.test.ts` を外した（前: capture.ts, deliver.ts, capture.test.ts, deliver.test.ts, 4 つのバージョンのファイル）
