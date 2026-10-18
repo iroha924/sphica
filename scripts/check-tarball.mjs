@@ -302,9 +302,10 @@ try {
         }),
       }) || "{}",
     ).hookSpecificOutput;
+    // The whole reply, so a stale bundle that still adds the session-start set to the line does not pass
     if (
       sub?.hookEventName !== "SubagentStart" ||
-      !sub.additionalContext?.includes("search Sphica's past records")
+      sub.additionalContext !== "Sphica: before choosing an approach, search Sphica's past records for it."
     )
       throw new Error(
         `the delivery hook did not answer SubagentStart with the search line\n${JSON.stringify(sub)}`,

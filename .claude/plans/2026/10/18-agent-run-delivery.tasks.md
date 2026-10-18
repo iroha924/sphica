@@ -116,6 +116,17 @@ base: main
   - 結果: red: `node --test test/agent-runs.test.ts` → pass 4 / fail 1（actual 'claude-main'、expected 'claude-subagent'）
   - 結果: `node --test test/agent-runs.test.ts` → pass 5 / fail 0。持ち主の DB から抽出し直した pairs と blocks は保存済みの JSON と同じ（標本にこの形の行は無い）ので JSON は変えない
 
+- [x] T10: tarball の検査で SubagentStart の返答全体を比べ、古いバンドルを通さない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（新しい起動の 1 行が要る）
+  - 変更: `scripts/check-tarball.mjs`
+  - red: `node scripts/check-tarball.mjs stale.tgz` → 直す前の検査は、0.6.60 の deliver.js を入れた tarball でも exit 0
+  - 完了条件: `node scripts/check-tarball.mjs stale.tgz` → 「did not answer SubagentStart with the search line」で exit 1。新しい tarball → 55 files の行で exit 0
+  - コミット: `fix(check): compare the whole SubagentStart reply in the tarball check`
+  - 結果: red: `node scripts/check-tarball.mjs stale.tgz` → 直す前の検査で exit 0
+  - 結果: `node scripts/check-tarball.mjs stale.tgz` → 「Error: the delivery hook did not answer SubagentStart with the search line」、exit 1。新しい tarball → 「tarball: 55 files matching the shipped list. ...」、exit 0
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）
