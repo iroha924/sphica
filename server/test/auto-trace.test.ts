@@ -15,12 +15,14 @@ import {
   differences,
   extract,
   type Population,
+  pin,
   readClaude,
   readCodex,
   readLogs,
   shares,
   times,
 } from "../evals/trace/auto-trace.ts";
+import { openReader } from "../src/db.ts";
 import { at, hash, insert, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const SCRIPT = path.join(import.meta.dirname, "..", "evals", "trace", "auto-trace.ts");
@@ -35,6 +37,7 @@ const jsonl = (rows: Line[]) => `${rows.map((r) => JSON.stringify(r)).join("\n")
 const said = (id: string, when: string, calls: { id: string; name: string; input: Line }[] = []): Line => ({
   type: "assistant",
   sessionId: "main",
+  cwd: "/r",
   timestamp: at(when),
   requestId: `req-${id}`,
   message: { id, content: calls.map((c) => ({ type: "tool_use", ...c })) },
@@ -126,6 +129,7 @@ function writeLogs(dirs: { claude: string; codex: string }) {
     path.join(dirs.codex, "2026", "10", "14", "rollout-a.jsonl"),
     jsonl([
       { type: "session_meta", payload: { id: "thread-1" } },
+      { type: "turn_context", payload: { cwd: "/r" } },
       {
         type: "response_item",
         payload: {
@@ -246,7 +250,7 @@ test("the population is the project's trace runs an automatic record_context nam
       logs.map((l) => l.file),
       ["main.jsonl", path.join("2026", "10", "14", "rollout-a.jsonl")],
     );
-    const pop = await extract(db.reader, KEY, WINDOW, logs);
+    const pop = await extract(db.reader, KEY, WINDOW, logs, "/r");
     assert.deepEqual(
       pop.runs.map((r) => [r.id, r.draft, r.target, r.callers, r.units]),
       [
@@ -280,17 +284,23 @@ test("the population is the project's trace runs an automatic record_context nam
       pop.spans.map((s) => [s.host, s.line, s.call]),
       [
         ["claude-code", 1, "p1"],
-        ["codex", 4, "e1"],
+        ["codex", 5, "e1"],
       ],
     );
-    const narrow = await extract(db.reader, KEY, { from: WINDOW.from, to: at("2026-10-10T00:00:00Z") }, logs);
+    const narrow = await extract(
+      db.reader,
+      KEY,
+      { from: WINDOW.from, to: at("2026-10-10T00:00:00Z") },
+      logs,
+      "/r",
+    );
     assert.deepEqual(
       narrow.runs.map((r) => r.draft),
       ["draftA"],
     );
     assert.equal(narrow.spans.length, 1);
     await assert.rejects(
-      extract(db.reader, "git:github.com/o/none", WINDOW, logs),
+      extract(db.reader, "git:github.com/o/none", WINDOW, logs, "/r"),
       /no project with the key/,
     );
   } finally {
@@ -306,16 +316,16 @@ test("a pinned population matches itself and names the runs, records, and spans 
     writeLogs(dirs);
     const f = fixture(db);
     const logs = readLogs(dirs);
-    const pinned = await extract(db.reader, KEY, WINDOW, logs);
+    const pinned = await extract(db.reader, KEY, WINDOW, logs, "/r");
     assert.deepEqual(differences(pinned, pinned), []);
-    const fewer = await extract(db.reader, KEY, WINDOW, logs.slice(1));
+    const fewer = await extract(db.reader, KEY, WINDOW, logs.slice(1), "/r");
     assert.deepEqual(differences(pinned, fewer), [
       `1 pinned runs are no longer there, first ${f.a}`,
       "unmatched run ids differ: 1 pinned, 0 now",
       "automatic trace spans differ: 2 pinned, 1 now",
     ]);
     db.owner.prepare("delete from unit where id = ?").run(f.a2);
-    assert.deepEqual(differences(pinned, await extract(db.reader, KEY, WINDOW, logs)), [
+    assert.deepEqual(differences(pinned, await extract(db.reader, KEY, WINDOW, logs, "/r")), [
       `1 runs changed, first ${f.a}`,
     ]);
     assert.match(differences({ ...pinned, sha256: "0" }, pinned)[0] ?? "", /does not hash to its sha256/);
@@ -351,7 +361,7 @@ test("the script freezes the database and the logs once, then stops with the dif
     const args = [
       SCRIPT,
       "--freeze",
-      ...["--db", db.file, "--claude", dirs.claude, "--codex", dirs.codex, "--project", KEY],
+      ...["--db", db.file, "--claude", dirs.claude, "--codex", dirs.codex, "--project", KEY, "--root", "/r"],
       ...["--from", WINDOW.from, "--to", WINDOW.to, "--repo", repo, "--frozen", frozen, "--out", out],
     ];
     const first = spawnSync(process.execPath, args, { encoding: "utf8" });
@@ -387,7 +397,7 @@ test("the script freezes the database and the logs once, then stops with the dif
     assert.notEqual(missing.status, 0);
     assert.match(
       missing.stderr,
-      /--freeze needs --claude, --codex, --project, --from, --to, --repo, --frozen, --out/,
+      /--freeze needs --claude, --codex, --project, --root, --from, --to, --repo, --frozen, --out/,
     );
   } finally {
     await db.done();
@@ -468,6 +478,7 @@ function spanPopulation(
 ): Population {
   return {
     project: KEY,
+    root: "/r",
     window: WINDOW,
     condition: "",
     runs: runs.map(([id, draft, units]) => ({
@@ -671,4 +682,85 @@ test("span time merges overlapping spans, and run time comes from begin to save"
   assert.equal(out.span_seconds_merged, 30);
   assert.deepEqual(out.span_seconds, { n: 3, total: 35, median: 10, max: 15 });
   assert.deepEqual(out.run_seconds, { n: 1, total: 15, median: 15, max: 15 });
+});
+
+test("only the project's own automatic calls count: a call made from another repository is neither a span nor an unmatched run id", async () => {
+  const db = tempDb();
+  const dirs = logsDir();
+  try {
+    writeLogs(dirs);
+    fixture(db);
+    fs.writeFileSync(
+      path.join(dirs.codex, "other.jsonl"),
+      jsonl([
+        { type: "session_meta", payload: { id: "thread-3" } },
+        { type: "turn_context", payload: { cwd: "/elsewhere" } },
+        responded("o1", "2026-10-15T00:00:00Z"),
+        mcp("o2", "2026-10-15T00:00:01Z", "record", "trace_pending", { auto: true }, "1 session"),
+        responded("o3", "2026-10-15T00:00:02Z"),
+        mcp(
+          "o4",
+          "2026-10-15T00:00:03Z",
+          "record",
+          "record_context",
+          { run: "theirs", auto: true },
+          "context",
+        ),
+        { type: "turn_context", payload: { cwd: "/r/sub" } },
+        responded("o5", "2026-10-15T00:00:04Z", "t2"),
+        mcp("o6", "2026-10-15T00:00:05Z", "record", "trace_pending", { auto: true }, "nothing waits"),
+      ]),
+    );
+    const pop = await extract(db.reader, KEY, WINDOW, readLogs(dirs), "/r");
+    assert.deepEqual(
+      pop.spans.map((s) => [s.file, s.call]),
+      [
+        ["main.jsonl", "p1"],
+        [path.join("2026", "10", "14", "rollout-a.jsonl"), "e1"],
+        ["other.jsonl", "o6"],
+      ],
+    );
+    assert.deepEqual(
+      pop.unmatched.map((u) => u.draft),
+      ["wrongId"],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+test("a new baseline is extracted from the frozen copy, so a write to the live database meanwhile cannot make the two disagree", async () => {
+  const db = tempDb();
+  const dirs = logsDir();
+  try {
+    writeLogs(dirs);
+    const f = fixture(db);
+    const frozen = path.join(dirs.root, "frozen");
+    const out = path.join(dirs.root, "baseline.json");
+    const values = {
+      db: db.file,
+      claude: dirs.claude,
+      codex: dirs.codex,
+      project: KEY,
+      root: "/r",
+      from: WINDOW.from,
+      to: WINDOW.to,
+      repo: repoAt(dirs.root),
+      frozen,
+      out,
+    };
+    await pin(values, () => db.owner.prepare("delete from unit where id = ?").run(f.a1));
+    const pinned = JSON.parse(fs.readFileSync(out, "utf8")).population;
+    const snapshot = openReader(path.join(frozen, "sphica.db"));
+    try {
+      const again = await extract(snapshot, KEY, WINDOW, readLogs(dirs), "/r");
+      assert.deepEqual(pinned.runs, again.runs);
+    } finally {
+      await snapshot.destroy();
+    }
+  } finally {
+    await db.done();
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
 });

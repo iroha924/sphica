@@ -40,6 +40,16 @@ base: main
   - コミット: `feat(eval): count tokens and time of automatic traces with attribution bounds (T02)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 9 件 pass（同じ message.id の 2 行は最後の usage を 1 回、id の無い応答は gap、Codex は同じ response_id を落とし累積の不一致を gap、区間は trace_pending から最後の save を読む応答まで（後の持ち主の作業と次のターンは外れる）、2 つの run を処理する応答は上限だけ、開いた run が 2 つの間の推論だけの応答は帰属不明・1 つの間のツールだけの応答と推論だけの応答はその run、結果の無い run は不明で上限だけ、owner_work は下限から外れ上限に残る、時間の重なりの合算、CLI の `--usage` と足りない引数）。`bun run check` → 0
 
+- [x] T07: 母集団を固定した DB から取り、別のプロジェクトの自動 trace を区間と No run から外す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の固定と抽出）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 読み取りと固定の間に本番の DB から記録を消すと baseline の母集団が固定した DB と食い違う、cwd が別のプロジェクトの trace_pending と No run が母集団に入る、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。新しく固定するときは backup と写しの後にそこから抽出し、区間と No run は呼び出しの cwd（引数か、その行・ターンの cwd）が `--root` かその下のものだけ
+  - コミット: `fix(eval): pin the automatic trace population from the frozen copy and own calls (T07)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 件が落ちた（cwd が /elsewhere の trace_pending o2 が区間に入る、読み取りと固定の間に記録を消すと baseline の run の記録が固定した DB と食い違う）。直した後、同じコマンド → 11 件 pass。`bun run check` → 0
+
 - [ ] T03: 40 件の抜き取り、agent の追加の組、採用の監査の一覧、シートを出す（`--sample`）
   - 種別: 追加
   - 計画: S3
@@ -79,3 +89,4 @@ base: main
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
+- 2026-10-18 / T07 / T01 の Codex のレビューで P2 が 2 件（本番の DB から抽出してから別の接続で backup するので間の変更で再現できない、Codex のログはプロジェクトをまたぐので別のプロジェクトの自動 trace_pending が区間に入る。後者は再現あり）。どちらも採る / 修正タスク T07 を T03 の前に足した

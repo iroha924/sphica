@@ -25,6 +25,8 @@ type Call = {
   input: Record<string, unknown>;
   line: number;
   at: string | null;
+  /** The working directory the call names, else the one its line or turn ran in */
+  cwd: string | null;
   /** The response that issued it, an index into Log.responses; null when the log holds no response before it */
   response: number | null;
   result: { line: number; ok: boolean; text: string } | null;
@@ -133,6 +135,7 @@ export function readClaude(dir: string, file: string): Log {
   for (const [n, d] of lines(raw, log.unreadable)) {
     if (typeof d.sessionId === "string" && !log.session) log.session = d.sessionId;
     const at = typeof d.timestamp === "string" ? d.timestamp : null;
+    const cwd = typeof d.cwd === "string" ? d.cwd : null;
     const message = isObject(d.message) ? d.message : {};
     const content = Array.isArray(message.content) ? message.content : [];
     if (d.type === "assistant") {
@@ -169,12 +172,14 @@ export function readClaude(dir: string, file: string): Log {
       }
       for (const c of content)
         if (isObject(c) && c.type === "tool_use" && typeof c.id === "string") {
+          const input = isObject(c.input) ? c.input : {};
           const call: Call = {
             id: c.id,
             ...claudeTool(String(c.name ?? "")),
-            input: isObject(c.input) ? c.input : {},
+            input,
             line: n,
             at,
+            cwd: typeof input.cwd === "string" ? input.cwd : cwd,
             response: r,
             result: null,
           };
@@ -258,6 +263,7 @@ export function readCodex(dir: string, file: string): Log {
     unreadable: [],
   };
   let model = "";
+  let cwd: string | null = null;
   let lastTurn: string | null = null;
   let turnTotal: Record<string, unknown> | null = null;
   for (const [n, d] of lines(raw, log.unreadable)) {
@@ -265,6 +271,7 @@ export function readCodex(dir: string, file: string): Log {
     const at = typeof d.timestamp === "string" ? d.timestamp : null;
     if (d.type === "session_meta" && typeof p.id === "string" && !log.session) log.session = p.id;
     if (d.type === "turn_context" && typeof p.model === "string") model = p.model;
+    if (d.type === "turn_context" && typeof p.cwd === "string") cwd = p.cwd;
     if (d.type === "token_usage_record") {
       const key = typeof p.response_id === "string" ? p.response_id : null;
       const turn = typeof p.turn_id === "string" ? p.turn_id : null;
@@ -283,12 +290,14 @@ export function readCodex(dir: string, file: string): Log {
     const item = isObject(p.item) ? p.item : null;
     if (d.type !== "event_msg" || p.type !== "item_completed" || item?.type !== "McpToolCall") continue;
     const result = isObject(item.result) ? item.result : {};
+    const input = isObject(item.arguments) ? item.arguments : {};
     log.calls.push({
       id: String(item.id ?? `line-${n}`),
       ...codexTool(item.server, item.tool),
-      input: isObject(item.arguments) ? item.arguments : {},
+      input,
       line: n,
       at,
+      cwd: typeof input.cwd === "string" ? input.cwd : cwd,
       response: log.responses.length ? log.responses.length - 1 : null,
       result: {
         line: n,
@@ -334,6 +343,7 @@ type SpanStart = { host: Host; file: string; line: number; call: string; at: str
 
 export type Population = {
   project: string;
+  root: string;
   window: Window;
   condition: string;
   runs: Run[];
@@ -344,19 +354,22 @@ export type Population = {
 };
 
 const CONDITION =
-  "trace runs of the project whose run id a record_context call with auto: true names in a log, started from <= started_at < to, ordered by started_at and id; spans start at each trace_pending call with auto: true made in the window";
+  "trace runs of the project whose run id a record_context call with auto: true made from the root or below names in a log, started from <= started_at < to, ordered by started_at and id; spans start at each such trace_pending call with auto: true made in the window";
 
 const inWindow = (at: string | null, w: Window) => at !== null && at >= w.from && at < w.to;
 
 const populationDigest = (p: Pick<Population, "runs" | "unmatched" | "spans">): string =>
   sha256(JSON.stringify({ runs: p.runs, unmatched: p.unmatched, spans: p.spans }));
 
+/** root is the repository's directory: Codex keeps every project's sessions together, so a call counts only when made from there */
 export async function extract(
   db: ReadonlyKysely<DB>,
   project: string,
   w: Window,
   logs: Log[],
+  root: string,
 ): Promise<Population> {
+  const here = (c: Call) => c.cwd !== null && (c.cwd === root || c.cwd.startsWith(`${root}${path.sep}`));
   const p = await db.selectFrom("project").select("id").where("key", "=", project).executeTakeFirst();
   if (!p) throw new Error(`no project with the key ${project}`);
   const named = new Map<
@@ -366,7 +379,7 @@ export async function extract(
   const spans: SpanStart[] = [];
   for (const log of logs)
     for (const c of log.calls) {
-      if (c.server !== "record" || c.input.auto !== true) continue;
+      if (c.server !== "record" || c.input.auto !== true || !here(c)) continue;
       if (c.tool === "trace_pending" && inWindow(c.at, w))
         spans.push({ host: log.host, file: log.file, line: c.line, call: c.id, at: c.at });
       if (c.tool !== "record_context" || typeof c.input.run !== "string") continue;
@@ -445,6 +458,7 @@ export async function extract(
   const out = { runs, unmatched, spans };
   return {
     project,
+    root,
     window: w,
     condition: CONDITION,
     ...out,
@@ -845,23 +859,29 @@ function directory(name: string, value: string): string {
 const NOTE =
   "#259 stage 1: the automatic trace runs of 0.6.30 and later, pinned from the owner's database and logs; see .claude/plans for the bars fixed before labelling";
 
-/** Pins the population and its inputs, or with a baseline already there, extracts again from the live data and names what differs */
-async function pin(values: Record<string, string | undefined>): Promise<void> {
+/**
+ * Pins the population and its inputs, or with a baseline already there, extracts again from the live data and names what differs.
+ * between runs after the live data is first read and before the result is written, where a write by another process can land.
+ */
+export async function pin(
+  values: Record<string, string | undefined>,
+  between: () => void = () => {},
+): Promise<void> {
   const dirs = {
     claude: directory("claude", values.claude as string),
     codex: directory("codex", values.codex as string),
   };
   const w = window(values.from as string, values.to as string);
-  const out = values.out as string;
+  const [out, project, root] = [values.out as string, values.project as string, values.root as string];
   const logs = readLogs(dirs);
-  const db = openReader(values.db as string);
-  let fresh: Population;
-  try {
-    fresh = await extract(db, values.project as string, w, logs);
-  } finally {
-    await db.destroy();
-  }
   if (fs.existsSync(out)) {
+    const db = openReader(values.db as string);
+    let fresh: Population;
+    try {
+      fresh = await extract(db, project, w, logs, root);
+    } finally {
+      await db.destroy();
+    }
     const pinned = (JSON.parse(fs.readFileSync(out, "utf8")) as Baseline).population;
     const diff = differences(pinned, fresh);
     if (diff.length)
@@ -869,18 +889,29 @@ async function pin(values: Record<string, string | undefined>): Promise<void> {
     console.log(`${fresh.runs.length} runs and ${fresh.units} records, the same as ${out}`);
     return;
   }
+  between();
+  const frozen = values.frozen as string;
   const inputs = await freeze({
     repo: values.repo as string,
     db: values.db as string,
-    project: values.project as string,
-    frozen: values.frozen as string,
+    project,
+    frozen,
     logs,
     dirs,
   });
-  const baseline: Baseline = { note: NOTE, inputs, population: fresh };
+  // Extracted from the copies, so what is pinned is exactly what the frozen inputs give
+  const thawed = thaw(frozen, inputs);
+  const db = openReader(thawed.db);
+  let population: Population;
+  try {
+    population = await extract(db, project, w, thawed.logs, root);
+  } finally {
+    await db.destroy();
+  }
+  const baseline: Baseline = { note: NOTE, inputs, population };
   fs.writeFileSync(out, `${JSON.stringify(baseline, null, 2)}\n`);
   console.log(
-    `${fresh.runs.length} runs, ${fresh.units} records, ${fresh.spans.length} spans, ${fresh.unmatched.length} unmatched run ids pinned to ${out}`,
+    `${population.runs.length} runs, ${population.units} records, ${population.spans.length} spans, ${population.unmatched.length} unmatched run ids pinned to ${out}`,
   );
 }
 
@@ -909,6 +940,7 @@ async function main(): Promise<void> {
       claude: { type: "string" },
       codex: { type: "string" },
       project: { type: "string" },
+      root: { type: "string" },
       from: { type: "string" },
       to: { type: "string" },
       repo: { type: "string" },
@@ -924,7 +956,7 @@ async function main(): Promise<void> {
     if (missing.length) throw new Error(`${mode} needs ${missing.map((k) => `--${k}`).join(", ")}`);
   };
   if (values.freeze) {
-    need("--freeze", ["db", "claude", "codex", "project", "from", "to", "repo", "frozen", "out"]);
+    need("--freeze", ["db", "claude", "codex", "project", "root", "from", "to", "repo", "frozen", "out"]);
     await pin(values as Record<string, string | undefined>);
     return;
   }
