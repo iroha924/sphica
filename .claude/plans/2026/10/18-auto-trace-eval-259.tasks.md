@@ -22,13 +22,14 @@ base: main
 
 入力を固定し、トークンと時間を下限と上限で数え、40 件と採用の全行を抜き出し、ラベルから 3 つの基準を判定するスクリプトができる。
 
-- [ ] T01: 入力を固定し、記録と費用の 2 つの母集団を抽出・保存・照合する（`--freeze`）
+- [x] T01: 入力を固定し、記録と費用の 2 つの母集団を抽出・保存・照合する（`--freeze`）
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`, `knip.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。一時 DB と一時の transcript・rollout から、auto: true の record_context の run が draft_id で結ばれ窓と origin で絞られる、Codex の function_call と McpToolCall も読み引用の中の引数は数えない、No run の id がエラーと一緒に残る、DB の backup と写しの sha256 が保存される、行を消した DB では違いを報告して 0 以外で終わる、足りない引数は名指しで止まる
   - コミット: `feat(eval): freeze the automatic trace population for #259 (T01)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 5 件 pass（message.id ごとの応答と結果・エラー文、Codex の McpToolCall を直前の応答に結び exec の中の文字列は読まない、窓と auto で絞った run と記録・No run の id・区間の始まり、照合の違いの 4 種、CLI で固定 → 2 回目は同じと報告 → 記録を消すと 0 以外で終わり baseline は変わらない、足りない引数の名指し）。`bun run check` → 0
 
 - [ ] T02: 応答ごとのトークンと時間を、帰属の下限と上限で数える（`--usage`）
   - 種別: 追加
@@ -75,3 +76,5 @@ base: main
   - コミット: `test(eval): record the #259 automatic trace baseline and its verdict (T06)`
 
 ## 記録
+
+- 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
