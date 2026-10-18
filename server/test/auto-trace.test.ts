@@ -13,6 +13,7 @@ import { test } from "node:test";
 import {
   attribute,
   differences,
+  draw,
   extract,
   type Population,
   pin,
@@ -20,10 +21,11 @@ import {
   readCodex,
   readLogs,
   shares,
+  sheet,
   times,
 } from "../evals/trace/auto-trace.ts";
 import { openReader } from "../src/db.ts";
-import { at, hash, insert, project, session, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const SCRIPT = path.join(import.meta.dirname, "..", "evals", "trace", "auto-trace.ts");
 const WINDOW = { from: at("2026-10-04T00:00:00Z"), to: at("2026-10-18T06:00:00Z") };
@@ -168,11 +170,12 @@ function traceRun(db: TempDb, p: number, draft: string, started: string, target 
   });
 }
 
-function unit(db: TempDb, p: number, run: number, key: string, created: string): number {
+function unit(db: TempDb, p: number, run: number, key: string, created: string, kind = "finding"): number {
   return insert(db, "unit", {
     project_id: p,
     key,
-    kind: "finding",
+    kind,
+    stance: kind === "decision" ? "do" : null,
     text: key,
     extraction: "supported",
     run_id: run,
@@ -759,6 +762,241 @@ test("a new baseline is extracted from the frozen copy, so a write to the live d
     } finally {
       await snapshot.destroy();
     }
+  } finally {
+    await db.done();
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+/** Run A with six records; the owner adopted u1 and u2, an AI u5, and a later run of another trace adopted u1 again */
+function adopted(db: TempDb) {
+  const p = project(db);
+  session(db, p, "s1");
+  // An AI's adoption needs a run an interactive session began, still running when it writes
+  const call = insert(db, "record_call", {
+    project_id: p,
+    tool: "trace_begin",
+    host: "codex",
+    caller_session: "main",
+    caller_turn: "turn-begin",
+    mode: "interactive",
+    called_at: at("2026-10-05T00:00:00Z"),
+  });
+  const a = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    session_id: "s1",
+    status: "running",
+    draft_id: "draftA",
+    begin_call_id: call,
+    started_at: at("2026-10-05T00:00:00Z"),
+  });
+  const later = run(db, p);
+  const units = [1, 2, 3, 4, 5, 6].map((i) => unit(db, p, a, `u${i}`, `2026-10-05T00:00:0${i}Z`, "decision"));
+  const prompt = message(db, p, {
+    id: "m1",
+    text: "前置き。SQLite にしよう、Postgres は要らない",
+    sent: "2026-10-05T00:00:00Z",
+  });
+  // The proposal the owner answers, for the sheet's message before it
+  message(db, p, {
+    id: "m0",
+    text: "SQLite か Postgres のどちらにしますか",
+    speaker: "assistant",
+    sent: "2026-10-04T23:59:00Z",
+  });
+  const reply = insert(db, "source", {
+    project_id: p,
+    kind: "session_message",
+    artifact: "session:s1",
+    external_id: "m2",
+    revision: 1,
+    session_id: "s1",
+    turn_id: "turn-2",
+    author_kind: "assistant",
+    created_at: at("2026-10-05T00:01:00Z"),
+    captured_at: at("2026-10-05T00:01:00Z"),
+    text: "I'll keep the retry in the client.",
+    original_bytes: Buffer.byteLength("I'll keep the retry in the client."),
+    content_hash: hash(9),
+    indexed: 0,
+  });
+  const span = (text: string, part: string) => {
+    const start = Buffer.from(text).indexOf(Buffer.from(part));
+    return { span_start: start, span_end: start + Buffer.byteLength(part) };
+  };
+  const adopt = (
+    u: number,
+    route: string,
+    source: number,
+    sp: { span_start: number; span_end: number },
+    by = a,
+  ) =>
+    insert(db, "unit_adoption", {
+      unit_id: u,
+      route,
+      source_id: source,
+      ...sp,
+      run_id: by,
+      added_at: at("2026-10-05T00:02:00Z"),
+    });
+  const evidence = (u: number, source: number, sp: { span_start: number; span_end: number }, role: string) =>
+    insert(db, "unit_evidence", {
+      unit_id: u,
+      source_id: source,
+      ...sp,
+      role,
+      run_id: a,
+      added_at: at("2026-10-05T00:02:00Z"),
+    });
+  const sqlite = span("前置き。SQLite にしよう、Postgres は要らない", "SQLite にしよう");
+  const retry = span("I'll keep the retry in the client.", "keep the retry in the client");
+  evidence(units[0] as number, prompt, sqlite, "states");
+  evidence(units[4] as number, reply, retry, "decides");
+  const ownerRows = [
+    adopt(units[0] as number, "owner_statement", prompt, sqlite),
+    adopt(units[1] as number, "owner_statement", prompt, sqlite),
+  ];
+  const agentRow = adopt(units[4] as number, "agent", reply, retry);
+  adopt(
+    units[0] as number,
+    "explicit",
+    prompt,
+    span("前置き。SQLite にしよう、Postgres は要らない", "Postgres は要らない"),
+    later,
+  );
+  const population = spanPopulation([], [[a, "draftA", units]]);
+  return { p, a, units, ownerRows, agentRow, population };
+}
+
+test("the sample is fixed by the seed, AI decisions it missed are an extra set, and only the automatic runs' adoptions are audited", async () => {
+  const db = tempDb();
+  try {
+    const f = adopted(db);
+    const first = await draw(db.reader, f.population, 20261018, 3);
+    const again = await draw(db.reader, f.population, 20261018, 3);
+    assert.deepEqual(first, again);
+    assert.equal(first.sample.length, 3);
+    assert.deepEqual(
+      first.sample.map((d) => d.n),
+      [1, 2, 3],
+    );
+    const sampled = new Set(first.sample.map((d) => d.unit));
+    assert.deepEqual(
+      first.extra.map((d) => [d.unit, d.agent, d.n]),
+      sampled.has(f.units[4] as number) ? [] : [[f.units[4], true, 4]],
+    );
+    assert.deepEqual(
+      first.audit.map((r) => [r.adoption, r.route]),
+      [
+        [f.ownerRows[0], "owner_statement"],
+        [f.ownerRows[1], "owner_statement"],
+        [f.agentRow, "agent"],
+      ],
+    );
+    const all = await draw(db.reader, f.population, 20261018, 6);
+    assert.deepEqual(
+      all.sample.map((d) => d.unit).sort((x, y) => x - y),
+      [...f.units].sort((x, y) => x - y),
+    );
+    assert.deepEqual(all.extra, []);
+    assert.notDeepEqual(
+      (await draw(db.reader, f.population, 1, 6)).sample.map((d) => d.unit),
+      all.sample.map((d) => d.unit),
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("the sheet quotes evidence and adoptions by their byte spans, with the words around an adoption and the message before it", async () => {
+  const db = tempDb();
+  try {
+    const f = adopted(db);
+    const drawn = await draw(db.reader, f.population, 20261018, 6);
+    const text = await sheet(db.reader, f.population, drawn);
+    assert.match(text, /- evidence states s\d+ \(owner\):\n {4}> SQLite にしよう\n/);
+    assert.match(text, /- adoption agent s\d+ \(assistant\):\n {4}> keep the retry in the client\n/);
+    assert.match(text, /> 前置き。\[\[SQLite にしよう\]\]、Postgres は要らない/);
+    assert.match(
+      text,
+      /- message before it, s\d+ \(assistant\):\n {4}> SQLite か Postgres のどちらにしますか/,
+    );
+    assert.equal(text.match(/^## A\d+ /gm)?.length, 3);
+    assert.equal(text.match(/^## S\d+ /gm)?.length, 6);
+  } finally {
+    await db.done();
+  }
+});
+
+test("the script draws once into the baseline, refuses another seed after that, and writes the sheet", async () => {
+  const db = tempDb();
+  const dirs = logsDir();
+  try {
+    writeLogs(dirs);
+    fixture(db);
+    const repo = repoAt(dirs.root);
+    const frozen = path.join(dirs.root, "frozen");
+    const out = path.join(dirs.root, "baseline.json");
+    const sheetFile = path.join(dirs.root, "sheet.md");
+    const freeze = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--freeze",
+        ...[
+          "--db",
+          db.file,
+          "--claude",
+          dirs.claude,
+          "--codex",
+          dirs.codex,
+          "--project",
+          KEY,
+          "--root",
+          "/r",
+        ],
+        ...["--from", WINDOW.from, "--to", WINDOW.to, "--repo", repo, "--frozen", frozen, "--out", out],
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(freeze.status, 0, freeze.stderr);
+    const sample = (seed: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          SCRIPT,
+          "--sample",
+          "--baseline",
+          out,
+          "--frozen",
+          frozen,
+          "--seed",
+          seed,
+          "--size",
+          "1",
+          "--sheet",
+          sheetFile,
+        ],
+        { encoding: "utf8" },
+      );
+    const first = sample("20261018");
+    assert.equal(first.status, 0, first.stderr);
+    const baseline = JSON.parse(fs.readFileSync(out, "utf8"));
+    assert.equal(baseline.sample.length, 1);
+    assert.equal(baseline.sampling.seed, 20261018);
+    assert.match(fs.readFileSync(sheetFile, "utf8"), /^## S1 u\d+ a[12]$/m);
+    assert.equal(sample("20261018").status, 0);
+    const other = sample("7");
+    assert.notEqual(other.status, 0);
+    assert.match(other.stderr, /already holds another sample/);
+    const bad = sample("x");
+    assert.match(bad.stderr, /--seed x is not a whole number/);
+    const missing = spawnSync(process.execPath, [SCRIPT, "--sample", "--baseline", out], {
+      encoding: "utf8",
+    });
+    assert.match(missing.stderr, /--sample needs --frozen, --seed, --size, --sheet/);
   } finally {
     await db.done();
     fs.rmSync(dirs.root, { recursive: true, force: true });

@@ -50,13 +50,23 @@ base: main
   - コミット: `fix(eval): pin the automatic trace population from the frozen copy and own calls (T07)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 件が落ちた（cwd が /elsewhere の trace_pending o2 が区間に入る、読み取りと固定の間に記録を消すと baseline の run の記録が固定した DB と食い違う）。直した後、同じコマンド → 11 件 pass。`bun run check` → 0
 
-- [ ] T03: 40 件の抜き取り、agent の追加の組、採用の監査の一覧、シートを出す（`--sample`）
+- [x] T03: 40 件の抜き取り、agent の追加の組、採用の監査の一覧、シートを出す（`--sample`）
   - 種別: 追加
   - 計画: S3
   - 依存: T01（保存した記録の母集団が要る）
   - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。保存した母集団と seed で 2 回流すと同じ 40 件が同じ順に出る、抜き取りに入らなかった agent の記録だけが追加の組になる、採用の全行が監査の一覧に出る、シートに本文・採用の引用と route・引用元の前後が入る
   - コミット: `feat(eval): sample automatic trace records and list adoptions to audit (T03)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 14 件 pass（同じ seed で同じ抜き取り・別の seed で別、抜き取りに入らなかった AI の採用の記録だけが追加の組、監査は自動の run が書いた採用の行だけで後の run の行は入らない、シートは根拠と採用をバイトの範囲で引き、採用の前後と直前の発言を出す、CLI は 1 回だけ抜き取り別の seed を拒み、数でない seed と足りない引数を名指し）。`bun run check` → 0
+
+- [ ] T08: 応答の時刻をその最後の行で取り、窓の終わりより後の応答を区間から外す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す対象の区間と時間）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 行に分かれた最後の応答で区間の終わりが最初の行の時刻になる、窓の終わりの後の応答が区間と上限に入る、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。区間の終わりと時間は応答の最後の行の時刻、窓の終わり以降の応答は数えず区間は打ち切り
+  - コミット: `fix(eval): end responses at their last line and cut spans at the window's end (T08)`
 
 - [ ] T04: 2 軸のラベルを集約し、3 つの基準と次の手を出す（`--decide`）
   - 種別: 追加
@@ -90,3 +100,4 @@ base: main
 
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
 - 2026-10-18 / T07 / T01 の Codex のレビューで P2 が 2 件（本番の DB から抽出してから別の接続で backup するので間の変更で再現できない、Codex のログはプロジェクトをまたぐので別のプロジェクトの自動 trace_pending が区間に入る。後者は再現あり）。どちらも採る / 修正タスク T07 を T03 の前に足した
+- 2026-10-18 / T08 / T02 の Codex のレビューで P2 が 2 件（Claude Code の応答の時刻を最初の行で取るので区間の終わりが早く出る、実ログで 33 秒、再現あり。窓の終わりで打ち切りの印を付けるだけで窓の外の応答も数える、再現あり）。どちらも採る / 修正タスク T08 を T04 の前に足した

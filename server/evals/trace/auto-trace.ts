@@ -13,6 +13,8 @@ import { parseArgs } from "node:util";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
+import { head } from "../../src/text.ts";
+import { shuffled } from "../post-write/replay.ts";
 
 type Host = "claude-code" | "codex";
 export type Window = { from: string; to: string };
@@ -824,6 +826,182 @@ export function times(population: Population, spans: SpanResult[]) {
 const USAGE_RULE =
   "a verdict on fixed token proxies, not on subscription usage: per host, output tokens and all processed tokens (input + cache creation + cache read + output; Codex's cached input counted once), each response once; low counts responses touching only runs known empty with no selection, owner work, or unattributed part; high counts responses touching an empty or unknown run, and every selection or unattributed response";
 
+export type Drawn = { n: number; unit: number; key: string; kind: string; agent: boolean };
+export type AuditRow = { n: number; adoption: number; unit: number; route: string; source: number };
+
+/**
+ * The records to label and the adoptions to audit. The sample is the first size records of the population, ordered by (created_at, id),
+ * shuffled with the seed; records an AI adopted that it missed are an extra set outside the useful rate. Every adoption row the
+ * automatic runs wrote is audited.
+ */
+export async function draw(
+  db: ReadonlyKysely<DB>,
+  population: Population,
+  seed: number,
+  size: number,
+): Promise<{ sample: Drawn[]; extra: Drawn[]; audit: AuditRow[] }> {
+  const ids = population.runs.flatMap((r) => r.units);
+  const runIds = population.runs.map((r) => r.id);
+  if (!ids.length) return { sample: [], extra: [], audit: [] };
+  const units = await db
+    .selectFrom("unit")
+    .where("id", "in", ids)
+    .select(["id", "key", "kind"])
+    .orderBy("created_at")
+    .orderBy("id")
+    .execute();
+  const adoptions = await db
+    .selectFrom("unit_adoption")
+    .where("run_id", "in", runIds)
+    .select(["id", "unit_id", "route", "source_id"])
+    .orderBy("id")
+    .execute();
+  const agent = new Set(adoptions.filter((a) => a.route === "agent").map((a) => a.unit_id));
+  const row = (u: (typeof units)[number], n: number): Drawn => ({
+    n,
+    unit: u.id,
+    key: u.key,
+    kind: u.kind,
+    agent: agent.has(u.id),
+  });
+  const sample = shuffled(units, seed)
+    .slice(0, size)
+    .map((u, i) => row(u, i + 1));
+  const drawn = new Set(sample.map((d) => d.unit));
+  const extra = units.filter((u) => agent.has(u.id) && !drawn.has(u.id)).map((u, i) => row(u, size + i + 1));
+  const audit = adoptions.map((a, i) => ({
+    n: i + 1,
+    adoption: a.id,
+    unit: a.unit_id,
+    route: a.route,
+    source: a.source_id,
+  }));
+  return { sample, extra, audit };
+}
+
+const cut = (text: string, from: number, to: number) =>
+  Buffer.from(text, "utf8").subarray(from, to).toString("utf8");
+
+const quoteLine = (s: string) => s.replaceAll("\n", "\n    > ");
+
+/** The labelling sheet: each drawn record with its evidence and adoptions in their words, then each adoption with what it answered */
+export async function sheet(
+  db: ReadonlyKysely<DB>,
+  population: Population,
+  drawn: { sample: Drawn[]; extra: Drawn[]; audit: AuditRow[] },
+): Promise<string> {
+  const runOf = new Map(population.runs.flatMap((r) => r.units.map((u) => [u, r])));
+  const source = async (id: number) =>
+    db
+      .selectFrom("source")
+      .where("id", "=", id)
+      .select(["id", "author_kind", "text", "session_id", "created_at"])
+      .executeTakeFirstOrThrow();
+  const before = async (s: { id: number; session_id: string | null; created_at: string }) =>
+    s.session_id === null
+      ? undefined
+      : db
+          .selectFrom("source")
+          .where("session_id", "=", s.session_id)
+          .where((eb) =>
+            eb.or([
+              eb("created_at", "<", s.created_at),
+              eb.and([eb("created_at", "=", s.created_at), eb("id", "<", s.id)]),
+            ]),
+          )
+          .select(["id", "author_kind", "text"])
+          .orderBy("created_at", "desc")
+          .orderBy("id", "desc")
+          .executeTakeFirst();
+  const out: string[] = [
+    "# Automatic trace labelling sheet",
+    "",
+    "Records: correctness correct / wrong / unknown, and value useful / not-needed / unknown (would a later session in this project need it, as of when it was saved). Adoptions: correct / misattributed / unknown, by speaker, quoted span, and the proposal it answers.",
+    "",
+  ];
+  const record = async (d: Drawn, heading: string) => {
+    const u = await db
+      .selectFrom("unit")
+      .where("id", "=", d.unit)
+      .select(["key", "kind", "stance", "text", "why", "lifecycle"])
+      .executeTakeFirstOrThrow();
+    const run = runOf.get(d.unit);
+    out.push(
+      `## ${heading}${d.n} u${d.unit} ${u.key}`,
+      "",
+      `- ${u.kind}${u.stance ? ` ${u.stance}` : ""}, now ${u.lifecycle}${d.agent ? ", adopted by an AI" : ""}; run ${run?.id} on ${run?.target.host} ${run?.target.session}`,
+      `- text: ${u.text}`,
+    );
+    if (u.why) out.push(`- why: ${u.why}`);
+    const options = await db
+      .selectFrom("unit_option")
+      .where("unit_id", "=", d.unit)
+      .select(["position", "outcome", "text", "why"])
+      .orderBy("position")
+      .execute();
+    for (const o of options)
+      out.push(`- option ${o.position} ${o.outcome}: ${o.text}${o.why ? ` (${o.why})` : ""}`);
+    const evidence = await db
+      .selectFrom("unit_evidence")
+      .where("unit_id", "=", d.unit)
+      .select(["source_id", "span_start", "span_end", "role"])
+      .orderBy("id")
+      .execute();
+    for (const e of evidence) {
+      const s = await source(e.source_id);
+      out.push(
+        `- evidence ${e.role} s${s.id} (${s.author_kind}):`,
+        `    > ${quoteLine(cut(s.text, e.span_start, e.span_end))}`,
+      );
+    }
+    const adoptions = await db
+      .selectFrom("unit_adoption")
+      .where("unit_id", "=", d.unit)
+      .select(["route", "source_id", "span_start", "span_end", "retracted_at"])
+      .orderBy("id")
+      .execute();
+    for (const a of adoptions) {
+      const s = await source(a.source_id);
+      out.push(
+        `- adoption ${a.route}${a.retracted_at ? " (retracted)" : ""} s${s.id} (${s.author_kind}):`,
+        `    > ${quoteLine(cut(s.text, a.span_start, a.span_end))}`,
+      );
+    }
+    out.push("");
+  };
+  for (const d of drawn.sample) await record(d, "S");
+  if (drawn.extra.length) out.push("# AI decisions outside the sample", "");
+  for (const d of drawn.extra) await record(d, "X");
+  out.push("# Adoptions to audit", "");
+  for (const a of drawn.audit) {
+    const row = await db
+      .selectFrom("unit_adoption as a")
+      .innerJoin("unit as u", "u.id", "a.unit_id")
+      .where("a.id", "=", a.adoption)
+      .select(["u.key", "u.text", "a.span_start", "a.span_end"])
+      .executeTakeFirstOrThrow();
+    const s = await source(a.source);
+    const prev = await before(s);
+    const bytes = Buffer.byteLength(s.text);
+    out.push(
+      `## A${a.n} adoption ${a.adoption} (${a.route}) of u${a.unit} ${row.key}`,
+      "",
+      `- record: ${row.text}`,
+      `- quoted span in s${s.id} (${s.author_kind}):`,
+      `    > ${quoteLine(cut(s.text, row.span_start, row.span_end))}`,
+      `- around it:`,
+      `    > ${quoteLine(`${cut(s.text, Math.max(0, row.span_start - 400), row.span_start)}[[${cut(s.text, row.span_start, row.span_end)}]]${cut(s.text, row.span_end, Math.min(bytes, row.span_end + 400))}`)}`,
+    );
+    if (prev)
+      out.push(
+        `- message before it, s${prev.id} (${prev.author_kind}):`,
+        `    > ${quoteLine(head(prev.text, 1500))}`,
+      );
+    out.push("");
+  }
+  return out.join("\n");
+}
+
 type Baseline = {
   note: string;
   inputs: Inputs;
@@ -835,6 +1013,10 @@ type Baseline = {
     responses: Attributed[];
   };
   time?: ReturnType<typeof times>;
+  sampling?: { method: string; seed: number; size: number; population_sha256: string };
+  sample?: Drawn[];
+  extra?: Drawn[];
+  audit?: AuditRow[];
 };
 
 /** An argument's date and time in the form the database stores, so comparing the strings compares the instants */
@@ -932,6 +1114,52 @@ function countUsage(values: Record<string, string | undefined>): void {
   console.log(JSON.stringify(baseline.usage.hosts, null, 2));
 }
 
+/** A whole-number argument at or above min, so a typo cannot draw another sample than the one asked for */
+function whole(name: string, value: string, min: number): number {
+  const n = Number(value);
+  if (!/^-?\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n < min)
+    throw new Error(`--${name} ${value} is not a whole number${min > 0 ? " above 0" : ""}`);
+  return n;
+}
+
+/** Draws the sample from the frozen database into the baseline, or checks a baseline that has one draws the same, and writes the sheet */
+async function drawSample(values: Record<string, string | undefined>): Promise<void> {
+  const file = values.baseline as string;
+  const baseline = JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+  if (populationDigest(baseline.population) !== baseline.population.sha256)
+    throw new Error(`${file} does not hash to its population's sha256`);
+  const seed = whole("seed", values.seed as string, 0);
+  const size = whole("size", values.size as string, 1);
+  const { db: snapshot } = thaw(directory("frozen", values.frozen as string), baseline.inputs);
+  const db = openReader(snapshot);
+  try {
+    const drawn = await draw(db, baseline.population, seed, size);
+    if (baseline.sampling) {
+      const same =
+        baseline.sampling.seed === seed &&
+        baseline.sampling.size === size &&
+        JSON.stringify([baseline.sample, baseline.extra, baseline.audit]) ===
+          JSON.stringify([drawn.sample, drawn.extra, drawn.audit]);
+      if (!same) throw new Error(`${file} already holds another sample; it is drawn once`);
+    } else {
+      baseline.sampling = {
+        method: "records ordered by (created_at, id), shuffled with mulberry32 and the seed, first size",
+        seed,
+        size,
+        population_sha256: baseline.population.sha256,
+      };
+      Object.assign(baseline, drawn);
+      fs.writeFileSync(file, `${JSON.stringify(baseline, null, 2)}\n`);
+    }
+    fs.writeFileSync(values.sheet as string, await sheet(db, baseline.population, drawn));
+    console.log(
+      `${drawn.sample.length} sampled, ${drawn.extra.length} extra AI decisions, ${drawn.audit.length} adoptions to audit; sheet ${values.sheet}`,
+    );
+  } finally {
+    await db.destroy();
+  }
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -949,6 +1177,10 @@ async function main(): Promise<void> {
       usage: { type: "boolean" },
       baseline: { type: "string" },
       "owner-work": { type: "string" },
+      sample: { type: "boolean" },
+      seed: { type: "string" },
+      size: { type: "string" },
+      sheet: { type: "string" },
     },
   });
   const need = (mode: string, keys: (keyof typeof values)[]) => {
@@ -965,7 +1197,14 @@ async function main(): Promise<void> {
     countUsage(values as Record<string, string | undefined>);
     return;
   }
-  throw new Error("pass --freeze to pin the population and its inputs, or --usage to count tokens and time");
+  if (values.sample) {
+    need("--sample", ["baseline", "frozen", "seed", "size", "sheet"]);
+    await drawSample(values as Record<string, string | undefined>);
+    return;
+  }
+  throw new Error(
+    "pass --freeze to pin the population and its inputs, --usage to count tokens and time, or --sample to draw records and write the sheet",
+  );
 }
 
 if (process.argv[1] && /auto-trace\.(ts|js)$/.test(process.argv[1])) await main();
