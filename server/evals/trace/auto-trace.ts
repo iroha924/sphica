@@ -894,6 +894,23 @@ const cut = (text: string, from: number, to: number) =>
 
 const quoteLine = (s: string) => s.replaceAll("\n", "\n    > ");
 
+/** The first or last chars characters of a text, taken on whole characters so none is split */
+const firstChars = (s: string, chars: number) => Array.from(s).slice(0, chars).join("");
+const lastChars = (s: string, chars: number) => Array.from(s).slice(-chars).join("");
+
+/** A long message cut to its head and its end, where a proposal's options usually are, saying how much is left out */
+function headAndEnd(text: string, bytes: number): string {
+  if (Buffer.byteLength(text) <= bytes) return text;
+  const start = head(text, bytes / 4);
+  const rest = Array.from(text.slice(start.length));
+  let n = rest.length;
+  let used = 0;
+  while (n > 0 && used + Buffer.byteLength(rest[n - 1] as string) <= (bytes * 3) / 4)
+    used += Buffer.byteLength(rest[--n] as string);
+  const left = Buffer.byteLength(text) - Buffer.byteLength(start) - used;
+  return `${start}\n[${left} bytes left out]\n${rest.slice(n).join("")}`;
+}
+
 /** The labelling sheet: each drawn record with its evidence and adoptions in their words, then each adoption with what it answered */
 export async function sheet(
   db: ReadonlyKysely<DB>,
@@ -992,7 +1009,6 @@ export async function sheet(
       .executeTakeFirstOrThrow();
     const s = await source(a.source);
     const prev = await before(s);
-    const bytes = Buffer.byteLength(s.text);
     out.push(
       `## A${a.n} adoption ${a.adoption} (${a.route}) of u${a.unit} ${row.key}`,
       "",
@@ -1000,12 +1016,12 @@ export async function sheet(
       `- quoted span in s${s.id} (${s.author_kind}):`,
       `    > ${quoteLine(cut(s.text, row.span_start, row.span_end))}`,
       `- around it:`,
-      `    > ${quoteLine(`${cut(s.text, Math.max(0, row.span_start - 400), row.span_start)}[[${cut(s.text, row.span_start, row.span_end)}]]${cut(s.text, row.span_end, Math.min(bytes, row.span_end + 400))}`)}`,
+      `    > ${quoteLine(`${lastChars(cut(s.text, 0, row.span_start), 200)}[[${cut(s.text, row.span_start, row.span_end)}]]${firstChars(cut(s.text, row.span_end, Buffer.byteLength(s.text)), 200)}`)}`,
     );
     if (prev)
       out.push(
         `- message before it, s${prev.id} (${prev.author_kind}):`,
-        `    > ${quoteLine(head(prev.text, 1500))}`,
+        `    > ${quoteLine(headAndEnd(prev.text, 6000))}`,
       );
     out.push("");
   }

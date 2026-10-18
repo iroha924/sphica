@@ -1300,3 +1300,35 @@ test("the useful bar is judged only on the 40 records fixed in the plan, and the
     undetermined: 1,
   });
 });
+
+test("the sheet keeps the end of a long message before an adoption, and cuts the words around it on whole characters", async () => {
+  const db = tempDb();
+  try {
+    const f = adopted(db);
+    const long = `${"表の行です。".repeat(400)}\n1. SQLite\n2. Postgres`;
+    message(db, f.p, { id: "m-long", text: long, speaker: "assistant", sent: "2026-10-04T23:59:30Z" });
+    const prefix = "あ".repeat(150);
+    const text = `${prefix}SQLite にしよう${"い".repeat(150)}`;
+    const answer = message(db, f.p, { id: "m-answer", text, sent: "2026-10-05T00:00:30Z" });
+    const start = Buffer.byteLength(prefix);
+    insert(db, "unit_adoption", {
+      unit_id: f.units[2] as number,
+      route: "owner_statement",
+      source_id: answer,
+      span_start: start,
+      span_end: start + Buffer.byteLength("SQLite にしよう"),
+      run_id: f.a,
+      added_at: at("2026-10-05T00:02:00Z"),
+    });
+    const out = await sheet(db.reader, f.population, await draw(db.reader, f.population, 20261018, 6));
+    assert.match(
+      out,
+      /1\. SQLite\n {4}> 2\. Postgres/,
+      "the options at the end of the message before it stay",
+    );
+    assert.match(out, /\[\d+ bytes left out\]/);
+    assert.doesNotMatch(out, /�/);
+  } finally {
+    await db.done();
+  }
+});

@@ -98,6 +98,16 @@ base: main
   - コミット: `fix(eval): judge the useful rate on 40 records only and count undetermined runs (T10)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 10 件の抜き取りで 7 件 useful が pass になり落ちた。直した後、同じコマンド → 21 件 pass（40 件でなければ undecided、runs に undetermined 1）。CLI のテストの 2 件の抜き取りは pass から undecided に直した。`bun run check` → 0
 
+- [x] T11: シートの直前の発言は末尾を省かずに出し、採用の前後は文字の境目で切る
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象のシート）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 末尾に選択肢がある長い直前の発言で選択肢がシートから消える、マルチバイトの文字の途中で前後が切れて置換文字が出る、の 2 件が落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。長い直前の発言は省いたバイト数を書いて末尾を残し、前後の文脈に置換文字が出ない
+  - コミット: `fix(eval): keep the end of the message before an adoption and cut context on characters (T11)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 末尾の「1. SQLite / 2. Postgres」がシートに無く落ちた。置換文字の側は選択肢の assert を外した写しを流し、置換文字が出て落ちた。直した後、同じコマンド → 22 件 pass。`bun run check` → 0
+
 ## P2: 測定と報告
 
 持ち主の DB と会話の記録で測り、ラベルを確定して判定し、結果を #259 に出す。
@@ -105,7 +115,7 @@ base: main
 - [ ] T05: 本番のデータを固定し、トークンと時間を数え、40 件と監査の一覧を出す
   - 種別: 追加
   - 計画: S5
-  - 依存: T02（トークンの集計が要る）, T03（抜き取りが要る）, T09（本番のデータは区間の打ち切りを直した後で数える）
+  - 依存: T02（トークンの集計が要る）, T03（抜き取りが要る）, T09（本番のデータは区間の打ち切りを直した後で数える）, T11（ラベルに使うシートの直し）
   - 変更: `server/evals/trace/auto-trace-baseline.json`
   - 完了条件: `jq -c '{runs: .population.records.runs, records: .population.records.units, sample: (.sample | length), audit: (.audit | length)}' server/evals/trace/auto-trace-baseline.json` → 固定した入力からの値が出て、sample は 40。固定先はリポジトリの外で、transcript の写しをコミットしない
   - コミット: `test(eval): pin the 2026-10-04..18 automatic trace population and its usage (T05)`
@@ -127,3 +137,4 @@ base: main
 - 2026-10-18 / T09 / T08 の Codex のレビューで P2 が 1 件（始まりが窓の中で最後の行が窓の後の応答だと、打ち切りにならず窓の外の時間が入る。実ログに窓を当てて再現、計画の窓では観測なし）。採る: 計画の決まり（窓の終わりで打ち切り）に反する / 修正タスク T09 を足した。T03 と T08 のレビューは依頼文の SHA が空になり 2 件とも HEAD を見ていたので、T03 を SHA を付けて頼み直した
 - 2026-10-18 / T05 / 依存の欄を変えた。前: T02, T03、新: T02, T03, T09 / 本番のデータは直した区間の決め方で数えるため
 - 2026-10-18 / T10 / T04 の Codex のレビューで P2 が 2 件（28 件の基準を件数の 7 割で出すので 40 件でない抜き取りでも pass が出る、再現あり。計画にある判定できない run の数が結果に無い）。どちらも採る / 修正タスク T10 を足し、T06 の依存を変えた。前: T04, T05、新: T04, T05, T10
+- 2026-10-18 / T11 / T03 の Codex のレビューで P2 が 1 件と P3 が 1 件（直前の発言を先頭 1500 バイトで切るので、採用の「1」が答えた末尾の選択肢が消える。前後 400 バイトで切るので UTF-8 の文字が壊れ、本番のシートで 6 か所 11 文字）。どちらも再現あり、採る。抜き取りの偏りや監査の行の過不足は無かった（本番で 40 件・追加 5 件・監査 65 行） / 修正タスク T11 を足し、T05 の依存を変えた。前: T02, T03, T09、新: T02, T03, T09, T11
