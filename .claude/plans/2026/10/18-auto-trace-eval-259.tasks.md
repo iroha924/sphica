@@ -69,13 +69,14 @@ base: main
   - コミット: `fix(eval): end responses at their last line and cut spans at the window's end (T08)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 区間の終わりが 00:00:19（最初の行）で 00:00:49 にならず落ちた。窓の側は同じテストの順を入れ替えた写しを流し、窓の終わりの後の m7〜m10 が残って落ちた。直した後、同じコマンド → 15 件 pass。`bun run check` → 0
 
-- [ ] T04: 2 軸のラベルを集約し、3 つの基準と次の手を出す（`--decide`）
+- [x] T04: 2 軸のラベルを集約し、3 つの基準と次の手を出す（`--decide`）
   - 種別: 追加
   - 計画: S4
   - 依存: T03（抜き取りと監査の一覧の形が要る）
   - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。2 軸の組み合わせごとの確定と可能性、28 件の境目（確定 28 は pass、可能性 27 は fail、間は undecided）、取り違えの確定・未確定、0.3 ちょうどは超えない・指標や両端が割れると undecided・欠測で境界をまたぐと undecided・分母 0 は undecided、次の手の集合、語彙の外のラベルは名指しで拒む
   - コミット: `feat(eval): decide the three automatic trace bars from settled labels (T04)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 20 件 pass（確定 28 は pass・27 は fail・unknown を含む 27+1 は undecided・wrong は useful に数えない、持ち主の採用の取り違え 1 件で fail・unknown で undecided・AI の採用は件数だけ、0.3 ちょうどは超えない・両指標と両端が割れると undecided・gap と分母 0 も undecided、次の手の集合、別の行や語彙の外のラベルを拒む、CLI はラベルを 1 回だけ取り込み 2 回目は固定した入力から同じ結果と報告・書き換えた結果は 0 以外で終わる）。`bun run check` → 0
 
 ## P2: 測定と報告
 

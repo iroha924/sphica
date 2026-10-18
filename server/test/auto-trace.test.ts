@@ -12,9 +12,12 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   attribute,
+  checkLabels,
+  decide,
   differences,
   draw,
   extract,
+  type Labels,
   type Population,
   pin,
   readClaude,
@@ -1035,6 +1038,230 @@ test("a span ends at the last line of its closing response, and responses from t
       "a run cut off by the window is not known empty",
     );
   } finally {
+    fs.rmSync(dirs.root, { recursive: true, force: true });
+  }
+});
+
+type Rec = Labels["sample"][number];
+const label = (correctness: string, value: string) => ({ correctness, value, reason: "r" }) as Rec["settled"];
+
+/** size drawn records, labelled by the [correctness, value] pairs given and then correct and not-needed */
+function labelled(size: number, pairs: [string, string][], audit: [string, string][] = []) {
+  const sample = Array.from({ length: size }, (_, i) => ({
+    n: i + 1,
+    unit: 100 + i,
+    key: `k${i}`,
+    kind: "decision",
+    agent: false,
+  }));
+  const rows = audit.map(([route], i) => ({ n: i + 1, adoption: 500 + i, unit: 100, route, source: 1 }));
+  const settled = (i: number) => label(...(pairs[i] ?? ["correct", "not-needed"]));
+  const labels: Labels = {
+    sample: sample.map((d, i) => ({
+      n: d.n,
+      unit: d.unit,
+      claude: settled(i),
+      codex: settled(i),
+      owner: null,
+      settled: settled(i),
+    })),
+    extra: [],
+    audit: rows.map((r, i) => {
+      const v = { verdict: audit[i]?.[1], reason: "r" } as Labels["audit"][number]["settled"];
+      return { n: r.n, adoption: r.adoption, claude: v, codex: v, owner: null, settled: v };
+    }),
+    owner_work: [],
+  };
+  const population = spanPopulation([], [[1, "dA", sample.map((d) => d.unit)]]);
+  return { drawn: { sample, extra: [], audit: rows }, labels, population };
+}
+
+const hostsAt = (low: number | null, high: number | null, gaps = 0) => {
+  const share = {
+    total: 10,
+    empty_low: 0,
+    empty_high: 0,
+    share_low: low,
+    share_high: high,
+    gaps,
+    gaps_low: 0,
+    gaps_high: 0,
+  };
+  return { "claude-code": { responses: 10, output: share, all: share, models: {} } };
+};
+
+test("the useful bar counts confirmed and possible records apart, so unknowns fall on both sides of 28 in 40", () => {
+  const many = (n: number, pair: [string, string]) => Array.from({ length: n }, () => pair);
+  const bar = (pairs: [string, string][]) => {
+    const f = labelled(40, pairs);
+    return decide(f.labels, f.drawn, f.population, hostsAt(0.1, 0.2)).useful;
+  };
+  assert.deepEqual(bar(many(28, ["correct", "useful"])), {
+    size: 40,
+    need: 28,
+    confirmed: 28,
+    possible: 28,
+    bar: "pass",
+  });
+  assert.equal(bar(many(27, ["correct", "useful"])).bar, "fail");
+  assert.deepEqual(bar([...many(27, ["correct", "useful"]), ["unknown", "useful"]]), {
+    size: 40,
+    need: 28,
+    confirmed: 27,
+    possible: 28,
+    bar: "undecided",
+  });
+  assert.equal(bar([...many(27, ["correct", "useful"]), ["correct", "unknown"]]).bar, "undecided");
+  assert.equal(
+    bar([...many(27, ["correct", "useful"]), ["wrong", "useful"]]).bar,
+    "fail",
+    "a wrong record is never useful",
+  );
+  assert.equal(bar([...many(27, ["correct", "useful"]), ["unknown", "not-needed"]]).bar, "fail");
+});
+
+test("one misattributed owner adoption fails its bar, an unknown one leaves it to the owner, and AI adoptions are only counted", () => {
+  const bar = (audit: [string, string][]) => {
+    const f = labelled(40, [], audit);
+    return decide(f.labels, f.drawn, f.population, hostsAt(0.1, 0.2)).adoption;
+  };
+  assert.equal(bar([["owner_statement", "correct"]]).bar, "pass");
+  assert.equal(bar([["owner_statement", "unknown"]]).bar, "undecided");
+  assert.equal(
+    bar([
+      ["owner_statement", "unknown"],
+      ["explicit", "misattributed"],
+    ]).bar,
+    "fail",
+  );
+  assert.deepEqual(
+    bar([
+      ["owner_statement", "correct"],
+      ["agent", "misattributed"],
+      ["agent", "unknown"],
+    ]),
+    {
+      owner_rows: 1,
+      misattributed: 0,
+      unknown: 0,
+      bar: "pass",
+      agent: { audited: 2, misattributed: 1, unknown: 1 },
+    },
+  );
+});
+
+test("the empty-run bar needs both proxies at both bounds on one side of 0.3, exactly 0.3 does not exceed it, and a gap leaves it open", () => {
+  const f = labelled(
+    40,
+    Array.from({ length: 28 }, () => ["correct", "useful"] as [string, string]),
+  );
+  const bar = (h: ReturnType<typeof hostsAt>) => decide(f.labels, f.drawn, f.population, h);
+  assert.equal(bar(hostsAt(0.31, 0.5)).empty.bar, "experiment");
+  assert.equal(bar(hostsAt(0.1, 0.3)).empty.bar, "no experiment");
+  assert.equal(bar(hostsAt(0.2, 0.4)).empty.bar, "undecided");
+  assert.equal(bar(hostsAt(0.1, 0.2, 1)).empty.bar, "undecided");
+  assert.equal(bar(hostsAt(null, null)).empty.bar, "undecided");
+  assert.deepEqual(bar(hostsAt(0.1, 0.2)).actions, ["keep the automatic trace as it is"]);
+  const g = labelled(40, [], [["owner_statement", "misattributed"]]);
+  assert.deepEqual(decide(g.labels, g.drawn, g.population, hostsAt(0.4, 0.5)).actions, [
+    "plan a fix of what the automatic trace extracts",
+    "file an issue for the misattributed owner adoptions",
+    "plan #259's stage-1 mechanical filter experiment",
+  ]);
+  assert.deepEqual(decide(f.labels, f.drawn, f.population, hostsAt(0.2, 0.4)).actions, [
+    "the owner decides the empty-run token share",
+  ]);
+});
+
+test("labels are refused when they sit on other rows than drawn or use words outside the vocabulary", () => {
+  const f = labelled(3, []);
+  checkLabels(f.labels, f.drawn);
+  const swapped = structuredClone(f.labels);
+  (swapped.sample[0] as Rec).unit = 999;
+  assert.throws(() => checkLabels(swapped, f.drawn), /sample 1: not the row drawn there/);
+  const word = structuredClone(f.labels);
+  (word.sample[1] as Rec).codex = label("maybe", "useful");
+  assert.throws(() => checkLabels(word, f.drawn), /sample 2 codex: a record label needs correctness/);
+  const reasonless = structuredClone(f.labels);
+  (reasonless.sample[2] as Rec).owner = { correctness: "correct", value: "useful", reason: " " };
+  assert.throws(() => checkLabels(reasonless, f.drawn), /sample 3 owner/);
+  assert.throws(
+    () => checkLabels({ ...f.labels, sample: f.labels.sample.slice(1) }, f.drawn),
+    /sample: 2 labelled, 3 drawn/,
+  );
+});
+
+test("the script takes the labels once, then gives the same result again from the frozen inputs, and refuses a result they do not give", async () => {
+  const db = tempDb();
+  const dirs = logsDir();
+  try {
+    writeLogs(dirs);
+    fixture(db);
+    const repo = repoAt(dirs.root);
+    const frozen = path.join(dirs.root, "frozen");
+    const out = path.join(dirs.root, "baseline.json");
+    const run = (...a: string[]) => spawnSync(process.execPath, [SCRIPT, ...a], { encoding: "utf8" });
+    const freeze = run(
+      "--freeze",
+      ...["--db", db.file, "--claude", dirs.claude, "--codex", dirs.codex, "--project", KEY, "--root", "/r"],
+      ...["--from", WINDOW.from, "--to", WINDOW.to, "--repo", repo, "--frozen", frozen, "--out", out],
+    );
+    assert.equal(freeze.status, 0, freeze.stderr);
+    const sheetFile = path.join(dirs.root, "sheet.md");
+    const sampled = run(
+      "--sample",
+      "--baseline",
+      out,
+      "--frozen",
+      frozen,
+      "--seed",
+      "1",
+      "--size",
+      "2",
+      "--sheet",
+      sheetFile,
+    );
+    assert.equal(sampled.status, 0, sampled.stderr);
+    const drawn = JSON.parse(fs.readFileSync(out, "utf8"));
+    const l = label("correct", "useful");
+    const labels: Labels = {
+      sample: drawn.sample.map((d: { n: number; unit: number }) => ({
+        n: d.n,
+        unit: d.unit,
+        claude: l,
+        codex: l,
+        owner: l,
+        settled: l,
+      })),
+      extra: [],
+      audit: [],
+      owner_work: [],
+    };
+    const labelsFile = path.join(dirs.root, "labels.json");
+    fs.writeFileSync(labelsFile, JSON.stringify(labels));
+    const first = run("--decide", "--baseline", out, "--frozen", frozen, "--labels", labelsFile);
+    assert.equal(first.status, 0, first.stderr);
+    const decided = JSON.parse(fs.readFileSync(out, "utf8"));
+    assert.equal(decided.result.useful.bar, "pass");
+    assert.equal(
+      decided.result.empty.bar,
+      "undecided",
+      "the fixture logs carry no usage, so every response is a gap",
+    );
+    const again = run("--decide", "--baseline", out, "--frozen", frozen);
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /give the baseline's result again/);
+    assert.match(
+      run("--decide", "--baseline", out, "--frozen", frozen, "--labels", labelsFile).stderr,
+      /already holds labels/,
+    );
+    fs.writeFileSync(out, JSON.stringify({ ...decided, result: { ...decided.result, actions: [] } }));
+    const tampered = run("--decide", "--baseline", out, "--frozen", frozen);
+    assert.notEqual(tampered.status, 0);
+    assert.match(tampered.stderr, /no longer give the baseline's result/);
+    assert.match(run("--decide", "--baseline", out).stderr, /--decide needs --frozen/);
+  } finally {
+    await db.done();
     fs.rmSync(dirs.root, { recursive: true, force: true });
   }
 });

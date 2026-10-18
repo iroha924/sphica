@@ -1008,6 +1008,180 @@ export async function sheet(
   return out.join("\n");
 }
 
+const CORRECTNESS = ["correct", "wrong", "unknown"] as const;
+const VALUE = ["useful", "not-needed", "unknown"] as const;
+const VERDICT = ["correct", "misattributed", "unknown"] as const;
+
+type RecordLabel = {
+  correctness: (typeof CORRECTNESS)[number];
+  value: (typeof VALUE)[number];
+  reason: string;
+};
+type AuditLabel = { verdict: (typeof VERDICT)[number]; reason: string };
+type Labelled<T, L> = T & { claude: L; codex: L; owner: L | null; settled: L };
+export type Labels = {
+  sample: Labelled<{ n: number; unit: number }, RecordLabel>[];
+  extra: Labelled<{ n: number; unit: number }, RecordLabel>[];
+  audit: Labelled<{ n: number; adoption: number }, AuditLabel>[];
+  owner_work: OwnerWork[];
+};
+
+type Bar = "pass" | "fail" | "undecided";
+
+export type Decision = {
+  useful: { size: number; need: number; confirmed: number; possible: number; bar: Bar };
+  adoption: {
+    owner_rows: number;
+    misattributed: number;
+    unknown: number;
+    bar: Bar;
+    agent: { audited: number; misattributed: number; unknown: number };
+  };
+  empty: {
+    host: Host;
+    output: [number | null, number | null];
+    all: [number | null, number | null];
+    gaps: number;
+    bar: "experiment" | "no experiment" | "undecided";
+  };
+  runs: { total: number; saved: number; confirmed_useful: number; sampled: number };
+  actions: string[];
+};
+
+/** Every label the bar reads, checked against the drawn rows by position, so a label cannot sit on another record than the one drawn */
+export function checkLabels(
+  labels: Labels,
+  drawn: { sample: Drawn[]; extra: Drawn[]; audit: AuditRow[] },
+): void {
+  const record = (l: unknown, where: string): void => {
+    const r = l as Partial<RecordLabel> | null;
+    if (
+      !r ||
+      !CORRECTNESS.includes(r.correctness as never) ||
+      !VALUE.includes(r.value as never) ||
+      !r.reason?.trim()
+    )
+      throw new Error(
+        `${where}: a record label needs correctness ${CORRECTNESS.join("/")}, value ${VALUE.join("/")}, and a reason`,
+      );
+  };
+  const audit = (l: unknown, where: string): void => {
+    const a = l as Partial<AuditLabel> | null;
+    if (!a || !VERDICT.includes(a.verdict as never) || !a.reason?.trim())
+      throw new Error(`${where}: an adoption label needs verdict ${VERDICT.join("/")} and a reason`);
+  };
+  const rows = <T extends { n: number }>(
+    got: T[],
+    want: { n: number }[],
+    name: string,
+    same: (g: T, w: never) => boolean,
+  ) => {
+    if (got.length !== want.length) throw new Error(`${name}: ${got.length} labelled, ${want.length} drawn`);
+    got.forEach((g, i) => {
+      if (g.n !== want[i]?.n || !same(g, want[i] as never))
+        throw new Error(`${name} ${i + 1}: not the row drawn there`);
+    });
+  };
+  rows(labels.sample, drawn.sample, "sample", (g, w: Drawn) => g.unit === w.unit);
+  rows(labels.extra, drawn.extra, "extra", (g, w: Drawn) => g.unit === w.unit);
+  rows(labels.audit, drawn.audit, "audit", (g, w: AuditRow) => g.adoption === w.adoption);
+  for (const [name, list] of [
+    ["sample", labels.sample],
+    ["extra", labels.extra],
+  ] as const)
+    for (const l of list) {
+      for (const who of ["claude", "codex", "settled"] as const) record(l[who], `${name} ${l.n} ${who}`);
+      if (l.owner !== null) record(l.owner, `${name} ${l.n} owner`);
+    }
+  for (const l of labels.audit) {
+    for (const who of ["claude", "codex", "settled"] as const) audit(l[who], `audit ${l.n} ${who}`);
+    if (l.owner !== null) audit(l.owner, `audit ${l.n} owner`);
+  }
+}
+
+/**
+ * The three bars fixed before labelling, each on its own. The useful rate counts the random sample only: confirmed when correct and
+ * useful, possible unless wrong or not-needed, so unknowns fall on both sides. The token share is judged on Claude Code; any gap there,
+ * a zero total, or proxies and bounds that disagree leave it to the owner.
+ */
+export function decide(
+  labels: Labels,
+  drawn: { sample: Drawn[]; extra: Drawn[]; audit: AuditRow[] },
+  population: Population,
+  hosts: ReturnType<typeof shares>,
+): Decision {
+  const size = drawn.sample.length;
+  const need = Math.ceil(size * 0.7);
+  const confirmed = labels.sample.filter(
+    (l) => l.settled.correctness === "correct" && l.settled.value === "useful",
+  );
+  const possible = labels.sample.filter(
+    (l) => l.settled.correctness !== "wrong" && l.settled.value !== "not-needed",
+  );
+  const usefulBar: Bar = confirmed.length >= need ? "pass" : possible.length < need ? "fail" : "undecided";
+  const route = new Map(drawn.audit.map((a) => [a.adoption, a.route]));
+  const ownerRows = labels.audit.filter((l) => route.get(l.adoption) !== "agent");
+  const agentRows = labels.audit.filter((l) => route.get(l.adoption) === "agent");
+  const count = (ls: typeof labels.audit, v: AuditLabel["verdict"]) =>
+    ls.filter((l) => l.settled.verdict === v).length;
+  const misattributed = count(ownerRows, "misattributed");
+  const unknown = count(ownerRows, "unknown");
+  const adoptionBar: Bar = misattributed ? "fail" : unknown ? "undecided" : "pass";
+  const claude = hosts["claude-code"];
+  const bounds = claude
+    ? [claude.output.share_low, claude.output.share_high, claude.all.share_low, claude.all.share_high]
+    : [];
+  const gaps = claude ? claude.output.gaps : 0;
+  const emptyBar =
+    !claude || gaps > 0 || bounds.some((b) => b === null)
+      ? "undecided"
+      : bounds.every((b) => (b as number) > 0.3)
+        ? "experiment"
+        : bounds.every((b) => (b as number) <= 0.3)
+          ? "no experiment"
+          : "undecided";
+  const unitRun = new Map(population.runs.flatMap((r) => r.units.map((u) => [u, r.id])));
+  const actions: string[] = [];
+  if (usefulBar === "fail") actions.push("plan a fix of what the automatic trace extracts");
+  if (adoptionBar === "fail") actions.push("file an issue for the misattributed owner adoptions");
+  if (emptyBar === "experiment") actions.push("plan #259's stage-1 mechanical filter experiment");
+  for (const [name, bar] of [
+    ["the useful rate", usefulBar],
+    ["the owner adoptions", adoptionBar],
+    ["the empty-run token share", emptyBar],
+  ] as const)
+    if (bar === "undecided") actions.push(`the owner decides ${name}`);
+  if (!actions.length) actions.push("keep the automatic trace as it is");
+  return {
+    useful: { size, need, confirmed: confirmed.length, possible: possible.length, bar: usefulBar },
+    adoption: {
+      owner_rows: ownerRows.length,
+      misattributed,
+      unknown,
+      bar: adoptionBar,
+      agent: {
+        audited: agentRows.length,
+        misattributed: count(agentRows, "misattributed"),
+        unknown: count(agentRows, "unknown"),
+      },
+    },
+    empty: {
+      host: "claude-code",
+      output: [claude?.output.share_low ?? null, claude?.output.share_high ?? null],
+      all: [claude?.all.share_low ?? null, claude?.all.share_high ?? null],
+      gaps,
+      bar: emptyBar,
+    },
+    runs: {
+      total: population.runs.length,
+      saved: population.runs.filter((r) => r.units.length).length,
+      confirmed_useful: new Set(confirmed.map((l) => unitRun.get(l.unit))).size,
+      sampled: new Set(labels.sample.map((l) => unitRun.get(l.unit))).size,
+    },
+    actions,
+  };
+}
+
 type Baseline = {
   note: string;
   inputs: Inputs;
@@ -1023,6 +1197,8 @@ type Baseline = {
   sample?: Drawn[];
   extra?: Drawn[];
   audit?: AuditRow[];
+  labels?: Labels;
+  result?: Decision;
 };
 
 /** An argument's date and time in the form the database stores, so comparing the strings compares the instants */
@@ -1166,6 +1342,53 @@ async function drawSample(values: Record<string, string | undefined>): Promise<v
   }
 }
 
+/**
+ * Applies the bars. The first run takes the labels into the baseline; every run recomputes the tokens, the sample, and the result from
+ * the frozen inputs and the baseline's labels, and a baseline that already holds a result must come out the same.
+ */
+async function decideBars(values: Record<string, string | undefined>): Promise<void> {
+  const file = values.baseline as string;
+  const baseline = JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+  if (populationDigest(baseline.population) !== baseline.population.sha256)
+    throw new Error(`${file} does not hash to its population's sha256`);
+  if (!baseline.sampling || !baseline.sample || !baseline.extra || !baseline.audit)
+    throw new Error(`${file} holds no sample; draw it with --sample first`);
+  if (values.labels && baseline.labels) throw new Error(`${file} already holds labels; they are taken once`);
+  const labels =
+    baseline.labels ??
+    (values.labels ? (JSON.parse(fs.readFileSync(values.labels, "utf8")) as Labels) : null);
+  if (!labels) throw new Error("--decide needs --labels the first time");
+  const { db: snapshot, logs } = thaw(directory("frozen", values.frozen as string), baseline.inputs);
+  const db = openReader(snapshot);
+  let drawn: Awaited<ReturnType<typeof draw>>;
+  try {
+    drawn = await draw(db, baseline.population, baseline.sampling.seed, baseline.sampling.size);
+  } finally {
+    await db.destroy();
+  }
+  if (
+    JSON.stringify([drawn.sample, drawn.extra, drawn.audit]) !==
+    JSON.stringify([baseline.sample, baseline.extra, baseline.audit])
+  )
+    throw new Error("the frozen inputs no longer draw the baseline's sample");
+  checkLabels(labels, drawn);
+  const { responses, spans } = attribute(baseline.population, logs, labels.owner_work);
+  const hosts = shares(responses);
+  const result = decide(labels, drawn, baseline.population, hosts);
+  if (baseline.result) {
+    if (JSON.stringify(baseline.result) !== JSON.stringify(result))
+      throw new Error("the frozen inputs and labels no longer give the baseline's result");
+    console.log("the frozen inputs and labels give the baseline's result again");
+    return;
+  }
+  baseline.labels = labels;
+  baseline.usage = { rule: USAGE_RULE, hosts, spans, responses };
+  baseline.time = times(baseline.population, spans);
+  baseline.result = result;
+  fs.writeFileSync(file, `${JSON.stringify(baseline, null, 2)}\n`);
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -1187,6 +1410,8 @@ async function main(): Promise<void> {
       seed: { type: "string" },
       size: { type: "string" },
       sheet: { type: "string" },
+      decide: { type: "boolean" },
+      labels: { type: "string" },
     },
   });
   const need = (mode: string, keys: (keyof typeof values)[]) => {
@@ -1208,8 +1433,13 @@ async function main(): Promise<void> {
     await drawSample(values as Record<string, string | undefined>);
     return;
   }
+  if (values.decide) {
+    need("--decide", ["baseline", "frozen"]);
+    await decideBars(values as Record<string, string | undefined>);
+    return;
+  }
   throw new Error(
-    "pass --freeze to pin the population and its inputs, --usage to count tokens and time, or --sample to draw records and write the sheet",
+    "pass --freeze to pin the population and its inputs, --usage to count tokens and time, --sample to draw records and write the sheet, or --decide to apply the bars",
   );
 }
 
