@@ -538,7 +538,10 @@ async function freeze(o: {
     throw new Error(`server/ has uncommitted changes; commit before a run that saves a result:\n${dirty}`);
   const commit = execFileSync("git", ["-C", o.repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   // The copies hold the owner's whole database and conversations, which must never be committed
-  const [repo, frozen] = [realPath(o.repo), realPath(o.frozen)];
+  const top = execFileSync("git", ["-C", o.repo, "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).trim();
+  const [repo, frozen] = [realPath(top), realPath(o.frozen)];
   if (frozen === repo || frozen.startsWith(`${repo}${path.sep}`))
     throw new Error(`--frozen ${o.frozen} is inside the repository; freeze outside it`);
   if (fs.existsSync(o.frozen) && fs.readdirSync(o.frozen).length)

@@ -1378,6 +1378,15 @@ test("freezing refuses a directory inside the repository, and the baseline keeps
       ...["--db", db.file, "--claude", dirs.claude, "--codex", dirs.codex, "--project", KEY, "--root", "/r"],
       ...["--from", WINDOW.from, "--to", WINDOW.to, "--repo", repo, "--frozen", frozen, "--out", out],
     ];
+    const below = spawnSync(
+      process.execPath,
+      args(path.join(repo, "frozen-below"), path.join(dirs.root, "below.json")).map((a) =>
+        a === repo ? path.join(repo, "server") : a,
+      ),
+      { encoding: "utf8" },
+    );
+    assert.notEqual(below.status, 0, "a --repo below the top level still bounds the whole worktree");
+    assert.ok(!fs.existsSync(path.join(repo, "frozen-below")));
     const inside = path.join(repo, "frozen");
     const refused = spawnSync(process.execPath, args(inside, path.join(dirs.root, "in.json")), {
       encoding: "utf8",

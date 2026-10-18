@@ -150,6 +150,16 @@ base: main
   - コミット: `fix(eval): require owner labels, keep frozen copies outside the repo, pin unreadable lines (T13)`
   - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 2 件が落ちた（持ち主のラベルの無い抜き取りの行が通る、--repo の下の --frozen への固定が 0 で終わる。読めない行の欄はその後の assert で、欄が無いので必ず落ちる）。直した後、同じコマンド → 26 件 pass。今の baseline には、固定した写しを sha256 で確かめて読み直した行番号を足した（40 本とも 0 行）。`--decide --frozen --baseline` → 同じと報告して 0。`bun run check` → 0
 
+- [x] T14: 固定先の境界を --repo ではなく作業ツリーの最上位で判定する
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T13（直す対象の境界の判定）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → --repo にリポジトリの下の server を渡すと、リポジトリの中の --frozen への固定が 0 で終わるテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。境界は `git rev-parse --show-toplevel` の実体のパスで、その中の --frozen は何も書かずに止まる
+  - コミット: `fix(eval): bound frozen copies by the worktree's top level (T14)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → --repo に server を渡したリポジトリの中への固定が 0 で終わり落ちた。直した後、同じコマンド → 26 件 pass。`bun run check` → 0
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログで record のツールは McpToolCall の item だけに出て、function_call の名前に record のツールは 0 件だった（~/.codex/sessions と archived_sessions を grep）。code mode の exec の入力の文字列にも run と auto が出るが、引用と同じく数えない / plan の「function_call と McpToolCall」のうち McpToolCall だけを読む。Codex の応答の区切りは token_usage_record（response_id と応答ごとの usage を持つ）にした。T02 で usage もこれから取り、turn_token_usage の累積との一致で欠落を見る
@@ -164,3 +174,4 @@ base: main
 - 2026-10-18 / T12 / 全差分の Codex のレビュー（high）で P2 が 3 件（応答の最後の行に usage が無いと前の行の値が残り gap にならない、settled が持ち主のラベルと食い違っても通る、出し直しが result だけを比べトークンと時間の書き換えを見逃す）。3 件とも再現あり、採る。今の baseline はどれにも当たらない（同じレビューで固定した入力と一致を確認） / 修正タスク T12 を足した
 - 2026-10-18 / T12 / 修正の差分の Codex の再レビューは指摘なし
 - 2026-10-18 / T13 / PR #356 の GitHub の Codex のレビューで P2 が 3 件（抜き取りの行に持ち主のラベルが無くても判定が出る、--frozen がリポジトリの中でも DB の写しと会話を書く、読めないログの行が baseline に残らず欠けた計測と見分けられない）。3 件とも採る。3 件目は計画の方針（読めなかった行を baseline に残す）の書き漏れ。今の baseline は 40 件とも持ち主のラベルがあり、固定先は scratchpad / 修正タスク T13 を足した
+- 2026-10-18 / T14 / T13 の Codex の再レビューで P2 が 1 件（--repo にリポジトリの下のディレクトリを渡すと、境界がそこになり、リポジトリの中の --frozen を止めない。書かない形で再現）。採る / 修正タスク T14 を足した
