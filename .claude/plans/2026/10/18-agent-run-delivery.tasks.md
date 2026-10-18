@@ -63,13 +63,14 @@ base: main
   - コミット: `feat(deliver): start subagents and child threads with the search line only`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/review-bridge.test.ts` → tests 85 / pass 85 / fail 0（SubagentStart・agent id の無い SubagentStart・ログで確かめた Codex の子スレッドの開始が検索の 1 行だけ、unit 0・chars 0・reason は subagent / startup、読みは起動で戻らない、本体の開始は記録を出す）。`bun run check` → exit 0
 
-- [ ] T05: delivery-view の suppressed の扱いと README の配信の節を直す
+- [x] T05: delivery-view の suppressed の扱いと README の配信の節を直す
   - 種別: 変更
   - 計画: S4
   - 依存: T03（suppressed の行が書かれるようになってから説明する）, T04（README に起動の縮小を書く）
   - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`, `README.md`
   - 完了条件: `cd server && node --test test/delivery-view.test.ts` → suppressed の行が表に出て keyless に入らない。`rg -n "not written today" server/src` → 0 件。`bun run verify` → 0 で終わる
   - コミット: `docs(deliver): describe what agent-started runs and subagent starts receive`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/delivery-view.test.ts` → tests 12 / pass 12 / fail 0（suppressed の行が `| session_start | suppressed | 1 | 0 | 0 | - | 0 |` で出て keyless は `-`）。`rg -n "not written today" server/src` → 0 件。`bun run verify` → exit 0（acceptance 148 / pass 148）
 
 ## 記録
 
