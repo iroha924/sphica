@@ -105,6 +105,17 @@ base: main
   - 結果: red: `node --test --test-name-pattern="a run another agent started" test/deliver.test.ts` → actual `[ 'session_start:emitted:startup:1' ]`
   - 結果: `node --test test/deliver.test.ts` → pass 65 / fail 0
 
+- [x] T09: agent id の無いサブエージェントの起動を、内訳の分類でサブエージェントとして数える
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T01（分類の関数が要る）
+  - 変更: `server/evals/delivery/agent-runs.ts`, `server/test/agent-runs.test.ts`
+  - red: `node --test test/agent-runs.test.ts` → 直す前は reason subagent・agent id 無しの session_start が `claude-main`
+  - 完了条件: `node --test test/agent-runs.test.ts` → fail 0。抽出し直して pairs と blocks が agent-runs-353.json と同じ
+  - コミット: `fix(eval): count a subagent start logged without its agent id as a subagent's`
+  - 結果: red: `node --test test/agent-runs.test.ts` → pass 4 / fail 1（actual 'claude-main'、expected 'claude-subagent'）
+  - 結果: `node --test test/agent-runs.test.ts` → pass 5 / fail 0。持ち主の DB から抽出し直した pairs と blocks は保存済みの JSON と同じ（標本にこの形の行は無い）ので JSON は変えない
+
 ## 記録
 
 - 2026-10-18 / T01 / Codex のログを探す `walk` を sample.ts から使うため export した / 変更欄に `server/evals/delivery/sample.ts` を足した（前: agent-runs.ts, agent-runs-353.json, agent-runs.test.ts）

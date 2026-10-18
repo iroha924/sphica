@@ -85,6 +85,10 @@ test("the recipient is read from the delivery row and the first line of the Code
     recipientOf({ host: "claude-code", external_id: "s", agent_id: "a1" }, find),
     "claude-subagent",
   );
+  // A subagent's start the host sent without its agent id is logged with reason subagent
+  const noId = { host: "claude-code", external_id: "s", agent_id: null, reason: "subagent" };
+  assert.equal(recipientOf({ ...noId, event: "session_start" }, find), "claude-subagent");
+  assert.equal(recipientOf({ ...noId, event: "pre_read" }, find), "claude-main");
   assert.equal(recipientOf({ host: "codex", external_id: "t-exec", agent_id: null }, find), "codex-exec");
   assert.equal(recipientOf({ host: "codex", external_id: "t-tui", agent_id: null }, find), "codex-tui");
   assert.equal(recipientOf({ host: "codex", external_id: "t-app", agent_id: null }, find), "codex-other");

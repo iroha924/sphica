@@ -75,12 +75,18 @@ export function tally(pairs: Pair[]): Record<Block, Tally> {
   ) as Record<Block, Tally>;
 }
 
-/** The recipient of one delivery row: Codex by the first line of the session log that ends in the row's thread id */
+/**
+ * The recipient of one delivery row: Codex by the first line of the session log that ends in the row's thread id. A subagent's start the
+ * host sent without its agent id is logged with reason subagent
+ */
 export function recipientOf(
-  row: { host: string; external_id: string; agent_id: string | null },
+  row: { host: string; external_id: string; agent_id: string | null; event?: string; reason?: string | null },
   codexLog: (thread: string) => string | null,
 ): Recipient {
-  if (row.host !== "codex") return row.agent_id ? "claude-subagent" : "claude-main";
+  if (row.host !== "codex")
+    return row.agent_id || (row.event === "session_start" && row.reason === "subagent")
+      ? "claude-subagent"
+      : "claude-main";
   if (row.agent_id) return "codex-child";
   const file = codexLog(row.external_id);
   if (!file) return "codex-no-log";
