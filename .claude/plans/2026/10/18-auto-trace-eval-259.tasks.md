@@ -31,13 +31,14 @@ base: main
   - コミット: `feat(eval): freeze the automatic trace population for #259 (T01)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 5 件 pass（message.id ごとの応答と結果・エラー文、Codex の McpToolCall を直前の応答に結び exec の中の文字列は読まない、窓と auto で絞った run と記録・No run の id・区間の始まり、照合の違いの 4 種、CLI で固定 → 2 回目は同じと報告 → 記録を消すと 0 以外で終わり baseline は変わらない、足りない引数の名指し）。`bun run check` → 0
 
-- [ ] T02: 応答ごとのトークンと時間を、帰属の下限と上限で数える（`--usage`）
+- [x] T02: 応答ごとのトークンと時間を、帰属の下限と上限で数える（`--usage`）
   - 種別: 追加
   - 計画: S2
   - 依存: T01（呼び出しの読み取りと固定した入力が要る）
   - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。同じ message.id の行は 1 回だけ数え id の無い応答は欠測、Codex の重なった累積値を落とし差の不一致を欠測にする、区間の始まりと終わりの境目、2 つの run を処理する応答と開いた run が 1 つ・2 つの間のツールだけの応答・推論だけの応答の帰属、結果不明の run、欠測を 0 にしない、の各 fixture で下限と上限が期待どおり
   - コミット: `feat(eval): count tokens and time of automatic traces with attribution bounds (T02)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 9 件 pass（同じ message.id の 2 行は最後の usage を 1 回、id の無い応答は gap、Codex は同じ response_id を落とし累積の不一致を gap、区間は trace_pending から最後の save を読む応答まで（後の持ち主の作業と次のターンは外れる）、2 つの run を処理する応答は上限だけ、開いた run が 2 つの間の推論だけの応答は帰属不明・1 つの間のツールだけの応答と推論だけの応答はその run、結果の無い run は不明で上限だけ、owner_work は下限から外れ上限に残る、時間の重なりの合算、CLI の `--usage` と足りない引数）。`bun run check` → 0
 
 - [ ] T03: 40 件の抜き取り、agent の追加の組、採用の監査の一覧、シートを出す（`--sample`）
   - 種別: 追加

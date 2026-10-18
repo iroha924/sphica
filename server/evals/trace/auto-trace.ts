@@ -30,8 +30,20 @@ type Call = {
   result: { line: number; ok: boolean; text: string } | null;
 };
 
-/** One model response: Claude Code writes one over several lines that share message.id, Codex ends one with a token_usage_record */
-type Response = { key: string | null; line: number; at: string | null; turn: string | null };
+type Usage = { model: string; input: number; cacheCreation: number; cacheRead: number; output: number };
+
+/**
+ * One model response: Claude Code writes one over several lines that share message.id, Codex ends one with a token_usage_record. usage is
+ * null with gap saying why when the log does not give this response's tokens exactly once; a gap is never counted as 0.
+ */
+type Response = {
+  key: string | null;
+  line: number;
+  at: string | null;
+  turn: string | null;
+  usage: Usage | null;
+  gap: string | null;
+};
 
 export type Log = {
   host: Host;
@@ -98,6 +110,9 @@ function lines(raw: Buffer, unreadable: number[]): [number, Record<string, unkno
 
 const sha256 = (b: Buffer | string): string => crypto.createHash("sha256").update(b).digest("hex");
 
+const count = (v: unknown): number | null =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
+
 /** A Claude Code transcript: responses by message.id (else requestId), tool_use calls in them, and tool_result lines as their results */
 export function readClaude(dir: string, file: string): Log {
   const raw = fs.readFileSync(path.join(dir, file));
@@ -112,6 +127,9 @@ export function readClaude(dir: string, file: string): Log {
   };
   const byKey = new Map<string, number>();
   const byCall = new Map<string, Call>();
+  const messages: number[] = [];
+  const prompts: number[] = [];
+  const unmarked: number[] = [];
   for (const [n, d] of lines(raw, log.unreadable)) {
     if (typeof d.sessionId === "string" && !log.session) log.session = d.sessionId;
     const at = typeof d.timestamp === "string" ? d.timestamp : null;
@@ -122,8 +140,32 @@ export function readClaude(dir: string, file: string): Log {
         typeof message.id === "string" ? message.id : typeof d.requestId === "string" ? d.requestId : null;
       let r = key === null ? undefined : byKey.get(key);
       if (r === undefined) {
-        r = log.responses.push({ key, line: n, at, turn: null }) - 1;
+        r = log.responses.push({ key, line: n, at, turn: null, usage: null, gap: null }) - 1;
         if (key !== null) byKey.set(key, r);
+      }
+      // Every line of a response repeats its usage, and the last line holds the final counts
+      const response = log.responses[r] as Response;
+      const u = isObject(message.usage) ? message.usage : null;
+      const counts =
+        u &&
+        [
+          u.input_tokens,
+          u.cache_creation_input_tokens ?? 0,
+          u.cache_read_input_tokens ?? 0,
+          u.output_tokens,
+        ].map(count);
+      if (key === null) response.gap = "no message.id or requestId";
+      else if (!counts || counts.some((c) => c === null)) response.gap = "no usage";
+      else {
+        const [input, cacheCreation, cacheRead, output] = counts as number[];
+        response.usage = {
+          model: String(message.model ?? ""),
+          input: input as number,
+          cacheCreation: cacheCreation as number,
+          cacheRead: cacheRead as number,
+          output: output as number,
+        };
+        response.gap = null;
       }
       for (const c of content)
         if (isObject(c) && c.type === "tool_use" && typeof c.id === "string") {
@@ -142,13 +184,62 @@ export function readClaude(dir: string, file: string): Log {
       continue;
     }
     if (d.type !== "user") continue;
-    for (const c of content)
-      if (isObject(c) && c.type === "tool_result" && typeof c.tool_use_id === "string") {
+    messages.push(n);
+    const results = content.filter((c) => isObject(c) && c.type === "tool_result");
+    for (const c of results)
+      if (isObject(c) && typeof c.tool_use_id === "string") {
         const call = byCall.get(c.tool_use_id);
         if (call) call.result = { line: n, ok: c.is_error !== true, text: resultText(c.content) };
       }
+    if (results.length || d.isMeta === true || d.isCompactSummary === true) continue;
+    const origin = isObject(d.origin) ? d.origin.kind : undefined;
+    if (origin === "human") prompts.push(n);
+    else if (origin === undefined) unmarked.push(n);
   }
+  // A user line of no known origin starts a turn only when the model answers it next, as the delivery evaluation reads transcripts
+  const answered = (n: number) => {
+    const next = Math.min(...[...messages, ...log.responses.map((r) => r.line)].filter((m) => m > n));
+    return log.responses.some((r) => r.line === next);
+  };
+  const starts = [...prompts, ...unmarked.filter(answered)].sort((a, b) => a - b);
+  for (const r of log.responses) r.turn = String(starts.filter((s) => s < r.line).length);
   return log;
+}
+
+const CODEX_COUNTERS = ["input_tokens", "cached_input_tokens", "output_tokens"] as const;
+
+/**
+ * A Codex response's usage, checked against the turn's running total: the total before it plus this response must give the total after
+ * it, counter by counter, so a record missing in between shows as a gap. before is null at a turn's first response.
+ */
+function codexUsage(
+  p: Record<string, unknown>,
+  model: string,
+  before: Record<string, unknown> | null,
+): Pick<Response, "usage" | "gap"> {
+  const u = isObject(p.usage) ? p.usage : null;
+  const after = isObject(p.turn_token_usage) ? p.turn_token_usage : null;
+  if (!u || !after) return { usage: null, gap: "no usage or turn total" };
+  for (const k of CODEX_COUNTERS) {
+    const [mine, prev, total] = [count(u[k]), before ? count(before[k]) : 0, count(after[k])];
+    if (mine === null || prev === null || total === null) return { usage: null, gap: `no ${k}` };
+    if (prev + mine !== total)
+      return { usage: null, gap: `${k}: ${prev} + ${mine} is not the turn total ${total}` };
+  }
+  // Codex's input_tokens holds the cached part, which Claude Code counts apart
+  const [input, cached] = [count(u.input_tokens) as number, count(u.cached_input_tokens) as number];
+  if (cached > input)
+    return { usage: null, gap: `cached_input_tokens ${cached} is above input_tokens ${input}` };
+  return {
+    usage: {
+      model,
+      input: input - cached,
+      cacheCreation: 0,
+      cacheRead: cached,
+      output: count(u.output_tokens) as number,
+    },
+    gap: null,
+  };
 }
 
 /**
@@ -166,17 +257,27 @@ export function readCodex(dir: string, file: string): Log {
     calls: [],
     unreadable: [],
   };
+  let model = "";
+  let lastTurn: string | null = null;
+  let turnTotal: Record<string, unknown> | null = null;
   for (const [n, d] of lines(raw, log.unreadable)) {
     const p = isObject(d.payload) ? d.payload : {};
     const at = typeof d.timestamp === "string" ? d.timestamp : null;
     if (d.type === "session_meta" && typeof p.id === "string" && !log.session) log.session = p.id;
+    if (d.type === "turn_context" && typeof p.model === "string") model = p.model;
     if (d.type === "token_usage_record") {
+      const key = typeof p.response_id === "string" ? p.response_id : null;
+      const turn = typeof p.turn_id === "string" ? p.turn_id : null;
+      if (key !== null && log.responses.at(-1)?.key === key) continue;
       log.responses.push({
-        key: typeof p.response_id === "string" ? p.response_id : null,
+        key,
         line: n,
         at,
-        turn: typeof p.turn_id === "string" ? p.turn_id : null,
+        turn,
+        ...codexUsage(p, model, turn === lastTurn ? turnTotal : null),
       });
+      turnTotal = isObject(p.turn_token_usage) ? p.turn_token_usage : null;
+      lastTurn = turn;
       continue;
     }
     const item = isObject(p.item) ? p.item : null;
@@ -436,10 +537,290 @@ async function freeze(o: {
   };
 }
 
+/** The frozen database and logs, after checking they still hash to what the baseline pinned */
+function thaw(frozen: string, inputs: Inputs): { db: string; logs: Log[] } {
+  const db = path.join(frozen, inputs.snapshot.file);
+  if (sha256(fs.readFileSync(db)) !== inputs.snapshot.sha256)
+    throw new Error(`${db} does not hash to the pinned sha256`);
+  const logs = inputs.logs.files.map((f) => {
+    const dir = logDir(frozen, f.host);
+    const l = f.host === "claude-code" ? readClaude(dir, f.file) : readCodex(dir, f.file);
+    if (l.sha256 !== f.sha256) throw new Error(`${f.file} does not hash to the pinned sha256`);
+    return l;
+  });
+  return { db, logs };
+}
+
+const RUN_ID = /^run: (\S+)/m;
+
+/** The run a record-server call works on: its run argument, or for trace_begin the run its result returned */
+function callRun(c: Call): string | null {
+  if (c.tool === "trace_begin") return c.result?.ok ? (RUN_ID.exec(c.result.text)?.[1] ?? null) : null;
+  return typeof c.input.run === "string" ? c.input.run : null;
+}
+
+/** A response the owner's labelling confirmed served the owner's request, with the reason written down */
+export type OwnerWork = { host: Host; file: string; line: number; reason: string };
+
+export type Attributed = {
+  host: Host;
+  file: string;
+  key: string | null;
+  line: number;
+  span: number;
+  runs: number[];
+  selection: boolean;
+  unattributed: boolean;
+  owner_work: string | null;
+  usage: Usage | null;
+  gap: string | null;
+  lower: boolean;
+  upper: boolean;
+};
+
+export type SpanResult = {
+  host: Host;
+  file: string;
+  start: number;
+  end: number;
+  from: string | null;
+  to: string | null;
+  truncated: boolean;
+  runs: number[];
+  /** From the span's start to the first response that began a run, or to its end when none did */
+  selection_seconds: number | null;
+};
+
+const seconds = (from: string | null, to: string | null): number | null =>
+  from && to ? (Date.parse(to) - Date.parse(from)) / 1000 : null;
+
+/**
+ * Every response of every automatic trace span, with what it worked on. A span runs from the response that called trace_pending with
+ * auto: true to the response that reads the last record-server result of that sequence in the same turn (or the turn's last response).
+ * A response with no record-server call or result belongs to the one run open then (begun, not yet saved), and is unattributed when zero
+ * or several are open. owner_work comes only from labelling, never from the kind of tool a response used.
+ */
+export function attribute(
+  population: Population,
+  logs: Log[],
+  ownerWork: OwnerWork[] = [],
+): { responses: Attributed[]; spans: SpanResult[] } {
+  const byDraft = new Map(population.runs.map((r) => [r.draft, r]));
+  const responses: Attributed[] = [];
+  const spans: SpanResult[] = [];
+  const isAutoPending = (c: Call) =>
+    c.server === "record" && c.tool === "trace_pending" && c.input.auto === true;
+  for (const start of population.spans) {
+    const log = logs.find((l) => l.host === start.host && l.file === start.file);
+    const call = log?.calls.find((c) => c.id === start.call && c.line === start.line);
+    if (!log || !call || call.response === null)
+      throw new Error(
+        `the span at ${start.host} ${start.file}:${start.line} has no response in the frozen logs`,
+      );
+    const rs = call.response;
+    const turn = log.responses[rs]?.turn ?? null;
+    const record = (r: number) => log.calls.filter((c) => c.response === r && c.server === "record");
+    let stop = rs + 1;
+    while (
+      stop < log.responses.length &&
+      log.responses[stop]?.turn === turn &&
+      !record(stop).some(isAutoPending)
+    )
+      stop++;
+    let last = rs;
+    for (let r = rs; r < stop; r++) if (record(r).length) last = r;
+    const closed = last + 1 < stop;
+    const end = closed ? last + 1 : stop - 1;
+    const endAt = log.responses[end]?.at ?? null;
+    const unanswered = record(last).some((c) => c.result === null);
+    const truncated =
+      unanswered || !endAt || endAt >= population.window.to || (!closed && stop === log.responses.length);
+    const span = spans.length;
+    const open = new Set<string>();
+    const touchedRuns = new Set<number>();
+    let begun: string | null = null;
+    for (let r = rs; r <= end; r++) {
+      const resp = log.responses[r] as Response;
+      const issued = record(r);
+      const touched = [...issued, ...(r > rs ? record(r - 1) : [])];
+      const drafts = touched.map(callRun).filter((d): d is string => d !== null);
+      const runs = new Set<number>();
+      let unattributed = drafts.some((d) => !byDraft.has(d));
+      for (const d of drafts) {
+        const run = byDraft.get(d);
+        if (run) runs.add(run.id);
+      }
+      if (!touched.length) {
+        const only = open.size === 1 ? byDraft.get([...open][0] as string) : undefined;
+        if (only) runs.add(only.id);
+        else unattributed = true;
+      }
+      const selection = touched.some(
+        (c) => c.tool === "trace_pending" || (c.tool === "trace_begin" && callRun(c) === null),
+      );
+      for (const c of issued) {
+        const d = callRun(c);
+        if (c.tool === "trace_begin" && d) {
+          open.add(d);
+          begun ??= resp.at;
+        }
+        if (c.tool === "record_save" && d && c.result?.ok && !c.result.text.startsWith("✗")) open.delete(d);
+      }
+      for (const id of runs) touchedRuns.add(id);
+      const owner = ownerWork.find((o) => o.host === log.host && o.file === log.file && o.line === resp.line);
+      responses.push({
+        host: log.host,
+        file: log.file,
+        key: resp.key,
+        line: resp.line,
+        span,
+        runs: [...runs].sort((a, b) => a - b),
+        selection,
+        unattributed,
+        owner_work: owner?.reason ?? null,
+        usage: resp.usage,
+        gap: resp.gap,
+        lower: false,
+        upper: false,
+      });
+    }
+    spans.push({
+      host: log.host,
+      file: log.file,
+      start: log.responses[rs]?.line as number,
+      end: log.responses[end]?.line as number,
+      from: log.responses[rs]?.at ?? null,
+      to: endAt,
+      truncated,
+      runs: [...touchedRuns].sort((a, b) => a - b),
+      selection_seconds: seconds(log.responses[rs]?.at ?? null, begun ?? endAt),
+    });
+  }
+  // A run is known empty only when it saved, saved no record, and no span that touched it was cut short
+  const cut = new Set(spans.filter((s) => s.truncated).flatMap((s) => s.runs));
+  const outcome = new Map(
+    population.runs.map((r) => [
+      r.id,
+      r.status !== "saved" || cut.has(r.id) ? "unknown" : r.units.length ? "saved" : "empty",
+    ]),
+  );
+  for (const a of responses) {
+    const of = a.runs.map((id) => outcome.get(id) ?? "unknown");
+    a.lower =
+      of.length > 0 && of.every((o) => o === "empty") && !a.owner_work && !a.selection && !a.unattributed;
+    a.upper = of.some((o) => o !== "saved") || a.selection || a.unattributed;
+  }
+  return { responses, spans };
+}
+
+const METRICS = {
+  output: (u: Usage) => u.output,
+  all: (u: Usage) => u.input + u.cacheCreation + u.cacheRead + u.output,
+};
+
+export type Share = {
+  total: number;
+  empty_low: number;
+  empty_high: number;
+  share_low: number | null;
+  share_high: number | null;
+  /** Responses whose tokens the log does not give, and how many of them fall in each bound */
+  gaps: number;
+  gaps_low: number;
+  gaps_high: number;
+};
+
+/** The empty-run share of each token proxy, per host and never summed across hosts, with the models' totals */
+export function shares(responses: Attributed[]) {
+  const hosts = [...new Set(responses.map((r) => r.host))].sort();
+  return Object.fromEntries(
+    hosts.map((host) => {
+      const mine = responses.filter((r) => r.host === host);
+      const metric = (f: (u: Usage) => number): Share => {
+        const sum = (rs: Attributed[]) => rs.reduce((n, r) => n + (r.usage ? f(r.usage) : 0), 0);
+        const [total, low, high] = [
+          sum(mine),
+          sum(mine.filter((r) => r.lower)),
+          sum(mine.filter((r) => r.upper)),
+        ];
+        const gaps = mine.filter((r) => !r.usage);
+        return {
+          total,
+          empty_low: low,
+          empty_high: high,
+          share_low: total ? low / total : null,
+          share_high: total ? high / total : null,
+          gaps: gaps.length,
+          gaps_low: gaps.filter((r) => r.lower).length,
+          gaps_high: gaps.filter((r) => r.upper).length,
+        };
+      };
+      const models: Record<string, { responses: number; output: number; all: number }> = {};
+      for (const r of mine)
+        if (r.usage) {
+          const name = r.usage.model || "unknown";
+          models[name] ??= { responses: 0, output: 0, all: 0 };
+          const m = models[name];
+          m.responses++;
+          m.output += METRICS.output(r.usage);
+          m.all += METRICS.all(r.usage);
+        }
+      return [
+        host,
+        { responses: mine.length, output: metric(METRICS.output), all: metric(METRICS.all), models },
+      ];
+    }),
+  );
+}
+
+function spread(xs: number[]) {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = sorted.length / 2;
+  const median = !sorted.length
+    ? null
+    : sorted.length % 2
+      ? (sorted[Math.floor(mid)] as number)
+      : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+  return { n: sorted.length, total: sorted.reduce((a, b) => a + b, 0), median, max: sorted.at(-1) ?? null };
+}
+
+/** Run time from begin to save, span wall time with overlapping spans merged, and the time spent choosing a session */
+export function times(population: Population, spans: SpanResult[]) {
+  const runs = population.runs
+    .map((r) => seconds(r.started_at, r.finished_at))
+    .filter((s): s is number => s !== null);
+  const intervals = spans
+    .filter((s) => s.from && s.to)
+    .map((s) => [Date.parse(s.from as string), Date.parse(s.to as string)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  let merged = 0;
+  let edge = Number.NEGATIVE_INFINITY;
+  for (const [from, to] of intervals) {
+    merged += Math.max(0, to - Math.max(from, edge));
+    edge = Math.max(edge, to);
+  }
+  return {
+    run_seconds: spread(runs),
+    span_seconds: spread(intervals.map(([a, b]) => (b - a) / 1000)),
+    span_seconds_merged: merged / 1000,
+    selection_seconds: spread(spans.map((s) => s.selection_seconds).filter((s): s is number => s !== null)),
+  };
+}
+
+const USAGE_RULE =
+  "a verdict on fixed token proxies, not on subscription usage: per host, output tokens and all processed tokens (input + cache creation + cache read + output; Codex's cached input counted once), each response once; low counts responses touching only runs known empty with no selection, owner work, or unattributed part; high counts responses touching an empty or unknown run, and every selection or unattributed response";
+
 type Baseline = {
   note: string;
   inputs: Inputs;
   population: Population;
+  usage?: {
+    rule: string;
+    hosts: ReturnType<typeof shares>;
+    spans: SpanResult[];
+    responses: Attributed[];
+  };
+  time?: ReturnType<typeof times>;
 };
 
 /** An argument's date and time in the form the database stores, so comparing the strings compares the instants */
@@ -503,6 +884,23 @@ async function pin(values: Record<string, string | undefined>): Promise<void> {
   );
 }
 
+/** Counts tokens and time from the frozen inputs, and writes them into the baseline */
+function countUsage(values: Record<string, string | undefined>): void {
+  const file = values.baseline as string;
+  const baseline = JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+  if (populationDigest(baseline.population) !== baseline.population.sha256)
+    throw new Error(`${file} does not hash to its population's sha256`);
+  const { logs } = thaw(directory("frozen", values.frozen as string), baseline.inputs);
+  const owner = values["owner-work"]
+    ? (JSON.parse(fs.readFileSync(values["owner-work"], "utf8")) as { entries: OwnerWork[] }).entries
+    : [];
+  const { responses, spans } = attribute(baseline.population, logs, owner);
+  baseline.usage = { rule: USAGE_RULE, hosts: shares(responses), spans, responses };
+  baseline.time = times(baseline.population, spans);
+  fs.writeFileSync(file, `${JSON.stringify(baseline, null, 2)}\n`);
+  console.log(JSON.stringify(baseline.usage.hosts, null, 2));
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -516,6 +914,9 @@ async function main(): Promise<void> {
       repo: { type: "string" },
       frozen: { type: "string" },
       out: { type: "string" },
+      usage: { type: "boolean" },
+      baseline: { type: "string" },
+      "owner-work": { type: "string" },
     },
   });
   const need = (mode: string, keys: (keyof typeof values)[]) => {
@@ -527,7 +928,12 @@ async function main(): Promise<void> {
     await pin(values as Record<string, string | undefined>);
     return;
   }
-  throw new Error("pass --freeze to pin the population and its inputs");
+  if (values.usage) {
+    need("--usage", ["baseline", "frozen"]);
+    countUsage(values as Record<string, string | undefined>);
+    return;
+  }
+  throw new Error("pass --freeze to pin the population and its inputs, or --usage to count tokens and time");
 }
 
 if (process.argv[1] && /auto-trace\.(ts|js)$/.test(process.argv[1])) await main();
