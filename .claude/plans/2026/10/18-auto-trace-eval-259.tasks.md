@@ -78,6 +78,16 @@ base: main
   - コミット: `feat(eval): decide the three automatic trace bars from settled labels (T04)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 20 件 pass（確定 28 は pass・27 は fail・unknown を含む 27+1 は undecided・wrong は useful に数えない、持ち主の採用の取り違え 1 件で fail・unknown で undecided・AI の採用は件数だけ、0.3 ちょうどは超えない・両指標と両端が割れると undecided・gap と分母 0 も undecided、次の手の集合、別の行や語彙の外のラベルを拒む、CLI はラベルを 1 回だけ取り込み 2 回目は固定した入力から同じ結果と報告・書き換えた結果は 0 以外で終わる）。`bun run check` → 0
 
+- [x] T09: 窓の終わりをまたぐ最後の応答で区間を打ち切り、時間を窓の終わりまでにする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T08（直す対象の窓の打ち切り）
+  - 変更: `server/evals/trace/auto-trace.ts`, `server/test/auto-trace.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 始まりが窓の中で最後の行が窓の後の応答で、区間が打ち切りにならず終わりが窓の外になるテストが落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 全件 pass。最後の行が窓の終わり以降なら区間は打ち切りで、終わりの時刻は窓の終わり
+  - コミット: `fix(eval): cut a span whose last response runs past the window's end (T09)`
+  - 結果: red: 直す前のコードで `cd server && node --import ./test/isolate-home.ts --test test/auto-trace.test.ts` → 始まり 00:00:19・最後の行 00:00:49 の m10 に窓の終わり 00:00:30 を当てると truncated が false で落ちた。直した後、同じコマンド → 20 件 pass（打ち切りで終わりは 00:00:30）。`bun run check` → 0
+
 ## P2: 測定と報告
 
 持ち主の DB と会話の記録で測り、ラベルを確定して判定し、結果を #259 に出す。
@@ -85,7 +95,7 @@ base: main
 - [ ] T05: 本番のデータを固定し、トークンと時間を数え、40 件と監査の一覧を出す
   - 種別: 追加
   - 計画: S5
-  - 依存: T02（トークンの集計が要る）, T03（抜き取りが要る）
+  - 依存: T02（トークンの集計が要る）, T03（抜き取りが要る）, T09（本番のデータは区間の打ち切りを直した後で数える）
   - 変更: `server/evals/trace/auto-trace-baseline.json`
   - 完了条件: `jq -c '{runs: .population.records.runs, records: .population.records.units, sample: (.sample | length), audit: (.audit | length)}' server/evals/trace/auto-trace-baseline.json` → 固定した入力からの値が出て、sample は 40。固定先はリポジトリの外で、transcript の写しをコミットしない
   - コミット: `test(eval): pin the 2026-10-04..18 automatic trace population and its usage (T05)`
@@ -104,3 +114,5 @@ base: main
 - 2026-10-18 / T07 / T01 の Codex のレビューで P2 が 2 件（本番の DB から抽出してから別の接続で backup するので間の変更で再現できない、Codex のログはプロジェクトをまたぐので別のプロジェクトの自動 trace_pending が区間に入る。後者は再現あり）。どちらも採る / 修正タスク T07 を T03 の前に足した
 - 2026-10-18 / T08 / T02 の Codex のレビューで P2 が 2 件（Claude Code の応答の時刻を最初の行で取るので区間の終わりが早く出る、実ログで 33 秒、再現あり。窓の終わりで打ち切りの印を付けるだけで窓の外の応答も数える、再現あり）。どちらも採る / 修正タスク T08 を T04 の前に足した
 - 2026-10-18 / T07 / T07 の Codex のレビューで P2 が 1 件（--root の外にある worktree からの呼び出しが外れる。合成したログで再現）。断る: 同じレビューで実ログの自動の呼び出し 147 件は全部残り、外の worktree からの自動の呼び出しは 1 件も無かった。T05 で --root で外れた自動の呼び出しの数を数え、0 でなければ直す / 記録だけ残した
+- 2026-10-18 / T09 / T08 の Codex のレビューで P2 が 1 件（始まりが窓の中で最後の行が窓の後の応答だと、打ち切りにならず窓の外の時間が入る。実ログに窓を当てて再現、計画の窓では観測なし）。採る: 計画の決まり（窓の終わりで打ち切り）に反する / 修正タスク T09 を足した。T03 と T08 のレビューは依頼文の SHA が空になり 2 件とも HEAD を見ていたので、T03 を SHA を付けて頼み直した
+- 2026-10-18 / T05 / 依存の欄を変えた。前: T02, T03、新: T02, T03, T09 / 本番のデータは直した区間の決め方で数えるため

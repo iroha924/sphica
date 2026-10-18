@@ -1037,6 +1037,13 @@ test("a span ends at the last line of its closing response, and responses from t
       [],
       "a run cut off by the window is not known empty",
     );
+    // The closing response m10 starts inside the window and its last line comes after the window's end
+    const straddle = attribute({ ...early, window: { from: WINDOW.from, to: at("2026-10-05T00:00:30Z") } }, [
+      log,
+    ]);
+    assert.equal(straddle.responses.at(-1)?.key, "m10");
+    assert.equal(straddle.spans[0]?.truncated, true);
+    assert.equal(straddle.spans[0]?.to, at("2026-10-05T00:00:30Z"));
   } finally {
     fs.rmSync(dirs.root, { recursive: true, force: true });
   }

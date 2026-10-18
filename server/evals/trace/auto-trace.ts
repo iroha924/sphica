@@ -654,9 +654,13 @@ export function attribute(
     // Responses from the window's end on are not counted: the span is cut there
     let end = whole;
     while (end > rs && (log.responses[end]?.at ?? "") >= population.window.to) end--;
-    const endAt = log.responses[end]?.until ?? null;
+    const until = log.responses[end]?.until ?? null;
+    // A last response that runs past the window's end is cut there too
+    const past = until !== null && until >= population.window.to;
+    const endAt = past ? population.window.to : until;
     const unanswered = record(last).some((c) => c.result === null);
-    const truncated = end < whole || unanswered || !endAt || (!closed && stop === log.responses.length);
+    const truncated =
+      end < whole || past || unanswered || !endAt || (!closed && stop === log.responses.length);
     const span = spans.length;
     const open = new Set<string>();
     const touchedRuns = new Set<number>();
