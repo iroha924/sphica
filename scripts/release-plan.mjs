@@ -46,8 +46,12 @@ const paths = (...args) =>
   execFileSync("git", [...args, "-z"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter(Boolean);
-// A file name can hold a line break: shown as a JSON string, it cannot print a line of its own
-const shown = (file) => (/\p{Cc}/u.test(file) ? JSON.stringify(file) : file);
+// A file name can hold a line break, U+2028 and U+2029 included (JSON.stringify leaves those two as they are): shown escaped as a
+// JSON string, it cannot print a line of its own
+const shown = (file) =>
+  /[\p{Cc}\u2028\u2029]/u.test(file)
+    ? JSON.stringify(file).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+    : file;
 // What is staged is what the commit will hold, so the base is compared with the index
 const files = paths("diff", "--name-only", ref, "--cached")
   .filter(isPackageInput)

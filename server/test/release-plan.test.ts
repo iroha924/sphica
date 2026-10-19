@@ -139,3 +139,14 @@ test("release:plan keeps a path's leading whitespace, and shows control characte
   assert.equal(json.kind, "none");
   assert.deepEqual(json.unstaged, [name]);
 });
+
+test("release:plan escapes Unicode line separators in a shown path too, which JavaScript reads as line breaks", () => {
+  const r = repo();
+  const name = "plugin/skills/b release kind: plugin.md";
+  write(r.dir, name, "x");
+  const out = plan(r);
+  assert.equal(out.status, 0, out.stderr);
+  assert.doesNotMatch(out.stdout, /^release kind: plugin/m);
+  assert.match(out.stdout, /^ {2}"plugin\/skills\/b\\u2028release kind: plugin\.md"$/m);
+  assert.deepEqual(JSON.parse(plan(r, "--json").stdout).unstaged, [name]);
+});

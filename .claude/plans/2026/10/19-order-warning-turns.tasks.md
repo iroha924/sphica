@@ -56,6 +56,16 @@ base: main
   - コミット: `fix(release): read release:plan paths untrimmed and escape them when shown (T03)`
   - 結果: red: テストだけを足して流す → fail（先頭がタブの外のファイルが `inputs: plugin/skills/outside.md` として plugin に分類され、改行を含む名前から `release kind: plugin.md` の行が出た）。直した後 → 2 件 pass。`bun run verify` → exit 0
 
+- [x] T04: 同じターンの特例を AskUserQuestion の質問に当てず、release:plan の表示で行区切りの文字もエスケープする
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T01（直す判定が T01 にある）, T03（直す表示が T03 にある）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `scripts/release-plan.mjs`, `server/test/release-plan.test.ts`
+  - red: テストだけを足して `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="within one turn|line separators" test/record.test.ts test/release-plan.test.ts` → 1 つ目の答えを採用・同じターンの後の質問を proposes にしたケースで警告が出ないため、U+2028 を含む名前で偽の行が出るために落ちる
+  - 完了条件: 同じコマンド → 通る。`bun run verify` → 0 で終わる
+  - コミット: `fix: keep the order warning for a question, and escape line separators in release:plan (T04)`
+  - 結果: red: テストだけを足して流す → 2 件 fail（後の質問を proposes にしたケースで警告が無い、U+2028 の名前で `release kind: plugin.md` の行が出る）。直した後 record.test と release-plan.test の 88 件 pass。`bun run verify` → exit 0（acceptance 151、SQL 267/267）。review-shipping（コミット前）: 指摘なし
+
 ## 記録
 
 - 2026-10-19 / T01 / review-shipping（コミット前）: 出荷してよい、低 1 件。中継されたメッセージで始まるターンは前のターンの turn id を使い回す（`server/test/capture.test.ts:1053`）ので、前後が分かる組み合わせでも警告が出ないことがある / 不採用。失うのは警告だけで保存は変わらず、中継で始まるターンに限る。PR に限界として書く
@@ -64,3 +74,4 @@ base: main
 - 2026-10-19 / T02 / Codex の全差分レビュー（17bdf688）で P2 が 2 件（どちらも再現済み）: -z で取ったパスを表示でエスケープしないので改行を含む名前で偽の行を作れる、git() の trim が -z の先頭のタブを削り外のファイルを package と分類する / 採用。T03 を足して直す
 - 2026-10-19 / T02 / review-shipping（コミット後、push 前）: 指摘なし。突然変異 3 種でテストが落ちることを確認済み
 - 2026-10-19 / T03 / Codex の再レビュー（c84d14fd、全差分レビューと同じ会話）: F1・F2 は直っていて、新しい欠陥なし
+- 2026-10-19 / T01・T03 / GitHub の Codex レビュー（bc68abb0）で P2 が 2 件: 同じターンの特例が AskUserQuestion の質問（`:ask:…:q:`、答えの 1 ミリ秒前に記録され前後が分かる）にも効く、U+2028/U+2029 が `\p{Cc}` に入らず行を偽装できる / 採用。T04 を足して直す

@@ -733,6 +733,8 @@ export async function checkRecord(
       const midTurn =
         adopted &&
         proposed?.author_kind === "assistant" &&
+        // A question asked with AskUserQuestion is captured just before its answer, not when the turn stops
+        !proposed.external_id.includes(":ask:") &&
         adopted.session_id !== null &&
         adopted.turn_id !== null &&
         proposed.session_id === adopted.session_id &&

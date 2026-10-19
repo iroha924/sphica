@@ -1041,6 +1041,11 @@ test("within one turn, only the turn's first message is taken to come before the
     const nullOwner = said("n1", "No turn here.", "owner", "07", null);
     const nullReply = said("n2", "No turn reply.", "assistant", "08", null);
     const elsewhere = said("x1", "Another session's reply.", "assistant", "09", "t1", "s2");
+    // A question asked with AskUserQuestion is captured just before its answer, so its order is known, unlike the turn's last reply
+    said("o5", "Pick the scope.", "owner", "10", "t4");
+    said("t4:ask:u1:q:1", "Q1: Narrow it?", "assistant", "11", "t4");
+    const firstAnswer = said("t4:ask:u1:1", "A1: Narrow it", "owner", "12", "t4");
+    const laterQuestion = said("t4:ask:u2:q:2", "Q1: Keep subagents too?", "assistant", "13", "t4");
     const words = new Map<number, string>([
       [start, "Shall we narrow it?"],
       [mid, "Yes, narrow it."],
@@ -1052,6 +1057,8 @@ test("within one turn, only the turn's first message is taken to come before the
       [nullOwner, "No turn here."],
       [nullReply, "No turn reply."],
       [elsewhere, "Another session's reply."],
+      [firstAnswer, "A1: Narrow it"],
+      [laterQuestion, "Q1: Keep subagents too?"],
     ]);
     const unit = (key: string, adopted: number, proposed: number[]) => ({
       key,
@@ -1072,6 +1079,7 @@ test("within one turn, only the turn's first message is taken to come before the
         unit("other-session", mid, [elsewhere]),
         unit("owner-proposes", mid, [midLater]),
         unit("same-source", mid, [mid]),
+        unit("later-question", firstAnswer, [laterQuestion]),
       ],
     });
     const warned = checked.problems
@@ -1083,6 +1091,7 @@ test("within one turn, only the turn's first message is taken to come before the
       `trace:ext-s1/no-turns: its adoption (s${nullOwner}) is older than the proposal it cites (s${nullReply})`,
       `trace:ext-s1/other-session: its adoption (s${mid}) is older than the proposal it cites (s${elsewhere})`,
       `trace:ext-s1/owner-proposes: its adoption (s${mid}) is older than the proposal it cites (s${midLater})`,
+      `trace:ext-s1/later-question: its adoption (s${firstAnswer}) is older than the proposal it cites (s${laterQuestion})`,
     ]);
   } finally {
     await db.done();
