@@ -56,7 +56,19 @@ trace・harvest・glean の Skill が、提案が変わったら最終版への�
   - コミット: `test(record): pass a real agent adoption to the order warning test (T03)`
   - 結果: red: 直す前のテストで agent の除外を外して流す → pass（空振り）。直した後、同じ書き換え → fail、戻して → pass。adoption の route が ["agent"] であることも assert した。`bun run verify` → exit 0
 
+- [x] T04: 警告の判定のコメントを、断定ではなく警告にとどめる理由の説明にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T01（直すコメントが T01 にある）
+  - 変更: `server/src/record.ts`
+  - red: `rg -n "answered an earlier version" server/src/record.ts` → 1 行当たる（時刻の前後だけで、前の版への返事だったと言い切っている）
+  - 完了条件: 同じ `rg` → 当たらない。`bun run verify` → 0 で終わる
+  - コミット: `docs(record): say the adoption order check only warns (T04)`
+  - 結果: red: `rg -n "answered an earlier version" server/src/record.ts` → 720 行目に当たり。直した後 → 当たりなし（exit 1）。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-19 / T01 / 完了条件の release:plan を「版を編集する前に流す」→「コミットの後に流す」に変えた / release:plan はコミット済みの履歴だけを読み、作業ツリーの変更では none と出たため（plan の変更履歴にも記載）
 - 2026-10-19 / T01 / Codex のタスクごとのレビュー（c504abcf）で P2 が 1 件: agent の採用の除外を確かめるテストが adoption を空のまま渡していて空振りする（Codex が再現） / 採用。T03 を足して直す
+- 2026-10-19 / T01 / GitHub の Codex レビュー（cc17382d）の P1「コメントが言い切りすぎ」 / 採用。後の発言が言い換えなだけのこと（u655）もあるので、T04 を足して直す
+- 2026-10-19 / T01 / GitHub の Codex レビュー（cc17382d）の P1「release:plan を版の編集の前に戻せ」 / 不採用。release:plan はコミット済みの履歴だけを読み（作業ツリーでは none と出た）、pre-commit の bundle は版を上げない package のコミットを止めるので、その順序は今の仕組みでは取れない。PR 本文の Declined findings に書く

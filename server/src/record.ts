@@ -717,7 +717,8 @@ export async function checkRecord(
       problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
       adoption.splice(adoption.indexOf(x), 1);
     }
-    // A reply older than the proposal the record cites answered an earlier version. Only a session's messages keep when each was said
+    // Only a warning: a reply older than the proposal the record cites may answer an earlier version, or the later message may only
+    // restate what was adopted. Only a session's messages keep when each was said
     if (target.origin === "trace") {
       const newest = (ids: number[]) => {
         let found: { id: number; created_at: string } | undefined;
