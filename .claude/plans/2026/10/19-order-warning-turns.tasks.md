@@ -22,7 +22,7 @@ base: main
 
 ターンの途中の持ち主の発言を採用に引き、同じターンの AI の返事を提案に引いたとき、trace の check と save が警告しない。0.6.63 に上げる。
 
-- [ ] T01: ターンの途中の発言と同じターンの返事を比べないようにし、0.6.63 に上げる
+- [x] T01: ターンの途中の発言と同じターンの返事を比べないようにし、0.6.63 に上げる
   - 種別: 修正
   - 計画: S1, S2
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: driver の `.answer` 参照、acceptance case（u655 の形）、件数 20 → 21 だけを足した状態で `bun run bundle && SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance` → 新しい case が `check reported "is older than the proposal it cites"` で落ち、capture-19 と capture-20 は通る
   - 完了条件: `bun run verify` → 0 で終わる。変更を `git add` した状態で `bun run release:plan -- --base v0.6.62` → `plugin`（版を上げる前に流す）
   - コミット: `fix(record): do not compare a mid-turn reply with the same turn's answer (T01)`
+  - 結果: red: driver の `.answer` 参照・capture-21・件数 21 だけの状態で `bun run bundle && SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance` → capture-21 が `check reported "is older than the proposal it cites"` で落ち（その前の active と採用 1 件の確認は通過）、capture-19・20 は pass。実装後、record.test の新しいテストから `!midTurn` を外すと fail、戻すと pass。変更を stage して `bun run release:plan -- --base v0.6.62` → `plugin`（版を上げる前）。`bun run verify` → exit 0（acceptance 151 件 pass）
 
 ## P2: release:plan の表示（#360）
 
@@ -45,3 +46,6 @@ base: main
   - コミット: `fix(release): say which package changes release:plan did not count (T02)`
 
 ## 記録
+
+- 2026-10-19 / T01 / review-shipping（コミット前）: 出荷してよい、低 1 件。中継されたメッセージで始まるターンは前のターンの turn id を使い回す（`server/test/capture.test.ts:1053`）ので、前後が分かる組み合わせでも警告が出ないことがある / 不採用。失うのは警告だけで保存は変わらず、中継で始まるターンに限る。PR に限界として書く
+- 2026-10-19 / T01 / review-shipping: Codex は AskUserQuestion にあたる答えを記録しない（`plugin/hooks/codex.json` の PostToolUse は apply_patch だけ）ので、答えの部分は Claude Code だけに効く。前からある差 / PR に書く

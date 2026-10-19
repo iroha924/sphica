@@ -721,14 +721,30 @@ export async function checkRecord(
     // restate what was adopted. Only a session's messages keep when each was said
     if (target.origin === "trace") {
       const newest = (ids: number[]) => {
-        let found: { id: number; created_at: string } | undefined;
+        let found: NonNullable<ReturnType<typeof sources.get>> | undefined;
         for (const s of ids.map((id) => sources.get(id)))
           if (s?.kind === "session_message" && (!found || s.created_at > found.created_at)) found = s;
         return found;
       };
       const adopted = newest(adoption.filter((x) => x.route !== "agent").map((x) => x.source));
       const proposed = newest(evidence.filter((e) => e.role === "proposes").map((e) => e.source));
-      if (adopted && proposed && proposed.created_at > adopted.created_at)
+      // A turn's reply is captured when the turn stops, so an owner message sent during that turn may have answered it. Only the
+      // turn's first message left in the database is taken to come before the reply: a notice or a forgotten message can hide the real first
+      const midTurn =
+        adopted &&
+        proposed?.author_kind === "assistant" &&
+        adopted.session_id !== null &&
+        adopted.turn_id !== null &&
+        proposed.session_id === adopted.session_id &&
+        proposed.turn_id === adopted.turn_id &&
+        (await db
+          .selectFrom("source")
+          .select("id")
+          .where("session_id", "=", adopted.session_id)
+          .where("created_at", "<", adopted.created_at)
+          .where("turn_id", "=", adopted.turn_id)
+          .executeTakeFirst()) !== undefined;
+      if (adopted && proposed && proposed.created_at > adopted.created_at && !midTurn)
         problems.push(
           `${key}: its adoption (s${adopted.id}) is older than the proposal it cites (s${proposed.id}); if the proposal changed, quote the owner's reply to the final version or leave the adoption out; keep it if the adoption is right`,
         );

@@ -403,21 +403,26 @@ export async function createDriver(world: World): Promise<Driver> {
     assert.equal(sent.rejected, 0, `the database rejected records of ${id}`);
   }
 
-  /** The source a case names as `session:<id>#<turn>.<owner|assistant|question>`; question is what the agent asked with AskUserQuestion. */
+  /**
+   * The source a case names as `session:<id>#<turn>.<owner|assistant|question|answer>`; question is what the agent asked with AskUserQuestion,
+   * and answer is what the owner chose there.
+   */
   async function sessionSource(ref: string, quote?: string) {
-    const m = /^session:([^#]+)#(\d+)\.(owner|assistant|question)$/.exec(ref);
+    const m = /^session:([^#]+)#(\d+)\.(owner|assistant|question|answer)$/.exec(ref);
     if (!m) return undefined;
     const rows = await db()
       .selectFrom("source as m")
       .innerJoin("session as s", "s.id", "m.session_id")
       .where("s.external_id", "=", m[1] ?? "")
       .where("m.turn_id", "=", turnId(Number(m[2])))
-      .where("m.author_kind", "=", m[3] === "owner" ? "owner" : "assistant")
+      .where("m.author_kind", "=", m[3] === "owner" || m[3] === "answer" ? "owner" : "assistant")
       .select(["m.id", "m.kind", "m.text", "m.external_id", "s.host"])
       .execute();
     // The reader may not call like; an AskUserQuestion turn holds the question and the answers beside the turn's own messages. A turn
     // can ask more than once: the one holding the quoted words is the one meant
-    const kind = rows.filter((r) => r.external_id.includes(":ask:") === (m[3] === "question"));
+    const kind = rows.filter(
+      (r) => r.external_id.includes(":ask:") === (m[3] === "question" || m[3] === "answer"),
+    );
     return (quote ? kind.find((r) => r.text.includes(quote)) : undefined) ?? kind[0];
   }
 

@@ -1000,6 +1000,95 @@ test("a trace's adoption older than the unit's newest proposal is saved with a w
   }
 });
 
+test("within one turn, only the turn's first message is taken to come before the reply captured when the turn stops", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    session(db, p, "s2");
+    const said = (
+      id: string,
+      text: string,
+      speaker: "owner" | "assistant",
+      second: string,
+      turn: string | null,
+      sessionId = "s1",
+    ) =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: `session:${sessionId}`,
+        external_id: id,
+        revision: 1,
+        session_id: sessionId,
+        turn_id: turn,
+        author_kind: speaker,
+        created_at: at(`2026-09-10T00:00:${second}Z`),
+        available_at: at(`2026-09-10T00:00:${second}Z`),
+        captured_at: at(`2026-09-10T00:00:${second}Z`),
+        text,
+        original_bytes: Buffer.byteLength(text),
+        content_hash: hash(),
+        indexed: speaker === "owner" ? 1 : 0,
+      });
+    session(db, p, "s1");
+    const start = said("o1", "Shall we narrow it?", "owner", "01", "t1");
+    const mid = said("o2", "Yes, narrow it.", "owner", "02", "t1");
+    const midLater = said("o3", "And keep subagents.", "owner", "03", "t1");
+    const reply = said("a1", "Narrowed to codex exec only.", "assistant", "04", "t1");
+    const second = said("a2", "Also the starts of other sessions.", "assistant", "05", "t1");
+    const tieOwner = said("o4", "Same moment.", "owner", "06", "t3");
+    const tieReply = said("a3", "Same moment reply.", "assistant", "06", "t3");
+    const nullOwner = said("n1", "No turn here.", "owner", "07", null);
+    const nullReply = said("n2", "No turn reply.", "assistant", "08", null);
+    const elsewhere = said("x1", "Another session's reply.", "assistant", "09", "t1", "s2");
+    const words = new Map<number, string>([
+      [start, "Shall we narrow it?"],
+      [mid, "Yes, narrow it."],
+      [midLater, "And keep subagents."],
+      [reply, "Narrowed to codex exec only."],
+      [second, "Also the starts of other sessions."],
+      [tieOwner, "Same moment."],
+      [tieReply, "Same moment reply."],
+      [nullOwner, "No turn here."],
+      [nullReply, "No turn reply."],
+      [elsewhere, "Another session's reply."],
+    ]);
+    const unit = (key: string, adopted: number, proposed: number[]) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: `Scope (${key})`,
+      evidence: proposed.map((s) => ({ source: `s${s}`, quote: words.get(s), role: "proposes" })),
+      adoption: [{ source: `s${adopted}`, quote: words.get(adopted) }],
+    });
+    const checked = await checkRecord(db.ingest, target(p), {
+      units: [
+        // The earlier message of the turn is not cited, and still makes this one a message sent during the turn
+        unit("mid-turn", mid, [reply]),
+        unit("turn-start", start, [reply]),
+        unit("two-replies", start, [reply, second]),
+        unit("same-time", tieOwner, [tieReply]),
+        unit("no-turns", nullOwner, [nullReply]),
+        unit("other-session", mid, [elsewhere]),
+        unit("owner-proposes", mid, [midLater]),
+        unit("same-source", mid, [mid]),
+      ],
+    });
+    const warned = checked.problems
+      .filter((x) => x.includes("is older than the proposal it cites"))
+      .map((x) => x.slice(0, x.indexOf(";")));
+    assert.deepEqual(warned, [
+      `trace:ext-s1/turn-start: its adoption (s${start}) is older than the proposal it cites (s${reply})`,
+      `trace:ext-s1/two-replies: its adoption (s${start}) is older than the proposal it cites (s${second})`,
+      `trace:ext-s1/no-turns: its adoption (s${nullOwner}) is older than the proposal it cites (s${nullReply})`,
+      `trace:ext-s1/other-session: its adoption (s${mid}) is older than the proposal it cites (s${elsewhere})`,
+      `trace:ext-s1/owner-proposes: its adoption (s${mid}) is older than the proposal it cites (s${midLater})`,
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
 test("supersedes retires the old record with evidence, and conflicts link both", async () => {
   const db = tempDb();
   try {
