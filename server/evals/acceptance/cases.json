@@ -3315,6 +3315,67 @@
       ]
     },
     {
+      "id": "capture-21",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "An owner's answer to AskUserQuestion is not called older than the same turn's reply, which is captured only when the turn stops",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-asked-scope",
+            "host": "claude-code",
+            "at": "2026-06-05T11:00:00Z",
+            "turns": [
+              {
+                "owner": "CI の待ち時間をもう少し縮めたい。",
+                "asks": [
+                  {
+                    "question": "最長の unit をどこまで縮めますか？",
+                    "answer": "中: カバレッジを片方の Node だけで取る"
+                  }
+                ],
+                "assistant": "では Node 24.15 ではカバレッジを取らずに、テストだけを流します。計画にします。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-asked-scope",
+          "record": {
+            "units": [
+              {
+                "key": "coverage-one-node",
+                "kind": "decision",
+                "stance": "do",
+                "text": "CI のカバレッジは片方の Node だけで取り、Node 24.15 ではテストだけを流す",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-asked-scope#1.assistant",
+                    "quote": "Node 24.15 ではカバレッジを取らずに、テストだけを流します",
+                    "role": "proposes"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-asked-scope#1.answer",
+                    "quote": "中: カバレッジを片方の Node だけで取る"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        { "unit": "trace:s-ja-asked-scope/coverage-one-node", "lifecycle": "active" },
+        { "adoption_count": { "of": "trace:s-ja-asked-scope/coverage-one-node", "count": 1 } },
+        { "check_problem_absent": "is older than the proposal it cites" }
+      ]
+    },
+    {
       "id": "forget-01",
       "layer": "forget",
       "lang": "ja",

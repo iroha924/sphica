@@ -41,15 +41,30 @@ const at = (revision, file) => {
     return null;
   }
 };
-const files = git("diff", "--name-only", ref, "--cached")
-  .split("\n")
-  .filter(Boolean)
+// Paths come NUL-separated and untrimmed, so that names outside ASCII are not quoted and leading spaces stay part of the name
+const paths = (...args) =>
+  execFileSync("git", [...args, "-z"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean);
+// A file name can hold a line break, U+2028 and U+2029 included (JSON.stringify leaves those two as they are): shown escaped as a
+// JSON string, it cannot print a line of its own
+const shown = (file) =>
+  /[\p{Cc}\u2028\u2029]/u.test(file)
+    ? JSON.stringify(file).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029")
+    : file;
+// What is staged is what the commit will hold, so the base is compared with the index
+const files = paths("diff", "--name-only", ref, "--cached")
   .filter(isPackageInput)
   .filter(
     (file) =>
       !versionFiles.has(file) || withoutReleaseVersion(at(ref, file)) !== withoutReleaseVersion(at("", file)),
   );
 const kind = releaseKind(files);
+const unstaged = [
+  ...new Set([...paths("diff", "--name-only"), ...paths("ls-files", "--others", "--exclude-standard")]),
+]
+  .filter(isPackageInput)
+  .sort();
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 const packageVersion = read("plugin/package.json").version;
 const claudeVersion = read("plugin/.claude-plugin/plugin.json").version;
@@ -92,9 +107,11 @@ const settings =
       });
 const plan = {
   base: ref,
+  compared: "index",
   commit: git("rev-parse", "HEAD"),
   kind,
   files,
+  unstaged,
   versions: {
     package: packageVersion,
     claude: claudeVersion,
@@ -110,11 +127,15 @@ if (json) {
 } else {
   const label = { none: "none (no release)", plugin: "plugin" }[kind];
   console.log(`release kind: ${label}`);
-  console.log(`compared: ${ref}..${plan.commit}`);
+  console.log(`compared: ${ref}..index (HEAD ${plan.commit})`);
   console.log(
     `version: npm ${packageVersion} / plugin ${claudeVersion} / marketplace ${marketplaceVersion} / Codex ${codexVersion}`,
   );
-  if (files.length) console.log(`inputs: ${files.join(", ")}`);
+  if (files.length) console.log(`inputs: ${files.map(shown).join(", ")}`);
+  if (unstaged.length) {
+    console.log(`not staged, not counted (git add them first): ${unstaged.length}`);
+    for (const file of unstaged) console.log(`  ${shown(file)}`);
+  }
   for (const action of actions) console.log(`  ${action}`);
   for (const { name, state } of settings)
     console.log(`${state === "on" ? "" : "fix before releasing: "}${name}: ${state}`);

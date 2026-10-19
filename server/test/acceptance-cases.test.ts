@@ -15,7 +15,7 @@ import { tempDir } from "./temp-dir.ts";
 const ROOT = path.join(import.meta.dirname, "..", "..");
 
 const PER_LAYER = {
-  capture: 20,
+  capture: 21,
   status: 9,
   retrieval: 17,
   injection: 34,
