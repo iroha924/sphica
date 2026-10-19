@@ -22,14 +22,15 @@ base: main
 
 trace の新しい記録で、採用の発言が引いた提案より前なら check と save が警告する。0.6.62 に上げる。
 
-- [ ] T01: 採用が引いた提案より前のときの警告を足し、0.6.62 に上げる
+- [x] T01: 採用が引いた提案より前のときの警告を足し、0.6.62 に上げる
   - 種別: 修正
   - 計画: S1, S2, S4
   - 依存: なし
   - 変更: `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `server/src/record.ts`, `server/test/record.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: acceptance case 2 件と件数（capture 18 → 20）だけを足した状態で `bun run bundle && SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance` → 前の返事を引く case が「check did not report "is older than the proposal it cites"」で落ち、最終版の返事を引く case は通る
-  - 完了条件: `bun run verify` → 0 で終わる。`bun run release:plan -- --base bf7e146b` → `plugin`（版を編集する前に流す）
+  - 完了条件: `bun run verify` → 0 で終わる。コミットの後に `bun run release:plan -- --base bf7e146b` → `plugin`
   - コミット: `fix(record): warn when a trace's adoption is older than the proposal it cites (T01)`
+  - 結果: red: case と件数だけを足して `bun run bundle && SPHICA_ACCEPTANCE_LAYER=capture bun run acceptance` → capture-19 が「check did not report "is older than the proposal it cites"」で落ち、capture-20 は pass。実装後 `bun run verify` → exit 0（acceptance 150 件 pass）。record.test.ts の新しいテストを単独で流して pass
 
 ## P2: Skill の文面
 
@@ -45,3 +46,5 @@ trace・harvest・glean の Skill が、提案が変わったら最終版への�
   - コミット: `docs(skills): quote the reply to the final proposal as the adoption (T02)`
 
 ## 記録
+
+- 2026-10-19 / T01 / 完了条件の release:plan を「版を編集する前に流す」→「コミットの後に流す」に変えた / release:plan はコミット済みの履歴だけを読み、作業ツリーの変更では none と出たため（plan の変更履歴にも記載）

@@ -887,6 +887,92 @@ test("a merge or a contributor cannot adopt; the unit is kept as a candidate and
   }
 });
 
+test("a trace's adoption older than the unit's newest proposal is saved with a warning, and no other order warns", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = (id: string, text: string, speaker: "owner" | "assistant", sent: string) =>
+      message(db, p, { id, text, speaker, sent: `2026-09-10T00:00:0${sent}Z` });
+    const wide = said("m1", "Stop delivery to every subagent.", "assistant", "1");
+    const go = said("m2", "File an issue.", "owner", "2");
+    const narrow = said("m3", "Narrowed to codex exec sessions only.", "assistant", "3");
+    const ok = said("m4", "OK.", "owner", "4");
+    const tie = said("m5", "Same moment as the narrowing.", "owner", "3");
+    const unit = (
+      key: string,
+      adoption: number[],
+      evidence: [number, string, string][],
+      options: unknown[] = [],
+    ) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: `Next experiment (${key})`,
+      evidence: evidence.map(([s, quote, role]) => ({ source: `s${s}`, quote, role })),
+      adoption: adoption.map((s) => ({
+        source: `s${s}`,
+        quote: s === go ? "File an issue." : s === ok ? "OK." : "Same moment",
+      })),
+      options,
+    });
+    const proposes: [number, string, string] = [narrow, "codex exec sessions only", "proposes"];
+    const warned = (problems: string[]) =>
+      problems.filter((x) => x.includes("is older than the proposal it cites"));
+
+    const before = dump(db);
+    const checked = await checkRecord(db.ingest, target(p), {
+      units: [
+        unit("older", [go], [proposes]),
+        unit("final", [ok], [proposes]),
+        unit("tie", [tie], [proposes]),
+        unit("newest-of-two", [go, ok], [proposes]),
+        unit("none-adopted", [], [proposes]),
+        unit("no-proposal", [go], [[narrow, "codex exec sessions only", "explains"]]),
+        unit(
+          "option-only",
+          [go],
+          [[wide, "every subagent", "proposes"]],
+          [
+            {
+              text: "codex exec only",
+              outcome: "rejected",
+              evidence: [{ source: `s${narrow}`, quote: "codex exec", role: "proposes" }],
+            },
+          ],
+        ),
+      ],
+    });
+    assert.deepEqual(dump(db), before);
+    assert.deepEqual(warned(checked.problems), [
+      `trace:ext-s1/older: its adoption (s${go}) is older than the proposal it cites (s${narrow}); if the proposal changed, quote the owner's reply to the final version or leave the adoption out; keep it if the adoption is right`,
+    ]);
+
+    // Only a trace compares times: a harvest's sources can be edited after they were written
+    const harvest = { ...target(p, null), origin: "harvest" as const, prefix: "harvest:12/" };
+    assert.deepEqual(
+      warned((await checkRecord(db.ingest, harvest, { units: [unit("older", [go], [proposes])] })).problems),
+      [],
+    );
+
+    // The AI's own adoption quotes the same reply as its decides evidence, so it has no earlier reply to compare
+    const agent = await checkRecord(
+      db.ingest,
+      { ...target(p), agent: true },
+      {
+        units: [unit("agent", [], [[wide, "every subagent", "decides"], proposes])],
+      },
+    );
+    assert.deepEqual(warned(agent.problems), []);
+
+    const { checked: c, saved } = await save(db, target(p), { units: [unit("kept", [go], [proposes])] });
+    assert.equal(warned(c.problems).length, 1);
+    assert.deepEqual(saved.anchorProblems, []);
+    assert.equal(state(db, "trace:ext-s1/kept")?.lifecycle, "active");
+  } finally {
+    await db.done();
+  }
+});
+
 test("supersedes retires the old record with evidence, and conflicts link both", async () => {
   const db = tempDb();
   try {

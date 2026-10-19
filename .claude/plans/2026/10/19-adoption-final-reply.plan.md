@@ -62,7 +62,7 @@ approved_at: 2026-10-19
 - テスト
   - acceptance case を `capture` 層に 2 件足す（capture-06 と同じ、人の採用の層。件数 18 → 20）。(a) 提案 → 持ち主の返事 → 狭めた提案（proposes）→ 持ち主の「OK」の会話で、前の返事を採用に引くと check と save の両方に警告が出て、記録は active のまま。(b) 同じ会話で「OK」を引くと警告が出ない。日本語と英語で 1 件ずつ
   - `server/test/record.test.ts` に、本物の SQLite で境界の例: 採用なし、proposes なし、同じ時刻、複数の採用（最大で比べる）、agent の採用だけ、option の後の proposes、harvest の run では出ない、check は何も書かない
-- リリース: 版を編集する前に `bun run release:plan -- --base <0.6.61 のリリースのコミット>` を流し、`plugin` を確かめてから 0.6.62 に上げる。版は package を変える最初のコミットに入れる
+- リリース: 0.6.62 への版の変更は package を変える最初のコミットに入れ（pre-commit の `bundle` が、main と同じ版のままの package の変更を止める）、そのコミットの後に `bun run release:plan -- --base <0.6.61 のリリースのコミット>` で `plugin` を確かめる（release:plan はコミット済みの履歴だけを読む）
 
 ## 採った案と棄却した案
 
@@ -102,3 +102,5 @@ approved_at: 2026-10-19
 なし
 
 ## 変更履歴
+
+- 2026-10-19 / 方針のリリースの手順を「版を編集する前に release:plan」から「版を入れたコミットの後に release:plan」へ / release:plan はコミット済みの履歴だけを読み、作業ツリーの変更では none と出た（実測） / Go 不要（範囲は変わらない）
