@@ -122,3 +122,20 @@ test("release:plan names the package edits it did not count because they are not
   assert.doesNotMatch(staged.stdout, /not staged/);
   assert.deepEqual(JSON.parse(plan(r, "--json").stdout).unstaged, []);
 });
+
+test("release:plan keeps a path's leading whitespace, and shows control characters escaped so a file name cannot print a line", () => {
+  const r = repo();
+  // Outside the package only because of its leading tab: trimmed, it would read as a plugin file
+  write(r.dir, "\tplugin/skills/outside.md", "o");
+  r.git("add", "\tplugin/skills/outside.md");
+  const name = "plugin/skills/a\nrelease kind: plugin.md";
+  write(r.dir, name, "x");
+  const out = plan(r);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /^release kind: none/m);
+  assert.doesNotMatch(out.stdout, /^release kind: plugin/m);
+  assert.match(out.stdout, /^ {2}"plugin\/skills\/a\\nrelease kind: plugin\.md"$/m);
+  const json = JSON.parse(plan(r, "--json").stdout);
+  assert.equal(json.kind, "none");
+  assert.deepEqual(json.unstaged, [name]);
+});

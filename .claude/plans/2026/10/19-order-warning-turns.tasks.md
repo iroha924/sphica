@@ -46,8 +46,20 @@ base: main
   - コミット: `fix(release): say which package changes release:plan did not count (T02)`
   - 結果: red: テストだけを足した状態で `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → fail。最初に落ちたのは、red 欄に書いた stage していない行の確認より手前の `compared:` の行（`<base>..<HEAD>` のまま）で、どちらも今回直す出力。実装後 → pass。`bun run verify` → exit 0（acceptance 151 件、SQL 267/267）。このリポジトリで未追跡の `plugin/skills/zz-probe.md` を置いて `bun run release:plan -- --base v0.6.62` → `compared: v0.6.62..index (HEAD 04b47a47…)`、`not staged, not counted (git add them first): 1` とそのパス、`--json` に `compared: index` と `unstaged`（置いたファイルは消した）
 
+- [x] T03: release:plan がパスを trim せずに取り、表示では制御文字をエスケープする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T02（直すスクリプトとテストが T02 にある）
+  - 変更: `scripts/release-plan.mjs`, `server/test/release-plan.test.ts`
+  - red: テストに、先頭がタブのパス（package の外）と改行を含む未追跡のパスのケースだけを足して `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 外のパスが plugin と分類されるか、改行で偽の行が出るために落ちる
+  - 完了条件: 同じコマンド → 通る。`bun run verify` → 0 で終わる
+  - コミット: `fix(release): read release:plan paths untrimmed and escape them when shown (T03)`
+  - 結果: red: テストだけを足して流す → fail（先頭がタブの外のファイルが `inputs: plugin/skills/outside.md` として plugin に分類され、改行を含む名前から `release kind: plugin.md` の行が出た）。直した後 → 2 件 pass。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-19 / T01 / review-shipping（コミット前）: 出荷してよい、低 1 件。中継されたメッセージで始まるターンは前のターンの turn id を使い回す（`server/test/capture.test.ts:1053`）ので、前後が分かる組み合わせでも警告が出ないことがある / 不採用。失うのは警告だけで保存は変わらず、中継で始まるターンに限る。PR に限界として書く
 - 2026-10-19 / T01 / review-shipping: Codex は AskUserQuestion にあたる答えを記録しない（`plugin/hooks/codex.json` の PostToolUse は apply_patch だけ）ので、答えの部分は Claude Code だけに効く。前からある差 / PR に書く
 - 2026-10-19 / T01 / Codex のタスクごとのレビュー（04b47a47）: 指摘なし
+- 2026-10-19 / T02 / Codex の全差分レビュー（17bdf688）で P2 が 2 件（どちらも再現済み）: -z で取ったパスを表示でエスケープしないので改行を含む名前で偽の行を作れる、git() の trim が -z の先頭のタブを削り外のファイルを package と分類する / 採用。T03 を足して直す
+- 2026-10-19 / T02 / review-shipping（コミット後、push 前）: 指摘なし。突然変異 3 種でテストが落ちることを確認済み

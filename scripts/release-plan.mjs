@@ -41,11 +41,13 @@ const at = (revision, file) => {
     return null;
   }
 };
-// Paths come NUL-separated so that names outside ASCII are not quoted
+// Paths come NUL-separated and untrimmed, so that names outside ASCII are not quoted and leading spaces stay part of the name
 const paths = (...args) =>
-  git(...args, "-z")
+  execFileSync("git", [...args, "-z"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter(Boolean);
+// A file name can hold a line break: shown as a JSON string, it cannot print a line of its own
+const shown = (file) => (/\p{Cc}/u.test(file) ? JSON.stringify(file) : file);
 // What is staged is what the commit will hold, so the base is compared with the index
 const files = paths("diff", "--name-only", ref, "--cached")
   .filter(isPackageInput)
@@ -125,10 +127,10 @@ if (json) {
   console.log(
     `version: npm ${packageVersion} / plugin ${claudeVersion} / marketplace ${marketplaceVersion} / Codex ${codexVersion}`,
   );
-  if (files.length) console.log(`inputs: ${files.join(", ")}`);
+  if (files.length) console.log(`inputs: ${files.map(shown).join(", ")}`);
   if (unstaged.length) {
     console.log(`not staged, not counted (git add them first): ${unstaged.length}`);
-    for (const file of unstaged) console.log(`  ${file}`);
+    for (const file of unstaged) console.log(`  ${shown(file)}`);
   }
   for (const action of actions) console.log(`  ${action}`);
   for (const { name, state } of settings)
