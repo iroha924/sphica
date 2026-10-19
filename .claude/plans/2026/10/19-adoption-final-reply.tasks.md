@@ -36,7 +36,7 @@ trace の新しい記録で、採用の発言が引いた提案より前なら c
 
 trace・harvest・glean の Skill が、提案が変わったら最終版への返事を引くと言い、警告への対処を説明する。
 
-- [ ] T02: 3 つの Skill に、最終版への返事を引く規則と警告への対処を足す
+- [x] T02: 3 つの Skill に、最終版への返事を引く規則と警告への対処を足す
   - 種別: 修正
   - 計画: S3
   - 依存: T01（文面が名指す警告の文言が要る）
@@ -44,6 +44,7 @@ trace・harvest・glean の Skill が、提案が変わったら最終版への�
   - red: `rg -c "final version" plugin/skills/trace/SKILL.md plugin/skills/harvest/SKILL.md plugin/skills/glean/SKILL.md` → どれにも当たらない（今の文面は、提案が変わったときにどの返事を引くかを言わない）
   - 完了条件: 同じ `rg` → 3 ファイルすべてに当たる。`bun run verify` → 0 で終わる
   - コミット: `docs(skills): quote the reply to the final proposal as the adoption (T02)`
+  - 結果: red: 変更前に `rg -c "final version" plugin/skills/{trace,harvest,glean}/SKILL.md` → 当たりなし（exit 1）。変更後 → trace 2、harvest 2、glean 1。`bun run verify` → exit 0
 
 ## 記録
 
