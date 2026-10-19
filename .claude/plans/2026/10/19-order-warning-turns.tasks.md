@@ -36,7 +36,7 @@ base: main
 
 `release:plan` が、stage していない package の変更を知らせ、比べたもの（index）を名指す。
 
-- [ ] T02: release:plan が stage していない package の変更を知らせ、index と比べたと表示する
+- [x] T02: release:plan が stage していない package の変更を知らせ、index と比べたと表示する
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -44,8 +44,10 @@ base: main
   - red: テストだけを足した状態で `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → stage していない package のファイルがあるケースで、`not staged, not counted` の行が無いために落ちる
   - 完了条件: 同じコマンド → 通る。`bun run verify` → 0 で終わる
   - コミット: `fix(release): say which package changes release:plan did not count (T02)`
+  - 結果: red: テストだけを足した状態で `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → fail。最初に落ちたのは、red 欄に書いた stage していない行の確認より手前の `compared:` の行（`<base>..<HEAD>` のまま）で、どちらも今回直す出力。実装後 → pass。`bun run verify` → exit 0（acceptance 151 件、SQL 267/267）。このリポジトリで未追跡の `plugin/skills/zz-probe.md` を置いて `bun run release:plan -- --base v0.6.62` → `compared: v0.6.62..index (HEAD 04b47a47…)`、`not staged, not counted (git add them first): 1` とそのパス、`--json` に `compared: index` と `unstaged`（置いたファイルは消した）
 
 ## 記録
 
 - 2026-10-19 / T01 / review-shipping（コミット前）: 出荷してよい、低 1 件。中継されたメッセージで始まるターンは前のターンの turn id を使い回す（`server/test/capture.test.ts:1053`）ので、前後が分かる組み合わせでも警告が出ないことがある / 不採用。失うのは警告だけで保存は変わらず、中継で始まるターンに限る。PR に限界として書く
 - 2026-10-19 / T01 / review-shipping: Codex は AskUserQuestion にあたる答えを記録しない（`plugin/hooks/codex.json` の PostToolUse は apply_patch だけ）ので、答えの部分は Claude Code だけに効く。前からある差 / PR に書く
+- 2026-10-19 / T01 / Codex のタスクごとのレビュー（04b47a47）: 指摘なし

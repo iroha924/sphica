@@ -41,15 +41,24 @@ const at = (revision, file) => {
     return null;
   }
 };
-const files = git("diff", "--name-only", ref, "--cached")
-  .split("\n")
-  .filter(Boolean)
+// Paths come NUL-separated so that names outside ASCII are not quoted
+const paths = (...args) =>
+  git(...args, "-z")
+    .split("\0")
+    .filter(Boolean);
+// What is staged is what the commit will hold, so the base is compared with the index
+const files = paths("diff", "--name-only", ref, "--cached")
   .filter(isPackageInput)
   .filter(
     (file) =>
       !versionFiles.has(file) || withoutReleaseVersion(at(ref, file)) !== withoutReleaseVersion(at("", file)),
   );
 const kind = releaseKind(files);
+const unstaged = [
+  ...new Set([...paths("diff", "--name-only"), ...paths("ls-files", "--others", "--exclude-standard")]),
+]
+  .filter(isPackageInput)
+  .sort();
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 const packageVersion = read("plugin/package.json").version;
 const claudeVersion = read("plugin/.claude-plugin/plugin.json").version;
@@ -92,9 +101,11 @@ const settings =
       });
 const plan = {
   base: ref,
+  compared: "index",
   commit: git("rev-parse", "HEAD"),
   kind,
   files,
+  unstaged,
   versions: {
     package: packageVersion,
     claude: claudeVersion,
@@ -110,11 +121,15 @@ if (json) {
 } else {
   const label = { none: "none (no release)", plugin: "plugin" }[kind];
   console.log(`release kind: ${label}`);
-  console.log(`compared: ${ref}..${plan.commit}`);
+  console.log(`compared: ${ref}..index (HEAD ${plan.commit})`);
   console.log(
     `version: npm ${packageVersion} / plugin ${claudeVersion} / marketplace ${marketplaceVersion} / Codex ${codexVersion}`,
   );
   if (files.length) console.log(`inputs: ${files.join(", ")}`);
+  if (unstaged.length) {
+    console.log(`not staged, not counted (git add them first): ${unstaged.length}`);
+    for (const file of unstaged) console.log(`  ${file}`);
+  }
   for (const action of actions) console.log(`  ${action}`);
   for (const { name, state } of settings)
     console.log(`${state === "on" ? "" : "fix before releasing: "}${name}: ${state}`);
