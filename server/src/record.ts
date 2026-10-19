@@ -373,6 +373,7 @@ export async function checkRecord(
             "external_id",
             "session_id",
             "turn_id",
+            "created_at",
           ])
           .where("project_id", "=", target.projectId)
           .where("id", "in", [...refs])
@@ -715,6 +716,22 @@ export async function checkRecord(
       if (!why) continue;
       problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
       adoption.splice(adoption.indexOf(x), 1);
+    }
+    // Only a warning: a reply older than the proposal the record cites may answer an earlier version, or the later message may only
+    // restate what was adopted. Only a session's messages keep when each was said
+    if (target.origin === "trace") {
+      const newest = (ids: number[]) => {
+        let found: { id: number; created_at: string } | undefined;
+        for (const s of ids.map((id) => sources.get(id)))
+          if (s?.kind === "session_message" && (!found || s.created_at > found.created_at)) found = s;
+        return found;
+      };
+      const adopted = newest(adoption.filter((x) => x.route !== "agent").map((x) => x.source));
+      const proposed = newest(evidence.filter((e) => e.role === "proposes").map((e) => e.source));
+      if (adopted && proposed && proposed.created_at > adopted.created_at)
+        problems.push(
+          `${key}: its adoption (s${adopted.id}) is older than the proposal it cites (s${proposed.id}); if the proposal changed, quote the owner's reply to the final version or leave the adoption out; keep it if the adoption is right`,
+        );
     }
     // An AI's own adoption closes no question: of a decision or constraint, only the owner's or a maintainer's words do
     const grounds =

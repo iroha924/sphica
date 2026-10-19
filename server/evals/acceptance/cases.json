@@ -3185,6 +3185,136 @@
       ]
     },
     {
+      "id": "capture-19",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "An owner adoption older than the proposal the record cites is saved as it is, and check and save both warn that the proposal changed after that reply",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-narrowed",
+            "host": "claude-code",
+            "at": "2026-06-05T09:00:00Z",
+            "turns": [
+              {
+                "owner": "数字を見て、次の実験を決めたい。",
+                "assistant": "レビュー役も Codex も Claude Code のサブエージェントも、まとめて配信を止める実験にしましょう。",
+                "edits": []
+              },
+              {
+                "owner": "issue作成して",
+                "assistant": "先に数字を見ると、サブエージェントはメインと同じ割合で役に立っていました。なので範囲を狭め、codex exec のセッションとメイン以外のセッション開始時の配信だけを対象にします。この文面で issue を立てます。",
+                "edits": []
+              },
+              {
+                "owner": "OK",
+                "assistant": "issue #353 を立てました。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-narrowed",
+          "record": {
+            "units": [
+              {
+                "key": "next-experiment",
+                "kind": "decision",
+                "stance": "do",
+                "text": "次の実験は codex exec のセッションとメイン以外のセッション開始時の配信を対象にする",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-narrowed#2.assistant",
+                    "quote": "codex exec のセッションとメイン以外のセッション開始時の配信だけを対象にします",
+                    "role": "proposes"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-narrowed#2.owner",
+                    "quote": "issue作成して"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        { "unit": "trace:s-ja-narrowed/next-experiment", "lifecycle": "active" },
+        { "adoption_count": { "of": "trace:s-ja-narrowed/next-experiment", "count": 1 } },
+        { "check_problem_contains": "is older than the proposal it cites" },
+        { "save_notes_contain": "is older than the proposal it cites" }
+      ]
+    },
+    {
+      "id": "capture-20",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "An owner adoption that answers the final version of a narrowed proposal is saved without the warning",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-narrowed",
+            "host": "claude-code",
+            "at": "2026-06-05T10:00:00Z",
+            "turns": [
+              {
+                "owner": "Look at the numbers and pick the next experiment.",
+                "assistant": "Let's stop delivery to review processes, Codex, and Claude Code subagents alike.",
+                "edits": []
+              },
+              {
+                "owner": "File an issue for it.",
+                "assistant": "The numbers first: subagents were as useful as the main session. So I narrowed it to codex exec sessions and the starts of sessions other than the main one. Here is the draft.",
+                "edits": []
+              },
+              {
+                "owner": "OK, go with the narrowed one.",
+                "assistant": "Filed issue #353.",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-narrowed",
+          "record": {
+            "units": [
+              {
+                "key": "next-experiment",
+                "kind": "decision",
+                "stance": "do",
+                "text": "The next experiment covers codex exec sessions and the starts of sessions other than the main one",
+                "evidence": [
+                  {
+                    "source": "session:s-en-narrowed#2.assistant",
+                    "quote": "So I narrowed it to codex exec sessions and the starts of sessions other than the main one.",
+                    "role": "proposes"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-narrowed#3.owner",
+                    "quote": "OK, go with the narrowed one."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        { "unit": "trace:s-en-narrowed/next-experiment", "lifecycle": "active" },
+        { "check_problem_absent": "is older than the proposal it cites" }
+      ]
+    },
+    {
       "id": "forget-01",
       "layer": "forget",
       "lang": "ja",
