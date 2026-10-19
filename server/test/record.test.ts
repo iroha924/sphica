@@ -955,12 +955,39 @@ test("a trace's adoption older than the unit's newest proposal is saved with a w
     );
 
     // The AI's own adoption quotes the same reply as its decides evidence, so it has no earlier reply to compare
+    const chose = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "m6",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: at("2026-09-10T00:00:01Z"),
+      available_at: at("2026-09-10T00:00:01Z"),
+      captured_at: at("2026-09-10T00:00:01Z"),
+      text: "I'll keep subagents in the experiment.",
+      original_bytes: Buffer.byteLength("I'll keep subagents in the experiment."),
+      content_hash: hash(),
+      indexed: 0,
+    });
+    const mine = "I'll keep subagents in the experiment.";
     const agent = await checkRecord(
       db.ingest,
       { ...target(p), agent: true },
       {
-        units: [unit("agent", [], [[wide, "every subagent", "decides"], proposes])],
+        units: [
+          {
+            ...unit("agent", [], [[chose, mine, "decides"], proposes]),
+            adoption: [{ source: `s${chose}`, quote: mine }],
+          },
+        ],
       },
+    );
+    assert.deepEqual(
+      agent.units[0]?.adoption.map((x) => x.route),
+      ["agent"],
     );
     assert.deepEqual(warned(agent.problems), []);
 

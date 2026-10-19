@@ -46,6 +46,17 @@ trace・harvest・glean の Skill が、提案が変わったら最終版への�
   - コミット: `docs(skills): quote the reply to the final proposal as the adoption (T02)`
   - 結果: red: 変更前に `rg -c "final version" plugin/skills/{trace,harvest,glean}/SKILL.md` → 当たりなし（exit 1）。変更後 → trace 2、harvest 2、glean 1。`bun run verify` → exit 0
 
+- [x] T03: agent の採用を除くことを、実際に agent の採用を通して確かめる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T01（直すテストが T01 にある）
+  - 変更: `server/test/record.test.ts`
+  - red: 直す前のテストのまま `server/src/record.ts` の `adoption.filter((x) => x.route !== "agent")` を外し、`cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="adoption older than the unit's newest proposal" test/record.test.ts` → 通ってしまう（adoption が空で、除外を確かめていない）
+  - 完了条件: 同じ書き換えで同じコマンド → 落ちる。書き換えを戻して → 通る。`bun run verify` → 0 で終わる
+  - コミット: `test(record): pass a real agent adoption to the order warning test (T03)`
+  - 結果: red: 直す前のテストで agent の除外を外して流す → pass（空振り）。直した後、同じ書き換え → fail、戻して → pass。adoption の route が ["agent"] であることも assert した。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-19 / T01 / 完了条件の release:plan を「版を編集する前に流す」→「コミットの後に流す」に変えた / release:plan はコミット済みの履歴だけを読み、作業ツリーの変更では none と出たため（plan の変更履歴にも記載）
+- 2026-10-19 / T01 / Codex のタスクごとのレビュー（c504abcf）で P2 が 1 件: agent の採用の除外を確かめるテストが adoption を空のまま渡していて空振りする（Codex が再現） / 採用。T03 を足して直す
