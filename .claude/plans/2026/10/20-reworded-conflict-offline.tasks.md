@@ -66,13 +66,14 @@ base: main
 
 tune で方式と基準の数値を固定し、held-out を 1 回だけ測って判定を出す。
 
-- [ ] T05: tune で方式と基準を固定
+- [x] T05: tune で方式と基準を固定
   - 種別: 追加
   - 計画: S4
   - 依存: T01（拾い方が要る）, T04（tune のラベルが要る）
-  - 変更: `server/evals/conflict/tune.json`, `server/evals/conflict/labels.json`
+  - 変更: `server/evals/conflict/tune.json`, `server/evals/conflict/run.ts`, `server/evals/conflict/methods.ts`, `server/evals/conflict/measure.ts`, `server/test/conflict-measure.test.ts`, `server/test/conflict-eval.test.ts`, `biome.json`
   - 完了条件: `cd server && node evals/conflict/run.ts --check-tune evals/conflict/tune.json` → 選んだ方式・並べ方・取得上限、固定した判定の数値、tune の普段の依頼の候補のラベル（割れたものは 1 回の見直しの後、なお割れたら判定不能）と一致数が入っている
   - コミット: `feat(evals): fix the #260 method and bars on the tune split (T05)`
+  - 結果: `cd server && node evals/conflict/run.ts --check-tune evals/conflict/tune.json` → 数え直しが書いた値と一致、選んだ方式 B1b-m3、held-out で測る 8 方式、基準はラベルと同じ、普段の依頼の候補 619 組（初回一致 544、見直しで一致 52、判定不能 23）。`test/conflict-measure.test.ts` 12 件・`test/conflict-eval.test.ts` 4 件 pass
 
 - [ ] T06: held-out の測定と判定
   - 種別: 追加
@@ -92,4 +93,10 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 - T04, T05: 完了条件の「持ち主の確認」「持ち主と固定した判定の数値」「割れたものは持ち主の判定」を、別のモデルの確認・叩き台の値の固定・1 回の見直しと判定不能に変えた（plan の変更履歴 2026-10-21。持ち主が任せたため）
 - T04: 書き手は Codex 90 件・Claude 90 件。確認は書き手と別のモデルで、Claude は Codex の 90 件をすべて採り、Codex は Claude の 90 件のうち 12 件を直した（直した文は Claude が確かめて採った）。ほかの対象にも反するかの確認で、u437o351 の positive に u352、u607o418 の positive に u558 を衝突の集合へ足した。語の重なりは positive で none 4・partial 92・most 24
 - T04: コミットの件名を「owner-confirmed」から「cross-reviewed」に変えた（持ち主の確認が無いため）
+- T05: 変更欄を「tune.json, labels.json」から「tune.json, run.ts, methods.ts, measure.ts, conflict-measure.test.ts」に変えた。普段の依頼の候補のラベルは labels.json ではなく tune.json と baseline.json の依頼に入れ、測定・組み立て・検査を run.ts に、alias の並べ方と最低一致数を methods.ts に、判定する方式の指定を measure.ts に足すため
+- T05: tune の最初の測定で、B1a の候補に反する記録が入っても上位 3 から漏れる例が 16 件あり、alias の候補が記録 id 順に並ぶのが原因だった。計画の「並べ方は tune で固定」の範囲で、一致した alias の数と長さで並べる版（order: matches）と、一致した alias の最低数（minAliases 2・3）を足して比べた
+- T05: held-out の判定は tune で固定した 1 方式だけにする（judged）。ほかの方式は並べて報告するが進む候補にしない。held-out で複数の方式を判定すると、偶然どれかが基準を超える見込みが増えるため
+- T05: 方式の選び方（確定ラベルを見る前に決めた）: tune で、B0 から悪化 0 件かつ普段の依頼で無関係な候補が出た割合の Wilson 上限が基準（10%）以下の方式のうち、positive で表示される割合が最も高いもの。同率なら普段の依頼で何か表示した件数が少ないもの。該当が無ければ、B0 より表示される割合が高い方式のうち Wilson 上限が最も低いもの。held-out では選んだ方式に加え、B0・B1a・B1b（id 順と matches 順）・B2（取得上限は表示される割合が同じなら最小）・併用を報告する
+- T05: tune の結果（Claude と Codex の確定ラベル）: B0 は positive 60 件中 2 件を表示。B1a-m は 45 件（日 21・英 24）を表示するが、普段の依頼 180 件中 21 件で無関係な記録を出し、Wilson 上限 17%。B1b-m は 46 件・上限 60%。B2（取得上限 5・10・20）は 11 件で上限 39〜42%。基準（上限 10% 以下）を満たしたのは B1a-m2（23 件、7.1%）・B1a-m3（12 件）・B1b-m3（23 件、5.6%）で、同率の B1a-m2 と B1b-m3 のうち普段の依頼で何か出した件数が少ない B1b-m3 を選んだ。tune でも基準をすべて満たす方式は無い（判定は not_now）
+- T05: 公開ファイルの候補 ID の列は positive にだけ残し、ほかの依頼は表示した記録だけにした（数えるのに使うのはそれだけで、tune.json が 1.6 MB になったため）。依頼を 1 行ずつ書き、biome.json で `server/evals/conflict/*.json` を整形の対象から外した（整形すると 5.9 万行になるため）
 - T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する

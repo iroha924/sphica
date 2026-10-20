@@ -89,6 +89,8 @@ export type Baseline = {
   labelling: Labelling;
   inputs: { db_sha256: string; prompts_sha256: string; population_sha256: string };
   methods: Record<string, Method>;
+  /** The methods the verdict judges; the rest are reported beside them */
+  judged: string[];
   bars: Bars;
   synthetic_text_public: boolean;
   prompts: Prompt[];
@@ -248,8 +250,9 @@ export function summarize(prompts: Prompt[], methods: string[], split: Split): S
 /**
  * The verdict, holding first: too few prompts or too many nobody could settle say nothing either way. A method advances only when it
  * shows enough conflicts, gains enough over B0, loses none B0 showed, falls behind B0 in neither language, and rarely shows unrelated records.
+ * Only the judged methods can advance: the one fixed on tune, so methods reported beside it on held-out cannot pass by chance.
  */
-export function decide(s: Summary, bars: Bars): Verdict {
+export function decide(s: Summary, bars: Bars, judged: string[]): Verdict {
   const reasons: string[] = [];
   for (const lang of ["ja", "en"] as const) {
     const c = s.counts.positive[lang];
@@ -268,7 +271,7 @@ export function decide(s: Summary, bars: Bars): Verdict {
   if (!base) throw new Error(`the summary has no ${B0}`);
   // Compared as counts over the same prompts, so no rounding decides a bar
   const passing = Object.entries(s.methods)
-    .filter(([name]) => name !== B0)
+    .filter(([name]) => name !== B0 && judged.includes(name))
     .filter(([, m]) => {
       const { k, n } = m.positive.all.shown;
       const high = m.ordinary_unrelated.high;
@@ -456,7 +459,14 @@ export function checkPublic(v: unknown): asserts v is Baseline {
     review: oneOf("owner", "cross_model"),
     labelling: obj({ pairs: num, first_agree: num, second_agree: num, undecidable: num }),
     inputs: obj({ db_sha256: str(HEX), prompts_sha256: str(HEX), population_sha256: str(HEX) }),
-    methods: map(NAME, obj({ alias: oneOf("boundary", "terms"), search: num }, ["alias", "search"])),
+    methods: map(
+      NAME,
+      obj(
+        { alias: oneOf("boundary", "terms"), search: num, order: oneOf("id", "matches"), minAliases: num },
+        ["alias", "search", "order", "minAliases"],
+      ),
+    ),
+    judged: list(str(NAME)),
     bars: barsRule,
     synthetic_text_public: bool,
     prompts: list(promptRule(top?.synthetic_text_public === true)),
@@ -469,8 +479,23 @@ export function checkPublic(v: unknown): asserts v is Baseline {
   })(v, "baseline");
 }
 
+/** JSON indented by two spaces, but each prompt on one line: a side holds hundreds of them, each with every method's results */
+export function promptLines(v: unknown): string {
+  const kept: string[] = [];
+  // Each prompt is swapped for a placeholder string, then for its one-line JSON
+  const text = JSON.stringify(
+    v,
+    (key, value) =>
+      key === "prompts" && Array.isArray(value)
+        ? value.map((p) => `\u0000${kept.push(JSON.stringify(p)) - 1}`)
+        : value,
+    2,
+  );
+  return `${text.replace(/"\\u0000(\d+)"/g, (_, n: string) => kept[Number(n)] ?? "")}\n`;
+}
+
 /** The public baseline's text, refused when anything in it is outside the allowlist */
 export function publicJson(b: Baseline): string {
   checkPublic(b);
-  return `${JSON.stringify(b, null, 2)}\n`;
+  return promptLines(b);
 }

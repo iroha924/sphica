@@ -150,6 +150,11 @@ test("aliases add only dont decisions and records with a rejected option, by the
       text: "No automatic delivery. Keep SQLite, not Postgres. Prompts stay quiet.",
     });
     await save(db, p, [
+      decided("loud", m, "Prompts stay quiet.", {
+        stance: "dont",
+        text: "Do not make prompts loud",
+        aliases: ["prompts"],
+      }),
       decided("no-auto", m, "No automatic delivery.", {
         stance: "dont",
         aliases: ["自動配信", "auto delivery"],
@@ -173,9 +178,25 @@ test("aliases add only dont decisions and records with a rejected option, by the
       ["no-auto"],
       "a record outside the pool is not added",
     );
-    assert.deepEqual(await at("Add auto delivery to prompts", { alias: "boundary" }), ["no-auto"]);
-    assert.deepEqual(await at("Add auto delivery to prompts", { alias: "terms" }), ["no-auto"]);
+    assert.deepEqual(await at("Add auto delivery to prompts", { alias: "boundary" }), ["loud", "no-auto"]);
+    assert.deepEqual(await at("Add auto delivery to prompts", { alias: "terms" }), ["loud", "no-auto"]);
     assert.deepEqual(await at("Add auto delivery to prompts", {}), [], "B0 never counts aliases");
+    const two = "自動配信 (auto delivery) を prompts に足して";
+    assert.deepEqual(
+      await at(two, { alias: "boundary" }),
+      ["loud", "no-auto"],
+      "in the order prompts show records",
+    );
+    assert.deepEqual(
+      await at(two, { alias: "boundary", order: "matches" }),
+      ["no-auto", "loud"],
+      "more aliases first",
+    );
+    assert.deepEqual(
+      await at(two, { alias: "boundary", minAliases: 2 }),
+      ["no-auto"],
+      "one alias is not enough",
+    );
 
     const named = await look(db.reader, c, "Postgres の database server に移したい");
     const both = candidates(c, named, { alias: "terms" });

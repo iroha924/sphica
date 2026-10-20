@@ -15,7 +15,8 @@
       "scripts/**/*.mts",
       "server/*.json",
       "*.json",
-      "!server/src/db-types.ts"
+      "!server/src/db-types.ts",
+      "!server/evals/conflict/*.json"
     ]
   },
   "formatter": {

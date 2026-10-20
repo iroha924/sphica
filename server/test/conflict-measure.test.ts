@@ -16,17 +16,24 @@ import {
   decide,
   digest,
   type Prompt,
+  promptLines,
   publicJson,
   reached,
   summarize,
   wilson,
 } from "../evals/conflict/measure.ts";
 import {
+  assemble,
   buildLabels,
   checkLabels,
+  checkTune,
+  measure,
   overlapOf,
+  type Pair,
+  pairsToLabel,
   type Review,
   recount,
+  type Tune,
   type Written,
 } from "../evals/conflict/run.ts";
 import {
@@ -180,8 +187,10 @@ function passing(ordinaryCount = 40): Prompt[] {
 }
 
 test("the verdict holds first, then advances a method only when it clears every bar", () => {
-  const verdict = (ps: Prompt[], bars = BARS) => decide(summarize(ps, METHODS, "held_out"), bars);
+  const verdict = (ps: Prompt[], bars = BARS, judged = ["B1b", "B2"]) =>
+    decide(summarize(ps, METHODS, "held_out"), bars, judged);
   assert.deepEqual(verdict(passing()), { verdict: "advance", reasons: [], passing: ["B1b"] });
+  assert.equal(verdict(passing(), BARS, ["B2"]).verdict, "not_now", "a method not judged never advances");
   assert.deepEqual(verdict(passing(), { ...BARS, minPositivePerLanguage: 5 }), {
     verdict: "hold",
     reasons: ["too_few_positive_ja", "too_few_positive_en"],
@@ -224,7 +233,8 @@ function baseline(ps: Prompt[], over: Partial<Baseline> = {}): Baseline {
     synthetic_text_public: false,
     prompts: ps,
     summary,
-    verdict: decide(summary, BARS),
+    judged: ["B1b", "B2"],
+    verdict: decide(summary, BARS, ["B1b", "B2"]),
     ...over,
   };
 }
@@ -259,6 +269,15 @@ test("the public baseline holds only allowlisted keys and values, and never the 
     () => publicJson({ ...b, verdict: { ...b.verdict, reasons: ["the owner wants Postgres"] } }),
     /verdict\.reasons\[0\]/,
   );
+});
+
+test("the public files put each prompt on one line and read back as written", () => {
+  const b = baseline(passing());
+  const text = promptLines({ chosen: "B1b", baseline: b });
+  assert.deepEqual(JSON.parse(text), { chosen: "B1b", baseline: b });
+  const lines = text.split("\n").filter((l) => l.includes('"sha256"'));
+  assert.equal(lines.length, b.prompts.length, "one line per prompt");
+  assert.ok(lines.every((l) => l.trim().startsWith('{"id"')));
 });
 
 test("--recount counts the public baseline again from labels and ids alone, and fails when it does not come out as written", () => {
@@ -491,47 +510,56 @@ test("the overlap tier counts the prompt's content terms the record's words hold
   assert.equal(overlapOf("SQLite をやめて Postgres に移して", words), "most");
 });
 
+/** The fixture's population with three written prompts per target, every one kept but the first (fixed) and the second (dropped) */
+async function labelled(
+  db: TempDb,
+  text = (target: string, kind: string, lang: string) => `${kind} ${lang} for ${target}`,
+) {
+  await fixture(db);
+  const { population, drawn } = await build(db.reader, {
+    project: "git:github.com/o/r",
+    seed: 7,
+    window: WINDOW,
+    per: PER,
+    evals: [],
+    takenAt: "2026-10-21T00:00:00.000Z",
+    dbSha256: digest("db"),
+  });
+  const written: Written[] = [];
+  for (const side of ["tune", "held_out"] as const) {
+    const t = population.records.targets[side];
+    for (const target of [...t.dont.map((u) => `u${u}`), ...t.rejected.map(([u, o]) => `u${u}o${o}`)]) {
+      const one = (kind: Written["kind"], lang: Written["lang"], override = false): Written => ({
+        id: `s-${target}-${kind === "positive" ? "pos" : "hn"}-${lang}`,
+        target,
+        split: side,
+        kind,
+        lang,
+        override,
+        writer: "codex",
+        text: text(target, kind, lang),
+      });
+      written.push(one("positive", "ja", true), one("positive", "en"), one("hard_negative", "en"));
+    }
+  }
+  const first = written[0] as Written;
+  const review: Review = {
+    by: "cross_model",
+    public: false,
+    bars: BARS,
+    calls: Object.fromEntries(written.map((w) => [w.id, { call: "keep" as const }])),
+    conflict: { [first.target]: [999] },
+    related: {},
+  };
+  review.calls[first.id] = { call: "fix", text: "Rule d1 を破って" };
+  review.calls[(written[1] as Written).id] = { call: "drop" };
+  return { population, drawn, written, review, first };
+}
+
 test("the labels cover every target and drawn prompt of the population, with the review call, and refuse text unless published", async () => {
   const db = tempDb();
   try {
-    await fixture(db);
-    const { population, drawn } = await build(db.reader, {
-      project: "git:github.com/o/r",
-      seed: 7,
-      window: WINDOW,
-      per: PER,
-      evals: [],
-      takenAt: "2026-10-21T00:00:00.000Z",
-      dbSha256: digest("db"),
-    });
-    const written: Written[] = [];
-    for (const side of ["tune", "held_out"] as const) {
-      const t = population.records.targets[side];
-      for (const target of [...t.dont.map((u) => `u${u}`), ...t.rejected.map(([u, o]) => `u${u}o${o}`)]) {
-        const one = (kind: Written["kind"], lang: Written["lang"], override = false): Written => ({
-          id: `s-${target}-${kind === "positive" ? "pos" : "hn"}-${lang}`,
-          target,
-          split: side,
-          kind,
-          lang,
-          override,
-          writer: "codex",
-          text: `${kind} ${lang} for ${target}`,
-        });
-        written.push(one("positive", "ja", true), one("positive", "en"), one("hard_negative", "en"));
-      }
-    }
-    const first = written[0] as Written;
-    const review: Review = {
-      by: "cross_model",
-      public: false,
-      bars: BARS,
-      calls: Object.fromEntries(written.map((w) => [w.id, { call: "keep" as const }])),
-      conflict: { [first.target]: [999] },
-      related: {},
-    };
-    review.calls[first.id] = { call: "fix", text: "Rule d1 を破って" };
-    review.calls[(written[1] as Written).id] = { call: "drop" };
+    const { population, drawn, written, review, first } = await labelled(db);
     const { labels, texts } = await buildLabels(db.reader, population, written, review, drawn);
     assert.deepEqual(checkLabels(labels, population), []);
     const fixed = labels.prompts.find((p) => p.id === first.id);
@@ -582,6 +610,100 @@ test("the labels cover every target and drawn prompt of the population, with the
     assert.equal(published.labels.prompts.find((p) => p.id === first.id)?.text, "Rule d1 を破って");
     assert.ok(
       published.labels.prompts.filter((p) => p.group === "ordinary").every((p) => p.text === undefined),
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a side is measured from the private texts, assembled with the ordinary labels, and its tune file checked against the labels", async () => {
+  const db = tempDb();
+  try {
+    // A positive against a rejected option names that option, so exact naming (B0) finds it
+    const optionOf = (target: string) =>
+      String(
+        db.owner
+          .prepare("select text from unit_option where id = ?")
+          .get(Number(/o(\d+)$/.exec(target)?.[1] ?? 0))?.text ?? "",
+      );
+    const { population, drawn, written, review } = await labelled(db, (target, kind, lang) =>
+      kind === "positive" && target.includes("o")
+        ? `${lang === "ja" ? "これからは" : "Use"} ${optionOf(target)}`
+        : `${kind} ${lang} for ${target}`,
+    );
+    const { labels, texts } = await buildLabels(db.reader, population, written, review, drawn);
+    const methods = { B0: {}, B1a: { alias: "boundary" as const } };
+    const byId = new Map(texts.map((t) => [t.id, t.text]));
+    await assert.rejects(
+      measure(db.reader, "/r", population.project, labels, new Map([...byId].slice(1)), "tune", methods),
+      /private text is missing/,
+    );
+    const run = await measure(db.reader, "/r", population.project, labels, byId, "tune", methods);
+    const tune = labels.prompts.filter((p) => p.split === "tune");
+    assert.deepEqual(Object.keys(run.results).sort(), tune.map((p) => p.id).sort());
+    const named = tune.filter(
+      (p) => p.group === "positive" && /^s-u\d+o\d+-/.test(p.id) && p.call !== "drop",
+    );
+    assert.ok(named.length > 0);
+    for (const p of named)
+      assert.ok(
+        run.results[p.id]?.B0?.shown.some((u) => p.conflict.includes(u)),
+        p.id,
+      );
+    assert.equal(
+      run.signals.positives,
+      tune.filter((p) => p.group === "positive" && p.call !== "drop").length,
+    );
+    assert.equal(run.signals.ordinary, 2);
+
+    // An ordinary prompt that shows a record needs that record labelled before the side can be assembled
+    const ordinary = tune.find((p) => p.group === "ordinary") as Prompt;
+    const unit = named[0]?.conflict[0] as number;
+    run.results[ordinary.id] = {
+      B0: { candidates: [unit], shown: [unit], cut: [] },
+      B1a: { candidates: [], shown: [], cut: [] },
+    };
+    assert.deepEqual(pairsToLabel(labels, run.results, "tune"), [{ prompt: ordinary.id, unit }]);
+    const o = { methods, judged: ["B1a"], measuredAt: "2026-10-21", dbSha256: population.db_sha256 };
+    assert.throws(() => assemble(labels, run.results, [], "tune", o), /which has no labels/);
+    const pairs: Pair[] = [
+      {
+        prompt: ordinary.id,
+        unit,
+        claude: "unrelated",
+        codex: "related",
+        claude2: "related",
+        codex2: "related",
+      },
+    ];
+    const baseline = assemble(labels, run.results, pairs, "tune", o);
+    assert.deepEqual(baseline.labelling, { pairs: 1, first_agree: 0, second_agree: 1, undecidable: 0 });
+    assert.equal(baseline.prompts.find((p) => p.id === ordinary.id)?.labels[String(unit)], "related");
+    const split: Pair[] = [{ ...(pairs[0] as Pair), codex2: "unrelated" }];
+    assert.equal(
+      assemble(labels, run.results, split, "tune", o).prompts.find((p) => p.id === ordinary.id)?.labels[
+        String(unit)
+      ],
+      "undecidable",
+      "still split after each saw the other's reason",
+    );
+
+    const t: Tune = { chosen: "B1a", held_out_methods: methods, signals: run.signals, baseline };
+    assert.deepEqual(checkTune(t, labels), []);
+    assert.deepEqual(checkTune({ ...t, chosen: "B2" }, labels), [
+      "the chosen method B2 is not among the held-out methods",
+    ]);
+    assert.deepEqual(checkTune({ ...t, held_out_methods: { B0: {}, B1a: { alias: "terms" } } }, labels), [
+      "held-out method B1a is not one measured on tune",
+    ]);
+    assert.deepEqual(checkTune(t, { ...labels, bars: { ...labels.bars, minShown: 0.5 } }), [
+      "the bars differ from the ones fixed with the labels",
+    ]);
+    const edited = structuredClone(t);
+    (edited.baseline.prompts[0] as Prompt).conflict = [];
+    assert.match(
+      checkTune(edited, labels).join("\n"),
+      /the tune prompts differ from the labels|counted again differs/,
     );
   } finally {
     await db.done();

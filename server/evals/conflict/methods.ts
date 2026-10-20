@@ -25,10 +25,19 @@ type Signal =
   | "search-body"
   | "search-alias";
 
-export type Candidate = { u: Unit; why: string; via: "named" | "alias" | "search" };
+/** weight: how many of the record's aliases matched, then their length, for ordering alias candidates by how much they matched */
+export type Candidate = { u: Unit; why: string; via: "named" | "alias" | "search"; weight?: number };
 
-/** A method: B0 alone, plus aliases by one rule, plus search results up to a limit (searchUnits' limit, taken before narrowing) */
-export type Method = { alias?: "boundary" | "terms"; search?: number };
+/**
+ * A method: B0 alone, plus aliases by one rule, plus search results up to a limit (searchUnits' limit, taken before narrowing). Alias
+ * candidates come in the order prompts show records (kind, then id), or by how much of them matched, and may need several aliases matched.
+ */
+export type Method = {
+  alias?: "boundary" | "terms";
+  search?: number;
+  order?: "id" | "matches";
+  minAliases?: number;
+};
 
 /** Every candidate source a method may need, read from one database */
 export type Corpus = {
@@ -154,15 +163,28 @@ export async function look(db: Reads, c: Corpus, prompt: string): Promise<Look> 
       if (o.outcome === "rejected" && termsIn(o.text, have)) mark(u.id, "option-terms");
     }
     const as = c.aliases.get(u.id) ?? [];
-    const onBoundary = as.find((a) => Array.from(a).length >= 2 && word(fold(a), lower));
-    const byTerms = as.find((a) => termsIn(a, have));
-    if (onBoundary !== undefined) {
+    const onBoundary = as.filter((a) => Array.from(a).length >= 2 && word(fold(a), lower));
+    const byTerms = as.filter((a) => termsIn(a, have));
+    const weight = (ms: string[]) => ms.length * 1000 + Math.min(999, ms.join("").length);
+    if (onBoundary.length) {
       mark(u.id, "alias-boundary");
-      if (c.pool.has(u.id)) aliasBoundary.push({ u, why: ` [alias ${inline(onBoundary)}]`, via: "alias" });
+      if (c.pool.has(u.id))
+        aliasBoundary.push({
+          u,
+          why: ` [alias ${inline(onBoundary[0] ?? "")}]`,
+          via: "alias",
+          weight: weight(onBoundary),
+        });
     }
-    if (byTerms !== undefined) {
+    if (byTerms.length) {
       mark(u.id, "alias-terms");
-      if (c.pool.has(u.id)) aliasTerms.push({ u, why: ` [alias ${inline(byTerms)}]`, via: "alias" });
+      if (c.pool.has(u.id))
+        aliasTerms.push({
+          u,
+          why: ` [alias ${inline(byTerms[0] ?? "")}]`,
+          via: "alias",
+          weight: weight(byTerms),
+        });
     }
   }
   // A chosen option counts only for a record no rejected option of which was named
@@ -190,7 +212,10 @@ export function candidates(c: Corpus, l: Look, m: Method): Candidate[] {
       return u ? { u, why: ` [words ${(l.matched.get(id) ?? []).join(", ")}]`, via: "search" } : null;
     })
     .filter((x): x is Candidate => x !== null);
-  const aliased = m.alias === "boundary" ? l.aliasBoundary : m.alias === "terms" ? l.aliasTerms : [];
+  const found = m.alias === "boundary" ? l.aliasBoundary : m.alias === "terms" ? l.aliasTerms : [];
+  const enough = found.filter((x) => (x.weight ?? 0) >= (m.minAliases ?? 1) * 1000);
+  const aliased =
+    m.order === "matches" ? [...enough].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)) : enough;
   const seen = new Set<number>();
   return [...l.named, ...aliased, ...searched].filter((x) => !seen.has(x.u.id) && seen.add(x.u.id));
 }

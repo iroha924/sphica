@@ -5,13 +5,16 @@
 // ordinary prompts into the public labels and a private file of the final texts; --check-labels holds the labels to the pinned population.
 // --recount counts the public baseline again from its labels and candidate ids alone and fails unless the summary and verdict come out as
 // written.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { openReader, type Reads } from "../../src/db.ts";
+import { projectId } from "../../src/project.ts";
 import { queryTerms, terms } from "../../src/text.ts";
 import {
   type Bars,
+  type Baseline,
   checkLabelsPublic,
   checkPublic,
   decide,
@@ -19,9 +22,13 @@ import {
   type Labels,
   type Overlap,
   type Prompt,
+  promptLines,
+  publicJson,
+  type Result,
   summarize,
   type Verdict,
 } from "./measure.ts";
+import { candidates, corpus, cutByLimit, display, look, type Method } from "./methods.ts";
 import { type Population, textSha } from "./sample.ts";
 
 type Side = "tune" | "held_out";
@@ -55,7 +62,7 @@ type Ordinary = { id: number; split: Side; sha256: string; text: string };
 export function recount(value: unknown, split: Side = "held_out"): { verdict: Verdict; differs: string[] } {
   checkPublic(value);
   const summary = summarize(value.prompts, Object.keys(value.methods), split);
-  const verdict = decide(summary, value.bars);
+  const verdict = decide(summary, value.bars, value.judged);
   return {
     verdict,
     differs: [
@@ -225,6 +232,186 @@ export function checkLabels(v: unknown, population: Population): string[] {
   return out;
 }
 
+/** How often each signal brought up a record: positives whose conflict set it reached, and ordinary prompts where it fired at all */
+type Signals = {
+  positives: number;
+  ordinary: number;
+  reached: Record<string, number>;
+  fired: Record<string, number>;
+};
+
+/**
+ * Every method's candidates, shown records, and records cut by the search limit, for each prompt of one side, read from the private texts
+ * (each held to its pinned hash); and how often each signal fired, to compare them one by one.
+ */
+export async function measure(
+  db: Reads,
+  root: string,
+  project: string,
+  labels: Labels,
+  texts: Map<string, string>,
+  split: Side,
+  methods: Record<string, Method>,
+): Promise<{ results: Record<string, Record<string, Result>>; signals: Signals }> {
+  const pid = await projectId(db, project);
+  if (pid === null) throw new Error(`no project ${project}`);
+  const c = await corpus(db, pid, root);
+  const deliverable = new Set(c.units.map((u) => u.id));
+  const results: Record<string, Record<string, Result>> = {};
+  const signals: Signals = { positives: 0, ordinary: 0, reached: {}, fired: {} };
+  const add = (to: Record<string, number>, ss: Set<string>) => {
+    for (const s of ss) to[s] = (to[s] ?? 0) + 1;
+  };
+  for (const p of labels.prompts.filter((x) => x.split === split)) {
+    const text = texts.get(p.id);
+    if (text === undefined || textSha(text) !== p.sha256)
+      throw new Error(`${p.id}: its private text is missing or does not hash to its label`);
+    const l = await look(db, c, text);
+    results[p.id] = Object.fromEntries(
+      Object.entries(methods).map(([name, m]): [string, Result] => {
+        const cands = candidates(c, l, m);
+        return [
+          name,
+          {
+            candidates: cands.map((x) => x.u.id),
+            shown: display(cands, c.ai).shown,
+            cut: [...cutByLimit(c, l, m)],
+          },
+        ];
+      }),
+    );
+    if (p.group === "positive" && p.call !== "drop") {
+      signals.positives += 1;
+      add(signals.reached, new Set(p.conflict.flatMap((u): string[] => [...(l.signals.get(u) ?? [])])));
+    }
+    if (p.group === "ordinary") {
+      signals.ordinary += 1;
+      add(
+        signals.fired,
+        new Set([...l.signals].filter(([u]) => deliverable.has(u)).flatMap(([, ss]): string[] => [...ss])),
+      );
+    }
+  }
+  return { results, signals };
+}
+
+type PairLabel = "conflict" | "related" | "unrelated";
+/** One record an ordinary prompt showed, labelled by Claude and Codex apart, then again after each saw the other's label and reason */
+export type Pair = {
+  prompt: string;
+  unit: number;
+  claude: PairLabel;
+  codex: PairLabel;
+  claude2: PairLabel | null;
+  codex2: PairLabel | null;
+};
+
+/** A pair's label: the first one both gave, or the one both gave after seeing each other's, or nobody could settle it */
+const settle = (x: Pair) =>
+  x.claude === x.codex ? x.claude : x.claude2 !== null && x.claude2 === x.codex2 ? x.claude2 : "undecidable";
+
+/** The records the ordinary prompts of a side showed under any method, each once: what Claude and Codex label */
+export function pairsToLabel(labels: Labels, results: Record<string, Record<string, Result>>, split: Side) {
+  const out: { prompt: string; unit: number }[] = [];
+  for (const p of labels.prompts.filter((x) => x.split === split && x.group === "ordinary"))
+    for (const unit of new Set(Object.values(results[p.id] ?? {}).flatMap((r) => r.shown)))
+      out.push({ prompt: p.id, unit });
+  return out;
+}
+
+/** Only a positive's candidates and cut records are counted (how far its conflict set got); other prompts count what was shown */
+const kept = (p: Prompt, r: Result): Result =>
+  p.group === "positive" ? r : { candidates: [], shown: r.shown, cut: [] };
+
+/** The public file of one side: the side's prompts with their results and ordinary labels, its summary, and the verdict by the bars */
+export function assemble(
+  labels: Labels,
+  results: Record<string, Record<string, Result>>,
+  pairs: Pair[],
+  split: Side,
+  o: { methods: Record<string, Method>; judged: string[]; measuredAt: string; dbSha256: string },
+): Baseline {
+  const wanted = pairsToLabel(labels, results, split);
+  const got = new Map(pairs.map((x) => [`${x.prompt} ${x.unit}`, x]));
+  for (const w of wanted)
+    if (!got.has(`${w.prompt} ${w.unit}`))
+      throw new Error(`${w.prompt} showed u${w.unit}, which has no labels`);
+  if (pairs.length !== wanted.length)
+    throw new Error("the pairs name a record no ordinary prompt of this side showed");
+  const prompts = labels.prompts
+    .filter((p) => p.split === split)
+    .map((p): Prompt => {
+      const r = results[p.id];
+      if (!r) throw new Error(`${p.id} has no results`);
+      const mine = pairs.filter((x) => x.prompt === p.id);
+      return {
+        ...p,
+        labels: Object.fromEntries(mine.map((x) => [String(x.unit), settle(x)])),
+        results: Object.fromEntries(Object.keys(o.methods).map((m) => [m, kept(p, r[m] as Result)])),
+      };
+    });
+  const summary = summarize(prompts, Object.keys(o.methods), split);
+  return {
+    issue: 260,
+    measured_at: o.measuredAt,
+    review: labels.review,
+    labelling: {
+      pairs: pairs.length,
+      first_agree: pairs.filter((x) => x.claude === x.codex).length,
+      second_agree: pairs.filter((x) => x.claude !== x.codex && settle(x) !== "undecidable").length,
+      undecidable: pairs.filter((x) => settle(x) === "undecidable").length,
+    },
+    inputs: {
+      db_sha256: o.dbSha256,
+      prompts_sha256: labels.prompts_sha256,
+      population_sha256: labels.population_sha256,
+    },
+    methods: o.methods,
+    bars: labels.bars,
+    synthetic_text_public: labels.synthetic_text_public,
+    prompts,
+    summary,
+    judged: o.judged,
+    verdict: decide(summary, labels.bars, o.judged),
+  };
+}
+
+/** The tune side's file: its measured side, the method chosen there, the methods held-out will run, and the signals compared */
+export type Tune = {
+  chosen: string;
+  held_out_methods: Record<string, Method>;
+  signals: Signals;
+  baseline: Baseline;
+};
+
+/** Every way the tune file is not counted from the labels, or names a choice held-out cannot run */
+export function checkTune(v: Tune, labels: Labels): string[] {
+  const out: string[] = [];
+  try {
+    const { differs } = recount(v.baseline, "tune");
+    for (const d of differs) out.push(`the tune ${d} counted again differs from what it says`);
+  } catch (e) {
+    return [(e as Error).message];
+  }
+  const b = v.baseline;
+  if (b.summary.split !== "tune") out.push("the measured side is not tune");
+  if (!isDeepStrictEqual(b.bars, labels.bars))
+    out.push("the bars differ from the ones fixed with the labels");
+  if (b.inputs.prompts_sha256 !== labels.prompts_sha256)
+    out.push("the tune side was measured on other labels");
+  const strip = (p: Prompt) => ({ ...p, labels: {}, results: {} });
+  const fixed = labels.prompts.filter((p) => p.split === "tune");
+  if (!isDeepStrictEqual(b.prompts.map(strip), fixed.map(strip)))
+    out.push("the tune prompts differ from the labels");
+  if (!(v.chosen in v.held_out_methods))
+    out.push(`the chosen method ${v.chosen} is not among the held-out methods`);
+  if (!("B0" in v.held_out_methods)) out.push("held-out does not run B0");
+  for (const [name, m] of Object.entries(v.held_out_methods))
+    if (!isDeepStrictEqual(m, b.methods[name]))
+      out.push(`held-out method ${name} is not one measured on tune`);
+  return out;
+}
+
 const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"));
 
 async function main(): Promise<void> {
@@ -240,8 +427,165 @@ async function main(): Promise<void> {
       ordinary: { type: "string" },
       out: { type: "string" },
       texts: { type: "string" },
+      measure: { type: "boolean" },
+      root: { type: "string" },
+      labels: { type: "string" },
+      split: { type: "string" },
+      methods: { type: "string" },
+      tune: { type: "boolean" },
+      "held-out": { type: "boolean" },
+      "tune-file": { type: "string" },
+      "check-tune": { type: "string" },
+      run: { type: "string" },
+      pairs: { type: "string" },
+      chosen: { type: "string" },
+      "held-out-methods": { type: "string" },
+      "measured-at": { type: "string" },
+      baseline: { type: "string" },
+      rerun: { type: "boolean" },
+      prompts: { type: "string" },
     },
   });
+  const need = (mode: string, keys: (keyof typeof values)[]) => {
+    const missing = keys.filter((k) => !values[k]);
+    if (missing.length) throw new Error(`${mode} needs ${missing.map((k) => `--${String(k)}`).join(", ")}`);
+  };
+  const root = values.root ?? path.resolve(import.meta.dirname, "..", "..", "..");
+  const textsOf = (file: string) =>
+    new Map((read(file).prompts as { id: string; text: string }[]).map((t) => [t.id, t.text]));
+  if (values.measure) {
+    need("--measure", ["db", "population", "labels", "texts", "split", "methods", "out"]);
+    const split = values.split as Side;
+    if (split !== "tune" && split !== "held_out") throw new Error("--split is tune or held_out");
+    const methods = read(values.methods as string) as Record<string, Method>;
+    const labels = read(values.labels as string) as Labels;
+    const db = openReader(values.db as string);
+    try {
+      const run = await measure(
+        db,
+        root,
+        (read(values.population as string) as Population).project,
+        labels,
+        textsOf(values.texts as string),
+        split,
+        methods,
+      );
+      fs.writeFileSync(values.out as string, `${JSON.stringify({ split, methods, ...run }, null, 2)}\n`);
+      console.log(
+        `${values.out}: ${Object.keys(run.results).length} ${split} prompts measured; ${pairsToLabel(labels, run.results, split).length} records shown on ordinary prompts to label`,
+      );
+    } finally {
+      await db.destroy();
+    }
+    return;
+  }
+  if (values["check-tune"]) {
+    const file = values["check-tune"];
+    const problems = checkTune(
+      read(file),
+      read(values.labels ?? path.join(path.dirname(file), "labels.json")),
+    );
+    if (problems.length) {
+      for (const p of problems) console.error(p);
+      process.exitCode = 1;
+      return;
+    }
+    const t = read(file) as Tune;
+    console.log(
+      `${file}: counted again as written; chosen ${t.chosen}; held-out runs ${Object.keys(t.held_out_methods).join(", ")}; bars as fixed with the labels; ${t.baseline.labelling.pairs} ordinary records labelled (${t.baseline.labelling.first_agree} agreed at first, ${t.baseline.labelling.second_agree} after review, ${t.baseline.labelling.undecidable} undecidable)`,
+    );
+    return;
+  }
+  if (values.tune || values["held-out"]) {
+    const mode = values.tune ? "--tune" : "--held-out";
+    need(mode, ["labels", "run", "pairs", "measured-at", "population", "out"]);
+    const labels = read(values.labels as string) as Labels;
+    const run = read(values.run as string) as {
+      split: Side;
+      methods: Record<string, Method>;
+      results: Record<string, Record<string, Result>>;
+      signals: Signals;
+    };
+    if (!values.tune) need(mode, ["tune-file"]);
+    const tune = values.tune ? null : (read(values["tune-file"] as string) as Tune);
+    const methods = tune ? tune.held_out_methods : run.methods;
+    if (run.split !== (tune ? "held_out" : "tune"))
+      throw new Error(`${mode} takes a ${tune ? "held_out" : "tune"} run`);
+    const baseline = assemble(labels, run.results, read(values.pairs as string).pairs, run.split, {
+      methods,
+      // Tune compares every method; held-out judges only the one fixed there
+      judged: tune ? [tune.chosen] : Object.keys(methods).filter((m) => m !== "B0"),
+      measuredAt: values["measured-at"] as string,
+      dbSha256: (read(values.population as string) as Population).db_sha256,
+    });
+    if (tune) {
+      fs.writeFileSync(values.out as string, publicJson(baseline));
+      console.log(`${values.out}: ${baseline.verdict.verdict} ${baseline.verdict.passing.join(", ")}`);
+    } else {
+      need(mode, ["chosen", "held-out-methods"]);
+      const t: Tune = {
+        chosen: values.chosen as string,
+        held_out_methods: read(values["held-out-methods"] as string),
+        signals: run.signals,
+        baseline,
+      };
+      const problems = checkTune(t, labels);
+      if (problems.length) throw new Error(problems.join("\n"));
+      fs.writeFileSync(values.out as string, promptLines(t));
+      console.log(`${values.out}: written`);
+    }
+    return;
+  }
+  if (values.rerun) {
+    need("--rerun", ["db", "prompts", "baseline"]);
+    const b = read(values.baseline as string);
+    checkPublic(b);
+    const sha = crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(values.db as string))
+      .digest("hex");
+    if (sha !== b.inputs.db_sha256)
+      throw new Error(`${values.db} is not the database the baseline was measured on`);
+    const labels = {
+      prompts: b.prompts,
+      prompts_sha256: b.inputs.prompts_sha256,
+    } as Labels;
+    const db = openReader(values.db as string);
+    try {
+      const run = await measure(
+        db,
+        root,
+        (
+          read(
+            values.population ?? path.join(path.dirname(values.baseline as string), "population.json"),
+          ) as Population
+        ).project,
+        labels,
+        textsOf(values.prompts as string),
+        "held_out",
+        b.methods,
+      );
+      const differ = b.prompts.filter((p) => {
+        const again = run.results[p.id] ?? {};
+        return Object.keys(b.methods).some(
+          (m) => !isDeepStrictEqual(kept(p, again[m] as Result), p.results[m]),
+        );
+      });
+      if (differ.length) {
+        console.error(
+          `${differ.length} held-out prompts give other candidates now: ${differ.map((p) => p.id).join(", ")}`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log(
+        `${values.baseline}: the database and ${b.prompts.length} held-out texts hash as pinned, and every method gives the same candidates and shown records`,
+      );
+    } finally {
+      await db.destroy();
+    }
+    return;
+  }
   if (values.recount) {
     const { verdict, differs } = recount(read(values.recount));
     if (differs.length) {
@@ -296,7 +640,7 @@ async function main(): Promise<void> {
     return;
   }
   throw new Error(
-    "usage: run.ts --recount <baseline.json> | --check-labels <labels.json> | --build-labels ...",
+    "usage: run.ts --recount <baseline.json> | --check-labels <labels.json> | --check-tune <tune.json> | --build-labels | --measure | --tune | --held-out | --rerun ...",
   );
 }
 
