@@ -9,7 +9,7 @@ import type { Method } from "./methods.ts";
 type Group = "positive" | "hard_negative" | "ordinary";
 type Split = "tune" | "held_out";
 type Lang = "ja" | "en";
-type Overlap = "none" | "partial" | "most";
+export type Overlap = "none" | "partial" | "most";
 /** A candidate's label on an ordinary prompt: a real conflict, the same topic, neither, or one nobody could settle */
 type CandidateLabel = "conflict" | "related" | "unrelated" | "undecidable";
 
@@ -26,8 +26,8 @@ export type Prompt = {
   override: boolean;
   writer: "claude" | "codex" | "owner";
   overlap: Overlap | null;
-  /** The owner's call on a synthetic prompt; ordinary prompts are the owner's own and have none */
-  owner: "keep" | "fix" | "drop" | null;
+  /** The review's call on a synthetic prompt, made by the model that did not write it; ordinary prompts are the owner's own and have none */
+  call: "keep" | "fix" | "drop" | null;
   undecidable: boolean;
   /** Records the prompt goes against: showing any one of them counts */
   conflict: number[];
@@ -61,6 +61,8 @@ type MethodSummary = {
   drops: { none: number; limit: number; rank: number; chars: number };
   vs_b0: { gained: number; lost: number };
   ordinary_unrelated: Rate;
+  /** The same with records nobody could settle counted as unrelated, over every ordinary prompt: how much the left-out ones could move it */
+  ordinary_unrelated_if_undecided: Rate;
   ordinary_conflicts: number;
   hard_negative_shown: Rate;
 };
@@ -75,9 +77,16 @@ export type Summary = {
 };
 export type Verdict = { verdict: "advance" | "not_now" | "hold"; reasons: string[]; passing: string[] };
 
+/** Who made the calls on synthetic prompts: the owner, or the model that did not write each prompt */
+type Review = "owner" | "cross_model";
+/** Ordinary candidates labelled by Claude and Codex apart: how many agreed at first, after each saw the other's reasons, and the rest */
+type Labelling = { pairs: number; first_agree: number; second_agree: number; undecidable: number };
+
 export type Baseline = {
   issue: number;
   measured_at: string;
+  review: Review;
+  labelling: Labelling;
   inputs: { db_sha256: string; prompts_sha256: string; population_sha256: string };
   methods: Record<string, Method>;
   bars: Bars;
@@ -110,7 +119,7 @@ export function reached(p: Prompt, r: Result): "shown" | "chars" | "rank" | "lim
   return hit(r.cut) ? "limit" : "none";
 }
 
-const counted = (p: Prompt) => p.owner !== "drop" && !p.undecidable;
+const counted = (p: Prompt) => p.call !== "drop" && !p.undecidable;
 
 function stages(ps: Prompt[], method: string): Stages {
   const at = ps.map((p) => reached(p, result(p, method)));
@@ -130,12 +139,12 @@ function result(p: Prompt, method: string): Result {
   return r;
 }
 
-/** Whether an ordinary prompt showed an unrelated record. Every record it showed must have a label */
-function unrelated(p: Prompt, r: Result): boolean {
+/** Whether an ordinary prompt showed a record with one of these labels. Every record it showed must have a label */
+function showsAny(p: Prompt, r: Result, labels: CandidateLabel[]): boolean {
   return r.shown.some((id) => {
     const label = p.labels[String(id)];
     if (!label) throw new Error(`ordinary prompt ${p.id} shows record ${id}, which has no label`);
-    return label === "unrelated";
+    return labels.includes(label);
   });
 }
 
@@ -144,19 +153,20 @@ export function summarize(prompts: Prompt[], methods: string[], split: Split): S
     throw new Error(`the methods must include ${B0}, which every other one is held against`);
   const here = prompts.filter((p) => p.split === split);
   for (const p of here)
-    if (p.group !== "ordinary" && p.owner === null)
-      throw new Error(`synthetic prompt ${p.id} has no owner's call yet; it cannot be measured`);
+    if (p.group !== "ordinary" && p.call === null)
+      throw new Error(`synthetic prompt ${p.id} has no review call yet; it cannot be measured`);
   // An ordinary prompt with any record nobody could settle is left out of every method's count, so all share one denominator
   const settled = (p: Prompt) => !p.undecidable && !Object.values(p.labels).includes("undecidable");
   const positives = here.filter((p) => p.group === "positive" && counted(p));
   const hard = here.filter((p) => p.group === "hard_negative" && counted(p));
   const ordinary = here.filter((p) => p.group === "ordinary" && settled(p));
+  const open = here.filter((p) => p.group === "ordinary" && !p.undecidable);
   const tally = (g: Group, lang?: Lang) => {
     const of = here.filter((p) => p.group === g && (lang === undefined || p.lang === lang));
     return {
       kept: of.filter(counted).length,
-      dropped: of.filter((p) => p.owner === "drop").length,
-      undecidable: of.filter((p) => p.owner !== "drop" && p.undecidable).length,
+      dropped: of.filter((p) => p.call === "drop").length,
+      undecidable: of.filter((p) => p.call !== "drop" && p.undecidable).length,
     };
   };
   const out: Summary = {
@@ -218,7 +228,14 @@ export function summarize(prompts: Prompt[], methods: string[], split: Split): S
         gained: at.filter((s, i) => s === "shown" && !base[i]).length,
         lost: at.filter((s, i) => s !== "shown" && base[i]).length,
       },
-      ordinary_unrelated: wilson(ordinary.filter((p) => unrelated(p, result(p, m))).length, ordinary.length),
+      ordinary_unrelated: wilson(
+        ordinary.filter((p) => showsAny(p, result(p, m), ["unrelated"])).length,
+        ordinary.length,
+      ),
+      ordinary_unrelated_if_undecided: wilson(
+        open.filter((p) => showsAny(p, result(p, m), ["unrelated", "undecidable"])).length,
+        open.length,
+      ),
       ordinary_conflicts: ordinary.filter((p) =>
         result(p, m).shown.some((id) => p.labels[String(id)] === "conflict"),
       ).length,
@@ -356,6 +373,7 @@ const summaryRule = obj({
       drops: obj({ none: num, limit: num, rank: num, chars: num }),
       vs_b0: obj({ gained: num, lost: num }),
       ordinary_unrelated: rate,
+      ordinary_unrelated_if_undecided: rate,
       ordinary_conflicts: num,
       hard_negative_shown: rate,
     }),
@@ -372,7 +390,7 @@ function promptRule(textPublic: boolean): Rule {
     override: bool,
     writer: oneOf("claude", "codex", "owner"),
     overlap: oneOf("none", "partial", "most", null),
-    owner: oneOf("keep", "fix", "drop", null),
+    call: oneOf("keep", "fix", "drop", null),
     undecidable: bool,
     conflict: ids,
     related: ids,
@@ -395,22 +413,51 @@ function promptRule(textPublic: boolean): Rule {
   };
 }
 
+const barsRule = obj({
+  minPositivePerLanguage: num,
+  minOrdinary: num,
+  maxUndecidable: num,
+  minShown: num,
+  minGainOverB0: num,
+  maxUnrelatedUpper: num,
+});
+
+/** The labels fixed before any method runs: every prompt's labels and the bars, published like the baseline */
+export type Labels = {
+  issue: number;
+  review: Review;
+  population_sha256: string;
+  prompts_sha256: string;
+  synthetic_text_public: boolean;
+  bars: Bars;
+  prompts: Prompt[];
+};
+
+/** Throws unless the labels file holds only allowlisted keys and values */
+export function checkLabelsPublic(v: unknown): asserts v is Labels {
+  const top = v as { synthetic_text_public?: unknown };
+  obj({
+    issue: num,
+    review: oneOf("owner", "cross_model"),
+    population_sha256: str(HEX),
+    prompts_sha256: str(HEX),
+    synthetic_text_public: bool,
+    bars: barsRule,
+    prompts: list(promptRule(top?.synthetic_text_public === true)),
+  })(v, "labels");
+}
+
 /** Throws unless the value holds only the public file's keys and values */
 export function checkPublic(v: unknown): asserts v is Baseline {
   const top = v as { synthetic_text_public?: unknown };
   obj({
     issue: num,
     measured_at: str(DAY),
+    review: oneOf("owner", "cross_model"),
+    labelling: obj({ pairs: num, first_agree: num, second_agree: num, undecidable: num }),
     inputs: obj({ db_sha256: str(HEX), prompts_sha256: str(HEX), population_sha256: str(HEX) }),
     methods: map(NAME, obj({ alias: oneOf("boundary", "terms"), search: num }, ["alias", "search"])),
-    bars: obj({
-      minPositivePerLanguage: num,
-      minOrdinary: num,
-      maxUndecidable: num,
-      minShown: num,
-      minGainOverB0: num,
-      maxUnrelatedUpper: num,
-    }),
+    bars: barsRule,
     synthetic_text_public: bool,
     prompts: list(promptRule(top?.synthetic_text_public === true)),
     summary: summaryRule,

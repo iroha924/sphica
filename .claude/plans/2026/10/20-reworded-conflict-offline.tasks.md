@@ -53,13 +53,14 @@ base: main
   - コミット: `feat(evals): pin the #260 population and its tune and held-out split (T03)`
   - 結果: `cd server && node evals/conflict/sample.ts --check evals/conflict/population.json` → seed 260 と sha256 のとおり。配信できる 673 件、dont の決定 41 件、rejected option 255 件、tune 89 件 / held-out 88 件、対象は各側 dont 15 + rejected 15。普段の依頼は owner の発言 869 件から AskUserQuestion の答え 56 件・注入文 0 件を除き、各側 200 件（セッション 72 件を 44 / 28 に分割）。評価セッション 2 件。`test/conflict-measure.test.ts` は 8 件 pass
 
-- [ ] T04: 合成の依頼の作成とラベルの確定
+- [x] T04: 合成の依頼の作成とラベルの確定
   - 種別: 追加
   - 計画: S2
   - 依存: T03（unit 単位の分割と対象が要る）
-  - 変更: `server/evals/conflict/labels.json`, `server/evals/conflict/population.json`
-  - 完了条件: `cd server && node evals/conflict/run.ts --check-labels evals/conflict/labels.json` → 全依頼に衝突の集合・関連の集合・上書き・書き手・語の重なりの層があり、持ち主の確認（採る・直す・捨てる）が全件に付いている。本文は持ち主が公開を認めたときだけ入っている
-  - コミット: `feat(evals): add the owner-confirmed synthetic prompts and labels for #260 (T04)`
+  - 変更: `server/evals/conflict/labels.json`, `server/evals/conflict/run.ts`, `server/evals/conflict/measure.ts`, `server/test/conflict-measure.test.ts`
+  - 完了条件: `cd server && node evals/conflict/run.ts --check-labels evals/conflict/labels.json` → 全依頼に衝突の集合・関連の集合・上書き・書き手・語の重なりの層があり、書き手と別のモデルの確認（採る・直す・捨てる）が全件に付いている。本文は入っていない
+  - コミット: `feat(evals): add the cross-reviewed synthetic prompts and labels for #260 (T04)`
+  - 結果: `cd server && node evals/conflict/run.ts --check-labels evals/conflict/labels.json` → 母集団が求める依頼すべてにラベルがあり、positive 120 件・hard negative 60 件（捨てた 0 件、直した 12 件）、普段の依頼 400 件、本文は非公開。`test/conflict-measure.test.ts` は 10 件 pass
 
 ## P3: 測定と判定
 
@@ -70,7 +71,7 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
   - 計画: S4
   - 依存: T01（拾い方が要る）, T04（tune のラベルが要る）
   - 変更: `server/evals/conflict/tune.json`, `server/evals/conflict/labels.json`
-  - 完了条件: `cd server && node evals/conflict/run.ts --check-tune evals/conflict/tune.json` → 選んだ方式・並べ方・取得上限、持ち主と固定した判定の数値、tune の普段の依頼の候補のラベル（割れたものは持ち主の判定）が入っている
+  - 完了条件: `cd server && node evals/conflict/run.ts --check-tune evals/conflict/tune.json` → 選んだ方式・並べ方・取得上限、固定した判定の数値、tune の普段の依頼の候補のラベル（割れたものは 1 回の見直しの後、なお割れたら判定不能）と一致数が入っている
   - コミット: `feat(evals): fix the #260 method and bars on the tune split (T05)`
 
 - [ ] T06: held-out の測定と判定
@@ -86,4 +87,9 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 - T01: dont の決定は計画の件数と同じく kind = decision かつ stance = dont で数える。B2 の検索は lifecycle を active に絞って呼ぶ（配信できるのは active だけで、superseded が上限を食わないため）
 - T01: 評価の道具は出荷物の挙動を変えないので、タスクごとの Codex のレビューは省き、最後の全差分のレビューで見る
 - T03: DB の写しは 2026-10-21 00:48（日本時間）に `VACUUM INTO` で取った（sha256 dc4194d4…、計画の「2026-10-20 に固定」から約 1 時間後。この間の記録の差は数えていない）。普段の依頼の本文は capture が保存した形（長いものは切られている）で、フックが見た全文ではない
+- T04: 変更欄を「labels.json, population.json」から「labels.json, run.ts, measure.ts, conflict-measure.test.ts」に変えた。`--check-labels` とラベルの組み立てが run.ts に、ラベルの公開キーの許可が measure.ts に要るため。population.json は変えない（依頼を書いた Codex の会話はリポジトリの外で走らせ、capture されないので評価セッションに足すものが無い）
+- T04: 衝突の集合の候補は、対象の記録の文（依頼ではない）で検索して読んだ。同じ衝突を裏付ける dont の決定や却下した案は 60 件のどれにも見つからず、衝突の集合は対象の記録 1 件ずつ。同じ話題の記録は関連の集合に入れた
+- T04, T05: 完了条件の「持ち主の確認」「持ち主と固定した判定の数値」「割れたものは持ち主の判定」を、別のモデルの確認・叩き台の値の固定・1 回の見直しと判定不能に変えた（plan の変更履歴 2026-10-21。持ち主が任せたため）
+- T04: 書き手は Codex 90 件・Claude 90 件。確認は書き手と別のモデルで、Claude は Codex の 90 件をすべて採り、Codex は Claude の 90 件のうち 12 件を直した（直した文は Claude が確かめて採った）。ほかの対象にも反するかの確認で、u437o351 の positive に u352、u607o418 の positive に u558 を衝突の集合へ足した。語の重なりは positive で none 4・partial 92・most 24
+- T04: コミットの件名を「owner-confirmed」から「cross-reviewed」に変えた（持ち主の確認が無いため）
 - T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する

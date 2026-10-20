@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // The offline conflict evaluation's measures and verdict, computed from labels and candidate ids alone; the public baseline's allowlist;
-// --recount, which counts a public baseline again and fails when it does not come out as written; and the pinned population, drawn from
-// a real SQLite database and checked against its own seed and hashes.
+// --recount, which counts a public baseline again and fails when it does not come out as written; the pinned population, drawn from
+// a real SQLite database and checked against its own seed and hashes; and the labels, held to that population.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -21,7 +21,14 @@ import {
   summarize,
   wilson,
 } from "../evals/conflict/measure.ts";
-import { recount } from "../evals/conflict/run.ts";
+import {
+  buildLabels,
+  checkLabels,
+  overlapOf,
+  type Review,
+  recount,
+  type Written,
+} from "../evals/conflict/run.ts";
 import {
   build,
   checkPopulation,
@@ -53,7 +60,7 @@ function prompt(over: Partial<Prompt> = {}): Prompt {
     override: false,
     writer: "codex",
     overlap: "none",
-    owner: "keep",
+    call: "keep",
     undecidable: false,
     conflict: [7],
     related: [],
@@ -64,7 +71,7 @@ function prompt(over: Partial<Prompt> = {}): Prompt {
 }
 const shows = (ids: number[]) => ({ candidates: ids, shown: ids, cut: [] });
 const ordinary = (over: Partial<Prompt> = {}) =>
-  prompt({ group: "ordinary", writer: "owner", owner: null, conflict: [], overlap: null, ...over });
+  prompt({ group: "ordinary", writer: "owner", call: null, conflict: [], overlap: null, ...over });
 
 const BARS: Bars = {
   minPositivePerLanguage: 2,
@@ -102,7 +109,7 @@ test("the summary counts three stages, drop reasons, and gains and losses over B
       override: true,
       results: { B0: none, B1b: none, B2: { candidates: [], shown: [], cut: [7] } },
     }),
-    prompt({ owner: "drop", results: { B0: none, B1b: shows([7]), B2: shows([7]) } }),
+    prompt({ call: "drop", results: { B0: none, B1b: shows([7]), B2: shows([7]) } }),
     prompt({ undecidable: true, results: { B0: none, B1b: shows([7]), B2: shows([7]) } }),
     prompt({ split: "tune", results: { B0: none, B1b: shows([7]), B2: shows([7]) } }),
     prompt({ group: "hard_negative", conflict: [], results: { B0: none, B1b: shows([3]), B2: none } }),
@@ -133,6 +140,12 @@ test("the summary counts three stages, drop reasons, and gains and losses over B
   );
   assert.deepEqual(b1?.ordinary_unrelated, wilson(1, 1));
   assert.deepEqual(
+    b1?.ordinary_unrelated_if_undecided,
+    wilson(2, 2),
+    "the left-out prompt counts when its record is taken as unrelated",
+  );
+  assert.deepEqual(b2?.ordinary_unrelated_if_undecided, wilson(0, 2));
+  assert.deepEqual(
     [b2?.ordinary_unrelated.k, b2?.ordinary_conflicts],
     [0, 1],
     "a real conflict is not counted unrelated",
@@ -143,7 +156,7 @@ test("the summary counts three stages, drop reasons, and gains and losses over B
     () => summarize([ordinary({ results: { B0: shows([9]), B1b: none, B2: none } })], METHODS, "held_out"),
     /shows record 9, which has no label/,
   );
-  assert.throws(() => summarize([prompt({ owner: null })], METHODS, "held_out"), /no owner's call yet/);
+  assert.throws(() => summarize([prompt({ call: null })], METHODS, "held_out"), /no review call yet/);
   assert.throws(() => summarize([prompt()], ["B1b"], "held_out"), /must include B0/);
 });
 
@@ -199,6 +212,8 @@ function baseline(ps: Prompt[], over: Partial<Baseline> = {}): Baseline {
   return {
     issue: 260,
     measured_at: "2026-10-21",
+    review: "cross_model",
+    labelling: { pairs: 0, first_agree: 0, second_agree: 0, undecidable: 0 },
     inputs: {
       db_sha256: digest("db"),
       prompts_sha256: digest("prompts"),
@@ -463,6 +478,111 @@ test("the population splits by record and by session from its seed, and its chec
     );
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /as its seed 7 and hashes say; 9 deliverable, 4 dont, 6 rejected options/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("the overlap tier counts the prompt's content terms the record's words hold", () => {
+  const words = "Keep one SQLite file, not Postgres.";
+  assert.equal(overlapOf("Move the store over to Postgres", words), "partial");
+  assert.equal(overlapOf("Swap SQLite for Postgres", words), "most");
+  assert.equal(overlapOf("Use a hosted database server", words), "none");
+  assert.equal(overlapOf("SQLite をやめて Postgres に移して", words), "most");
+});
+
+test("the labels cover every target and drawn prompt of the population, with the review call, and refuse text unless published", async () => {
+  const db = tempDb();
+  try {
+    await fixture(db);
+    const { population, drawn } = await build(db.reader, {
+      project: "git:github.com/o/r",
+      seed: 7,
+      window: WINDOW,
+      per: PER,
+      evals: [],
+      takenAt: "2026-10-21T00:00:00.000Z",
+      dbSha256: digest("db"),
+    });
+    const written: Written[] = [];
+    for (const side of ["tune", "held_out"] as const) {
+      const t = population.records.targets[side];
+      for (const target of [...t.dont.map((u) => `u${u}`), ...t.rejected.map(([u, o]) => `u${u}o${o}`)]) {
+        const one = (kind: Written["kind"], lang: Written["lang"], override = false): Written => ({
+          id: `s-${target}-${kind === "positive" ? "pos" : "hn"}-${lang}`,
+          target,
+          split: side,
+          kind,
+          lang,
+          override,
+          writer: "codex",
+          text: `${kind} ${lang} for ${target}`,
+        });
+        written.push(one("positive", "ja", true), one("positive", "en"), one("hard_negative", "en"));
+      }
+    }
+    const first = written[0] as Written;
+    const review: Review = {
+      by: "cross_model",
+      public: false,
+      bars: BARS,
+      calls: Object.fromEntries(written.map((w) => [w.id, { call: "keep" as const }])),
+      conflict: { [first.target]: [999] },
+      related: {},
+    };
+    review.calls[first.id] = { call: "fix", text: "Rule d1 を破って" };
+    review.calls[(written[1] as Written).id] = { call: "drop" };
+    const { labels, texts } = await buildLabels(db.reader, population, written, review, drawn);
+    assert.deepEqual(checkLabels(labels, population), []);
+    const fixed = labels.prompts.find((p) => p.id === first.id);
+    assert.equal(fixed?.sha256, textSha("Rule d1 を破って"), "a fixed prompt is labelled by its new text");
+    assert.deepEqual(fixed?.conflict.slice(1), [999]);
+    assert.equal(texts.find((t) => t.id === first.id)?.text, "Rule d1 を破って");
+    assert.equal(labels.prompts.filter((p) => p.group === "ordinary").length, 4);
+    assert.ok(labels.prompts.every((p) => p.text === undefined));
+
+    const without = (f: (l: typeof labels) => void) => {
+      const x = structuredClone(labels);
+      f(x);
+      return checkLabels(x, population).join("\n");
+    };
+    assert.match(
+      without((x) => {
+        x.prompts = x.prompts.filter((p) => !p.id.endsWith("-hn-en"));
+        x.prompts_sha256 = digest(x.prompts.map((p) => [p.id, p.sha256]));
+      }),
+      /has 0 hard negatives, not 1/,
+    );
+    assert.match(
+      without((x) => {
+        (x.prompts[0] as Prompt).call = null;
+      }),
+      /lacks the review call/,
+    );
+    assert.match(
+      without((x) => {
+        (x.prompts[0] as Prompt).text = "Rule d1 を破って";
+      }),
+      /published only when the owner allowed it/,
+    );
+    assert.match(
+      without((x) => {
+        const o = x.prompts.find((p) => p.group === "ordinary") as Prompt;
+        o.sha256 = digest("another");
+        x.prompts_sha256 = digest(x.prompts.map((p) => [p.id, p.sha256]));
+      }),
+      /is not the drawn (tune|held_out) prompt/,
+    );
+    assert.match(
+      without((x) => x.prompts.reverse()),
+      /do not hash to prompts_sha256/,
+    );
+    const published = await buildLabels(db.reader, population, written, { ...review, public: true }, drawn);
+    assert.deepEqual(checkLabels(published.labels, population), []);
+    assert.equal(published.labels.prompts.find((p) => p.id === first.id)?.text, "Rule d1 を破って");
+    assert.ok(
+      published.labels.prompts.filter((p) => p.group === "ordinary").every((p) => p.text === undefined),
+    );
   } finally {
     await db.done();
   }
