@@ -31,13 +31,14 @@ base: main
   - コミット: `feat(evals): add the candidate methods and the prompt-fit copy for #260 (T01)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/conflict-eval.test.ts` → tests 4、pass 4、fail 0。写しの予算を 910 字にすると境界のテストが、AI の印を消すと AI のテストが落ちることを確かめて戻した。`bun run check` は knip の未使用 export 2 件を直した後、knip と typecheck を流し直して通った
 
-- [ ] T02: 指標・判定・公開 JSON
+- [x] T02: 指標・判定・公開 JSON
   - 種別: 追加
   - 計画: S3, S6
   - 依存: なし
   - 変更: `server/evals/conflict/measure.ts`, `server/evals/conflict/run.ts`, `server/test/conflict-measure.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/conflict-measure.test.ts` → pass（3 段の再現率と落ちた理由、B0 との改善・悪化件数、Wilson 95% 区間、保留を先に見る判定、許可したキーだけの公開 JSON と本文の混入の拒否、`--recount` が公開 JSON だけで集計を出し直す）
   - コミット: `feat(evals): add the measures, verdict, and public baseline writer for #260 (T02)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/conflict-measure.test.ts` → tests 6、pass 6、fail 0。`bun run check` は biome の forEach 1 件と knip の未使用 export 1 件を直した後、knip・typecheck・biome を流し直して通った
 
 ## P2: 母集団と依頼
 
@@ -83,3 +84,4 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 
 - T01: dont の決定は計画の件数と同じく kind = decision かつ stance = dont で数える。B2 の検索は lifecycle を active に絞って呼ぶ（配信できるのは active だけで、superseded が上限を食わないため）
 - T01: 評価の道具は出荷物の挙動を変えないので、タスクごとの Codex のレビューは省き、最後の全差分のレビューで見る
+- T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する
