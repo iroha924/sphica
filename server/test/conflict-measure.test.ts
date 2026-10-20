@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // The offline conflict evaluation's measures and verdict, computed from labels and candidate ids alone; the public baseline's allowlist;
-// and --recount, which counts a public baseline again and fails when it does not come out as written.
+// --recount, which counts a public baseline again and fails when it does not come out as written; and the pinned population, drawn from
+// a real SQLite database and checked against its own seed and hashes.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -21,6 +22,19 @@ import {
   wilson,
 } from "../evals/conflict/measure.ts";
 import { recount } from "../evals/conflict/run.ts";
+import {
+  build,
+  checkPopulation,
+  extractOrdinary,
+  extractRecords,
+  type Population,
+  splitRecords,
+  textSha,
+} from "../evals/conflict/sample.ts";
+import { inTransaction } from "../src/db.ts";
+import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { openRun } from "../src/trace.ts";
+import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const METHODS = ["B0", "B1b", "B2"];
@@ -262,4 +276,194 @@ test("--recount counts the public baseline again from labels and ids alone, and 
   const stale = run();
   assert.equal(stale.status, 1);
   assert.match(stale.stderr, /the verdict counted again differ/, "B1b now shows 4 of 8, short of 60%");
+});
+
+async function save(db: TempDb, p: number, units: unknown[]) {
+  const t: Target = {
+    projectId: p,
+    origin: "trace",
+    prefix: "trace:ext-s1/",
+    sessionId: "s1",
+    root: null,
+    sources: null,
+  };
+  await inTransaction(db.ingest, async (trx) => {
+    const run = await openRun(trx, {
+      projectId: p,
+      origin: "trace",
+      target: "session:s1",
+      sessionId: "s1",
+      draftId: `d${Math.random()}`,
+    });
+    return saveRecord(trx, t, run, await checkRecord(trx, t, { units }), []);
+  });
+}
+
+const decided = (key: string, source: number, extra: Record<string, unknown> = {}) => ({
+  key,
+  kind: "decision",
+  stance: "dont",
+  text: `Rule ${key}`,
+  evidence: [{ source: `s${source}`, quote: "Rules.", role: "states" }],
+  adoption: [{ source: `s${source}`, quote: "Rules." }],
+  ...extra,
+});
+const rejected = (text: string) => ({ options: [{ text, outcome: "rejected" }] });
+
+/** Four dont decisions (two with a rejected option), four other records with one, a dont constraint, a candidate, and prompts */
+async function fixture(db: TempDb): Promise<{ p: number; id: (key: string) => number }> {
+  const p = project(db);
+  const m = message(db, p, { id: "m1", text: "Rules." });
+  await save(db, p, [
+    decided("d1", m),
+    decided("d2", m),
+    decided("d3", m, rejected("Postgres")),
+    decided("d4", m, rejected("MySQL")),
+    ...["o1", "o2", "o3", "o4"].map((k) => decided(k, m, { stance: "do", ...rejected(`Option ${k}`) })),
+    decided("c1", m, { kind: "constraint" }),
+    {
+      key: "maybe",
+      kind: "decision",
+      stance: "dont",
+      text: "Maybe not",
+      evidence: [{ source: `s${m}`, quote: "Rules.", role: "proposes" }],
+    },
+  ]);
+  for (const s of ["a", "b", "c", "d"])
+    for (const t of [1, 2])
+      message(db, p, {
+        id: `${s}${t}:owner:h`,
+        text: `Prompt ${s}${t}`,
+        sent: `2026-10-0${t + 2}T00:00:00Z`,
+        session: uuid(s),
+      });
+  const a = { sent: "2026-10-03T00:00:00Z", session: uuid("a") };
+  message(db, p, { id: "a3:ask:call:h", text: "Yes", ...a });
+  message(db, p, { id: "a4:owner:h", text: "<task-notification> done", ...a });
+  message(db, p, { id: "a5:owner:h", text: "Before", ...a, sent: "2026-09-30T23:59:59Z" });
+  message(db, p, { id: "a6:owner:h", text: "At the end", ...a, sent: "2026-10-10T00:00:00Z" });
+  message(db, p, { id: "a7:assistant", text: "Done", ...a, speaker: "assistant" });
+  db.owner
+    .prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values (?, ?, 'codex', ?, ?)",
+    )
+    .run(uuid("e"), p, uuid("f"), "2026-10-20T00:00:00.000Z");
+  const id = (key: string) =>
+    Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+  return { p, id };
+}
+
+/** Session ids as the hosts give them */
+const uuid = (c: string) => `00000000-0000-4000-8000-00000000000${c}`;
+const WINDOW = { from: "2026-10-01T00:00:00.000Z", to: "2026-10-10T00:00:00.000Z" };
+const PER = { dont: 1, rejected: 2, ordinary: 2 };
+
+test("the population takes deliverable dont decisions and rejected options, and the window's own prompts without answers or injected text", async () => {
+  const db = tempDb();
+  try {
+    const { p, id } = await fixture(db);
+    const r = await extractRecords(db.reader, p);
+    assert.equal(r.deliverable, 9, "the candidate is not deliverable");
+    assert.deepEqual(r.dont, ["d1", "d2", "d3", "d4"].map(id), "a dont constraint is not a dont decision");
+    assert.deepEqual(
+      r.rejected.map(([u]) => u),
+      ["d3", "d4", "o1", "o2", "o3", "o4"].map(id),
+    );
+    const o = await extractOrdinary(db.reader, p, WINDOW);
+    assert.deepEqual([o.found, o.excluded], [10, { ask_answer: 1, injected: 1 }]);
+    assert.deepEqual(
+      o.rows.map((x) => x.text),
+      ["a", "b", "c", "d"].map((s) => `Prompt ${s}1`).concat(["a", "b", "c", "d"].map((s) => `Prompt ${s}2`)),
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("the population splits by record and by session from its seed, and its check finds any change and any text", async () => {
+  const db = tempDb();
+  const dir = tempDir("sphica-conflict-population-");
+  try {
+    await fixture(db);
+    const opts = {
+      project: "git:github.com/o/r",
+      seed: 7,
+      window: WINDOW,
+      per: PER,
+      evals: [`codex:${uuid("f")}`],
+      takenAt: "2026-10-21T00:00:00.000Z",
+      dbSha256: digest("db"),
+    };
+    const { population, drawn } = await build(db.reader, opts);
+    assert.deepEqual((await build(db.reader, opts)).population, population, "the same seed draws the same");
+    assert.deepEqual(checkPopulation(population), []);
+    const r = population.records;
+    const pool = [...new Set([...r.dont, ...r.rejected.map(([u]) => u)])].sort((a, b) => a - b);
+    assert.deepEqual(
+      [...r.split.tune, ...r.split.held_out].sort((a, b) => a - b),
+      pool,
+    );
+    for (const side of ["tune", "held_out"] as const) {
+      const t = r.targets[side];
+      assert.equal(r.split[side].filter((u) => r.dont.includes(u)).length, 2, "dont decisions split evenly");
+      assert.ok([...t.dont, ...t.rejected.map(([u]) => u)].every((u) => r.split[side].includes(u)));
+      assert.ok(
+        t.rejected.every(([u]) => !t.dont.includes(u)),
+        "a record is the target of one prompt kind",
+      );
+    }
+    const o = population.ordinary;
+    assert.deepEqual(
+      o.split.tune.filter((s) => o.split.held_out.includes(s)),
+      [],
+      "no session on both sides",
+    );
+    for (const side of ["tune", "held_out"] as const)
+      for (const [source] of o.drawn[side]) {
+        const session = o.eligible.find(([x]) => x === source)?.[1] ?? -1;
+        assert.ok(o.split[side].includes(session));
+      }
+    assert.ok(drawn.every((d) => d.sha256 === textSha(d.text)));
+    assert.deepEqual(population.eval_sessions, [
+      { host: "codex", external: uuid("f"), id: uuid("e"), from: "2026-10-20T00:00:00.000Z" },
+    ]);
+
+    const changed = (f: (x: Population) => void) => {
+      const x = structuredClone(population);
+      f(x);
+      return checkPopulation(x);
+    };
+    assert.deepEqual(
+      changed((x) => x.records.split.tune.reverse()),
+      ["records.split is not what the seed gives"],
+    );
+    // The draw from what is left may differ too
+    assert.deepEqual(changed((x) => x.ordinary.eligible.pop()).slice(0, 2), [
+      "ordinary.eligible does not hash to ordinary.sha256",
+      "ordinary.found is not the eligible prompts plus the excluded ones",
+    ]);
+    assert.match(
+      changed((x) => Object.assign(x.ordinary, { text: ["Prompt a1"] })).join("\n"),
+      /ordinary\.text: a key outside the allowlist/,
+    );
+    assert.match(
+      changed((x) => {
+        (x.eval_sessions[0] as { external: string }).external = "Prompt a1";
+      }).join("\n"),
+      /eval_sessions\[0\]\.external: a string that is not an id/,
+    );
+    assert.throws(() => splitRecords(7, r.dont, r.rejected, { dont: 3, rejected: 1 }), /short of 3/);
+
+    const file = path.join(dir, "population.json");
+    fs.writeFileSync(file, `${JSON.stringify(population, null, 2)}\n`);
+    const run = spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "conflict", "sample.ts"), "--check", file],
+      { encoding: "utf8", env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: dir, USERPROFILE: dir } },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /as its seed 7 and hashes say; 9 deliverable, 4 dont, 6 rejected options/);
+  } finally {
+    await db.done();
+  }
 });

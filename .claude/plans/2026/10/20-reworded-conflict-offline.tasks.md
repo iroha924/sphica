@@ -44,13 +44,14 @@ base: main
 
 記録と普段の依頼の母集団を固定して分け、合成の依頼を持ち主の確認でラベルまで確定する。
 
-- [ ] T03: 母集団の固定と分割
+- [x] T03: 母集団の固定と分割
   - 種別: 追加
   - 計画: S1
   - 依存: T02（公開 JSON の書き出しと sha256 の固定が要る）
   - 変更: `server/evals/conflict/sample.ts`, `server/evals/conflict/population.json`, `server/test/conflict-measure.test.ts`
   - 完了条件: `cd server && node evals/conflict/sample.ts --check evals/conflict/population.json` → 件数・seed・分割・sha256 が一致し、本文を含まない。`deliverableIds` での記録の件数、除いた普段の依頼の件数、評価セッションの ID と期間が入っている
   - コミット: `feat(evals): pin the #260 population and its tune and held-out split (T03)`
+  - 結果: `cd server && node evals/conflict/sample.ts --check evals/conflict/population.json` → seed 260 と sha256 のとおり。配信できる 673 件、dont の決定 41 件、rejected option 255 件、tune 89 件 / held-out 88 件、対象は各側 dont 15 + rejected 15。普段の依頼は owner の発言 869 件から AskUserQuestion の答え 56 件・注入文 0 件を除き、各側 200 件（セッション 72 件を 44 / 28 に分割）。評価セッション 2 件。`test/conflict-measure.test.ts` は 8 件 pass
 
 - [ ] T04: 合成の依頼の作成とラベルの確定
   - 種別: 追加
@@ -84,4 +85,5 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 
 - T01: dont の決定は計画の件数と同じく kind = decision かつ stance = dont で数える。B2 の検索は lifecycle を active に絞って呼ぶ（配信できるのは active だけで、superseded が上限を食わないため）
 - T01: 評価の道具は出荷物の挙動を変えないので、タスクごとの Codex のレビューは省き、最後の全差分のレビューで見る
+- T03: DB の写しは 2026-10-21 00:48（日本時間）に `VACUUM INTO` で取った（sha256 dc4194d4…、計画の「2026-10-20 に固定」から約 1 時間後。この間の記録の差は数えていない）。普段の依頼の本文は capture が保存した形（長いものは切られている）で、フックが見た全文ではない
 - T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する
