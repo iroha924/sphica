@@ -25,6 +25,7 @@ import {
 import {
   assemble,
   buildLabels,
+  checkHeldOut,
   checkLabels,
   checkTune,
   measure,
@@ -705,6 +706,34 @@ test("a side is measured from the private texts, assembled with the ordinary lab
       checkTune(edited, labels).join("\n"),
       /the tune prompts differ from the labels|counted again differs/,
     );
+
+    // A held-out baseline must hold every held-out prompt of the labels, run and judged as fixed on tune
+    const held = await measure(db.reader, "/r", population.project, labels, byId, "held_out", methods);
+    const heldPairs: Pair[] = pairsToLabel(labels, held.results, "held_out").map((x) => ({
+      ...x,
+      claude: "related",
+      codex: "related",
+      claude2: null,
+      codex2: null,
+    }));
+    const out = assemble(labels, held.results, heldPairs, "held_out", { ...o, judged: ["B1a"] });
+    assert.deepEqual(checkHeldOut(out, labels, t), []);
+    assert.ok(out.prompts.length > 1);
+    for (const prompts of [out.prompts.slice(1), []])
+      assert.deepEqual(checkHeldOut({ ...out, prompts }, labels, t), [
+        "the held-out prompts differ from the labels",
+      ]);
+    assert.deepEqual(
+      checkHeldOut(out, labels, { ...t, held_out_methods: { B0: {}, B1a: { alias: "terms" } } }),
+      ["the methods differ from the ones fixed on tune"],
+    );
+    assert.deepEqual(checkHeldOut({ ...out, judged: ["B0", "B1a"] }, labels, t), [
+      "the judged method is not B1a, the one fixed on tune",
+    ]);
+    assert.deepEqual(checkHeldOut(out, { ...labels, prompts: labels.prompts.slice(1) }, t), [
+      "the labels do not hash to their prompts_sha256",
+      ...(labels.prompts[0]?.split === "held_out" ? ["the held-out prompts differ from the labels"] : []),
+    ]);
   } finally {
     await db.done();
   }

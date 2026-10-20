@@ -84,6 +84,16 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
   - コミット: `feat(evals): measure the #260 held-out split and record the verdict (T06)`
   - 結果: `cd server && node evals/conflict/run.ts --recount evals/conflict/baseline.json` → `not_now, as written`（今回の方式では進めない）。`--rerun` で DB の写しと held-out の依頼 290 件の sha256 が一致し、全方式の候補と表示が baseline と同じ
 
+- [x] T07: held-out の検算が欠けた依頼と違う方式を通す穴をふさぐ
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す検算は held-out の baseline のもの）
+  - 変更: `server/evals/conflict/run.ts`, `server/test/conflict-measure.test.ts`
+  - red: held-out の依頼を 1 件または全部抜いて集計を書き直した baseline で `--rerun` → exit 0（通ってしまう）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/conflict-measure.test.ts` → pass（依頼が欠けた・方式が tune と違う・判定する方式が違う・ラベルのハッシュが合わない baseline を `checkHeldOut` が拒む）
+  - コミット: `fix(evals): hold the #260 held-out baseline to the labels and the tune choice (T07)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/conflict-measure.test.ts test/conflict-eval.test.ts` → 16 件 pass。依頼を 1 件・全部抜いた baseline の `--rerun` は exit 1（the held-out prompts differ from the labels）、B1b-m3 の中身を変えた run の `--held-out` は拒否、本物の baseline は `--held-out` で同じ内容に書き直せ、`--recount` と `--rerun` が通る
+
 ## 記録
 
 - T01: dont の決定は計画の件数と同じく kind = decision かつ stance = dont で数える。B2 の検索は lifecycle を active に絞って呼ぶ（配信できるのは active だけで、superseded が上限を食わないため）
@@ -103,4 +113,5 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 - T06: held-out の普段の依頼の候補 523 組は tune と同じく Claude と Codex が別々に付け、割れた 60 組を 1 回だけ見直した（初回一致 463、見直しで一致 41、判定不能 19）。判定不能を含む依頼は 18 件（200 件の 9%）で、保留の線（10%）の内側
 - T06: held-out の結果: 判定した B1b-m3 は positive 60 件中 20 件（日 9・英 11）を表示し、B0 から悪化 0 件・改善 19 件、普段の依頼で無関係な記録を出したのは 182 件中 2 件（Wilson 上限 3.9%）。表示される割合の基準（60%）に届かず not_now。並べて報告した方式では B1a-m が 38 件・無関係の上限 20%、B1b-m が 42 件・60%、B2-5 が 13 件・37%、B1a-m と B2-5 の併用が 41 件・49% で、表示を増やす方式はどれも無関係な記録を基準の 2 倍以上出す
 - T06: labels.json は変えていない（変更欄に挙げたが、held-out の普段の依頼のラベルは baseline.json の依頼に入れるため）
+- T07: 全差分の Codex のレビュー（high）の 2 件（P2）を採った。`--held-out` が測った run の方式の中身を tune で固定した方式と比べていなかった、`--rerun` が held-out の依頼の欠けを見ていなかった（どちらも再現）。`--recount` は公開 baseline の中だけで数え直す検査のまま変えず、依頼の揃いと方式は `--rerun` と `--held-out` で labels.json と tune.json に突き合わせる
 - T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する

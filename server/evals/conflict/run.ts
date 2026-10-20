@@ -412,6 +412,27 @@ export function checkTune(v: Tune, labels: Labels): string[] {
   return out;
 }
 
+/** Every way a held-out baseline is not the whole held-out side of the labels, run and judged as fixed on tune */
+export function checkHeldOut(b: Baseline, labels: Labels, tune: Tune): string[] {
+  const out: string[] = [];
+  if (labels.prompts_sha256 !== digest(labels.prompts.map((p) => [p.id, p.sha256])))
+    out.push("the labels do not hash to their prompts_sha256");
+  if (b.inputs.prompts_sha256 !== labels.prompts_sha256)
+    out.push("the baseline was measured on other labels");
+  if (b.summary.split !== "held_out") out.push("the measured side is not held-out");
+  const strip = (p: Prompt) => ({ ...p, labels: {}, results: {} });
+  const fixed = labels.prompts.filter((p) => p.split === "held_out");
+  if (!isDeepStrictEqual(b.prompts.map(strip), fixed.map(strip)))
+    out.push("the held-out prompts differ from the labels");
+  if (!isDeepStrictEqual(b.bars, labels.bars))
+    out.push("the bars differ from the ones fixed with the labels");
+  if (!isDeepStrictEqual(b.methods, tune.held_out_methods))
+    out.push("the methods differ from the ones fixed on tune");
+  if (!isDeepStrictEqual(b.judged, [tune.chosen]))
+    out.push(`the judged method is not ${tune.chosen}, the one fixed on tune`);
+  return out;
+}
+
 const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"));
 
 async function main(): Promise<void> {
@@ -511,6 +532,8 @@ async function main(): Promise<void> {
     const methods = tune ? tune.held_out_methods : run.methods;
     if (run.split !== (tune ? "held_out" : "tune"))
       throw new Error(`${mode} takes a ${tune ? "held_out" : "tune"} run`);
+    if (tune && !isDeepStrictEqual(run.methods, methods))
+      throw new Error("the held-out run was measured with other methods than the ones fixed on tune");
     const baseline = assemble(labels, run.results, read(values.pairs as string).pairs, run.split, {
       methods,
       // Tune compares every method; held-out judges only the one fixed there
@@ -519,6 +542,8 @@ async function main(): Promise<void> {
       dbSha256: (read(values.population as string) as Population).db_sha256,
     });
     if (tune) {
+      const problems = checkHeldOut(baseline, labels, tune);
+      if (problems.length) throw new Error(problems.join("\n"));
       fs.writeFileSync(values.out as string, publicJson(baseline));
       console.log(`${values.out}: ${baseline.verdict.verdict} ${baseline.verdict.passing.join(", ")}`);
     } else {
@@ -540,16 +565,16 @@ async function main(): Promise<void> {
     need("--rerun", ["db", "prompts", "baseline"]);
     const b = read(values.baseline as string);
     checkPublic(b);
+    const dir = path.dirname(values.baseline as string);
+    const labels = read(values.labels ?? path.join(dir, "labels.json")) as Labels;
+    const problems = checkHeldOut(b, labels, read(values["tune-file"] ?? path.join(dir, "tune.json")));
+    if (problems.length) throw new Error(problems.join("\n"));
     const sha = crypto
       .createHash("sha256")
       .update(fs.readFileSync(values.db as string))
       .digest("hex");
     if (sha !== b.inputs.db_sha256)
       throw new Error(`${values.db} is not the database the baseline was measured on`);
-    const labels = {
-      prompts: b.prompts,
-      prompts_sha256: b.inputs.prompts_sha256,
-    } as Labels;
     const db = openReader(values.db as string);
     try {
       const run = await measure(
