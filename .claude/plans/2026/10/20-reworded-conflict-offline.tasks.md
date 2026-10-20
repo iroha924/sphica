@@ -75,13 +75,14 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
   - コミット: `feat(evals): fix the #260 method and bars on the tune split (T05)`
   - 結果: `cd server && node evals/conflict/run.ts --check-tune evals/conflict/tune.json` → 数え直しが書いた値と一致、選んだ方式 B1b-m3、held-out で測る 8 方式、基準はラベルと同じ、普段の依頼の候補 619 組（初回一致 544、見直しで一致 52、判定不能 23）。`test/conflict-measure.test.ts` 12 件・`test/conflict-eval.test.ts` 4 件 pass
 
-- [ ] T06: held-out の測定と判定
+- [x] T06: held-out の測定と判定
   - 種別: 追加
   - 計画: S5, S6
   - 依存: T05（固定した方式と基準が要る）
   - 変更: `server/evals/conflict/baseline.json`, `server/evals/conflict/labels.json`
   - 完了条件: `cd server && node evals/conflict/run.ts --recount evals/conflict/baseline.json` → 判定（進む候補あり / 今回の方式では進めない / 標本不足で保留）と集計が baseline の値と一致する
   - コミット: `feat(evals): measure the #260 held-out split and record the verdict (T06)`
+  - 結果: `cd server && node evals/conflict/run.ts --recount evals/conflict/baseline.json` → `not_now, as written`（今回の方式では進めない）。`--rerun` で DB の写しと held-out の依頼 290 件の sha256 が一致し、全方式の候補と表示が baseline と同じ
 
 ## 記録
 
@@ -99,4 +100,7 @@ tune で方式と基準の数値を固定し、held-out を 1 回だけ測って
 - T05: 方式の選び方（確定ラベルを見る前に決めた）: tune で、B0 から悪化 0 件かつ普段の依頼で無関係な候補が出た割合の Wilson 上限が基準（10%）以下の方式のうち、positive で表示される割合が最も高いもの。同率なら普段の依頼で何か表示した件数が少ないもの。該当が無ければ、B0 より表示される割合が高い方式のうち Wilson 上限が最も低いもの。held-out では選んだ方式に加え、B0・B1a・B1b（id 順と matches 順）・B2（取得上限は表示される割合が同じなら最小）・併用を報告する
 - T05: tune の結果（Claude と Codex の確定ラベル）: B0 は positive 60 件中 2 件を表示。B1a-m は 45 件（日 21・英 24）を表示するが、普段の依頼 180 件中 21 件で無関係な記録を出し、Wilson 上限 17%。B1b-m は 46 件・上限 60%。B2（取得上限 5・10・20）は 11 件で上限 39〜42%。基準（上限 10% 以下）を満たしたのは B1a-m2（23 件、7.1%）・B1a-m3（12 件）・B1b-m3（23 件、5.6%）で、同率の B1a-m2 と B1b-m3 のうち普段の依頼で何か出した件数が少ない B1b-m3 を選んだ。tune でも基準をすべて満たす方式は無い（判定は not_now）
 - T05: 公開ファイルの候補 ID の列は positive にだけ残し、ほかの依頼は表示した記録だけにした（数えるのに使うのはそれだけで、tune.json が 1.6 MB になったため）。依頼を 1 行ずつ書き、biome.json で `server/evals/conflict/*.json` を整形の対象から外した（整形すると 5.9 万行になるため）
+- T06: held-out の普段の依頼の候補 523 組は tune と同じく Claude と Codex が別々に付け、割れた 60 組を 1 回だけ見直した（初回一致 463、見直しで一致 41、判定不能 19）。判定不能を含む依頼は 18 件（200 件の 9%）で、保留の線（10%）の内側
+- T06: held-out の結果: 判定した B1b-m3 は positive 60 件中 20 件（日 9・英 11）を表示し、B0 から悪化 0 件・改善 19 件、普段の依頼で無関係な記録を出したのは 182 件中 2 件（Wilson 上限 3.9%）。表示される割合の基準（60%）に届かず not_now。並べて報告した方式では B1a-m が 38 件・無関係の上限 20%、B1b-m が 42 件・60%、B2-5 が 13 件・37%、B1a-m と B2-5 の併用が 41 件・49% で、表示を増やす方式はどれも無関係な記録を基準の 2 倍以上出す
+- T06: labels.json は変えていない（変更欄に挙げたが、held-out の普段の依頼のラベルは baseline.json の依頼に入れるため）
 - T02: 普段の依頼は、候補のどれか 1 つでも判定不能なら全方式の分母から外す（方式どうしで分母をそろえるため）。無関係の率は表示された候補で数える。日英で B0 を下回らない条件は、悪化 0 件なら必ず満たすが、計画どおり別に判定する
