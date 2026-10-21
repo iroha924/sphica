@@ -18,3 +18,19 @@ export function writeVerdict(o: {
   get?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   env?: Record<string, string | undefined>;
 }): Promise<WrittenVerdict>;
+export interface Run {
+  id: number;
+  run_attempt: number;
+  head_sha: string;
+  event: string;
+  path: string;
+  status: string;
+  conclusion: string | null;
+  created_at: string;
+  head_repository?: { full_name?: string } | null;
+}
+export function latestRun(runs: Run[], o: { repo: string; head: string }): Run | string;
+export function verdictMismatch(
+  v: unknown,
+  o: { run: Pick<Run, "id" | "run_attempt">; tree: string; version: string },
+): string | null;

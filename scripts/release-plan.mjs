@@ -4,9 +4,16 @@
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { isPackageInput, releaseKind, withoutReleaseVersion } from "./lib/release-scope.mjs";
+import {
+  DEPENDENCY_INPUTS,
+  isPackageInput,
+  releaseKind,
+  withoutReleaseVersion,
+} from "./lib/release-scope.mjs";
+import { latestRun, verdictMismatch } from "./lib/release-verdict.mjs";
 import { observe, settingsState } from "./lib/repo-settings.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -59,7 +66,7 @@ const files = paths("diff", "--name-only", ref, "--cached")
     (file) =>
       !versionFiles.has(file) || withoutReleaseVersion(at(ref, file)) !== withoutReleaseVersion(at("", file)),
   );
-const kind = releaseKind(files);
+let kind = releaseKind(files);
 const unstaged = [
   ...new Set([...paths("diff", "--name-only"), ...paths("ls-files", "--others", "--exclude-standard")]),
 ]
@@ -72,6 +79,57 @@ const codexVersion = read("plugin/.codex-plugin/plugin.json").version;
 const marketplaceVersion = read(".claude-plugin/marketplace.json").plugins.find(
   (entry) => entry.name === "sphica",
 )?.source?.version;
+// A release relies on settings only an admin can read (release.yml's GITHUB_TOKEN cannot); read them with the owner's gh
+const gh = (args) =>
+  execFileSync("gh", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30_000,
+  });
+let repo = null;
+try {
+  repo = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).trim();
+} catch {}
+// A change to the server's dependency files alone ships nothing new when the PR's CI found the packed tarball the same as the base's
+// release. The verdict is read from that run's artifact, and only for the tree staged here and the version the base released
+let verdict = null;
+if (kind === "plugin" && files.every((file) => DEPENDENCY_INPUTS.has(file))) verdict = readVerdict();
+if (verdict?.same) kind = "none";
+
+function readVerdict() {
+  const no = (reason) => ({ same: false, reason });
+  if (!repo) return no("the repository name could not be read with gh");
+  const head = git("rev-parse", "HEAD");
+  let runs;
+  try {
+    runs = JSON.parse(
+      gh([
+        "api",
+        `repos/${repo}/actions/workflows/check.yml/runs?event=pull_request&head_sha=${head}&per_page=100`,
+      ]),
+    ).workflow_runs;
+  } catch {
+    return no("the pull request runs could not be read with gh");
+  }
+  if (!Array.isArray(runs)) return no("the reply lists no runs");
+  const run = latestRun(runs, { repo, head });
+  if (typeof run === "string") return no(run);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-plan-verdict-"));
+  try {
+    gh(["run", "download", String(run.id), "--repo", repo, "-n", "release-verdict", "-D", dir]);
+    const read = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
+    const version = JSON.parse(at(ref, "plugin/package.json") ?? "{}").version;
+    const why = verdictMismatch(read, { run, tree: git("write-tree"), version });
+    return why
+      ? no(why)
+      : { same: true, reason: `run ${run.id} found the packed tarball the same as ${version}` };
+  } catch {
+    return no(`the verdict of run ${run.id} could not be read`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 const actions =
   kind === "none"
     ? []
@@ -85,18 +143,6 @@ const actions =
         "bun run release:status",
         "update the Claude and Codex plugin caches and restart sessions",
       ];
-// A release relies on settings only an admin can read (release.yml's GITHUB_TOKEN cannot); read them with the owner's gh
-const gh = (args) =>
-  execFileSync("gh", args, {
-    cwd: root,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30_000,
-  });
-let repo = null;
-try {
-  repo = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).trim();
-} catch {}
 const unseen = { status: null, body: null };
 const settings =
   kind === "none"
@@ -110,6 +156,7 @@ const plan = {
   compared: "index",
   commit: git("rev-parse", "HEAD"),
   kind,
+  verdict,
   files,
   unstaged,
   versions: {
@@ -132,6 +179,7 @@ if (json) {
     `version: npm ${packageVersion} / plugin ${claudeVersion} / marketplace ${marketplaceVersion} / Codex ${codexVersion}`,
   );
   if (files.length) console.log(`inputs: ${files.map(shown).join(", ")}`);
+  if (verdict) console.log(`release verdict: ${verdict.same ? "same" : "not usable"}: ${verdict.reason}`);
   if (unstaged.length) {
     console.log(`not staged, not counted (git add them first): ${unstaged.length}`);
     for (const file of unstaged) console.log(`  ${shown(file)}`);

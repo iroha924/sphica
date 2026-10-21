@@ -75,13 +75,14 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `feat(release): let a dependency-only change skip the bump when CI found the tarball unchanged (T05)`
   - 結果: `DEPENDENCY_INPUTS` を release-scope に置き、`--defer-deps` と `--verdict` を足した（引数なしは今の規則）。`cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts` → 13 件 pass（引数なしは失敗、--defer-deps は依存の 2 ファイルだけ通す、ほかのパスが混ざれば両方とも失敗、--verdict は same・同じ tree・同じ base のときだけ通し differs・unknown・別の tree・別の base・読めないファイルは失敗、bump 済みは verdict に関係なく通る）。check.yml の早い検査に --defer-deps、Node 24.15 の static の判定の後に --verdict の検査、lefthook の bundle に --defer-deps。verify-pairs は、保留する検査の後に pack・判定・判定を読む検査が floor の static で揃うことを検査（`test/verify-pairs.test.ts` 15 件 pass）。最初の `bun run verify` はテストの no-template-curly-in-string で exit 1、抑止を足して `bun run verify` → exit 0（acceptance 151 件 pass）
 
-- [ ] T06: release:plan が確かめた判定を読む
+- [x] T06: release:plan が確かめた判定を読む
   - 種別: 変更
   - 計画: S6
   - 依存: T04（artifact の名前と形が要る）
-  - 変更: `scripts/release-plan.mjs`, `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `server/test/release-plan.test.ts`, `server/test/release-scope.test.ts`
+  - 変更: `scripts/release-plan.mjs`, `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts`, `server/test/release-plan.test.ts`, `server/test/release-scope.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts test/release-scope.test.ts` → index と判定の tree・base が一致し実行元を確かめた same のときだけ none、ほかは plugin と理由
   - コミット: `feat(release): report none for a dependency-only change only on a verified same verdict (T06)`
+  - 結果: 実行の選び方（自分のリポジトリの check.yml の pull_request の最新の run が成功していること）と判定の照合（same、run と attempt、index の tree、base のリリースのバージョン）を `scripts/lib/release-verdict.mjs` の `latestRun` と `verdictMismatch` に置き、release:plan は依存の 2 ファイルだけのときに gh で artifact を読む。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts test/release-scope.test.ts` → 5 件と 4 件 pass（same は none、differs・別の tree・別の attempt・別のバージョン・fork の run・失敗した run・実行中の run は plugin と理由、ほかの入力が混ざれば判定を読まない）。`bun run verify` → exit 0（acceptance 151 件 pass）
 
 - [ ] T07: main の same-tree が判定を照合してから検査する
   - 種別: 変更
@@ -98,3 +99,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T04 / 判定の書き出しをテストできるよう lib と CLI に分け、verify-pairs の構造の検査は最終の検査と一緒に T05 で足す / T04 の変更欄を `scripts/release-verdict.mjs`, `server/test/release-verdict.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts` から上の値に、完了条件から verify-pairs のテストを外した
 - 2026-10-21 / T05 / 変更欄に `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `server/test/verify-pairs.test.ts` を足した / 免除の対象の集合を release-scope に置き、verify-pairs のテストを足したため
 - 2026-10-21 / T04 / Codex のタスクレビュー（high）: 指摘 0 件。指定のテストは Codex の sandbox で mkdtemp が EPERM になり走らせられなかった（手元では pass） / 対応なし
+- 2026-10-21 / T06 / 変更欄を `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts` から `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts` に替えた / DEPENDENCY_INPUTS は T05 で入れ、実行と判定の照合は T07 と共有するため release-verdict に置いた

@@ -44,3 +44,38 @@ export async function writeVerdict({ packed, base, out, cwd, get = fetch, env = 
   fs.writeFileSync(out, `${JSON.stringify(verdict, null, 2)}\n`);
   return verdict;
 }
+
+const CHECK_YML = ".github/workflows/check.yml";
+
+/**
+ * The latest check.yml pull_request run on head from this repository's own branches, or a string saying why there is none to rely on.
+ * A run from a fork never counts: its artifact was written by code nobody approved yet.
+ */
+export function latestRun(runs, { repo, head }) {
+  const own = runs.filter(
+    (r) =>
+      r.head_sha === head &&
+      r.event === "pull_request" &&
+      r.path === CHECK_YML &&
+      r.head_repository?.full_name === repo,
+  );
+  if (!own.length) return `no check.yml pull request run on ${head.slice(0, 12)} from ${repo}`;
+  const started = (r) => Date.parse(r.created_at);
+  if (own.some((r) => Number.isNaN(started(r)))) return "a run has no readable start time";
+  const [latest, next] = [...own].sort((a, b) => started(b) - started(a));
+  if (next && started(next) === started(latest)) return "two runs started at the same time";
+  if (latest.status !== "completed") return `the latest run ${latest.id} is ${latest.status}`;
+  if (latest.conclusion !== "success") return `the latest run ${latest.id} ended ${latest.conclusion}`;
+  return latest;
+}
+
+/** Why the verdict cannot stand for this run, tree, and release version, or null when it can */
+export function verdictMismatch(v, { run, tree, version }) {
+  if (v?.verdict !== "same") return `the verdict is ${v?.verdict ?? "missing"}: ${v?.reason ?? "no reason"}`;
+  if (String(v.run?.id) !== String(run.id) || String(v.run?.attempt) !== String(run.run_attempt))
+    return `the verdict is not from run ${run.id} attempt ${run.run_attempt}`;
+  if (v.tree !== tree) return "the verdict is for another tree";
+  if (v.npm?.version !== version)
+    return `the verdict compared with ${v.npm?.version ?? "no release"}, not ${version}`;
+  return null;
+}

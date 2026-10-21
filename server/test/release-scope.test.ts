@@ -8,7 +8,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  DEPENDENCY_INPUTS,
   EXACT_PACKAGE_INPUTS,
+  isPackageInput,
   PACKAGE_PREFIXES,
   releaseKind,
   withoutReleaseVersion,
@@ -50,4 +52,9 @@ test("the pre-commit bundle glob covers every release input and not README.md (s
   // A README-only commit must not run the bundle and the version check
   for (const g of glob)
     assert.ok(!path.matchesGlob("README.md", g), `${g} in the bundle glob matches README.md`);
+});
+
+test("the dependency files a tarball verdict can excuse are package inputs, and nothing else is", () => {
+  assert.deepEqual([...DEPENDENCY_INPUTS].sort(), ["server/bun.lock", "server/package.json"]);
+  for (const file of DEPENDENCY_INPUTS) assert.ok(isPackageInput(file), file);
 });
