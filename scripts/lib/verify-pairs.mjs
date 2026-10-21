@@ -150,6 +150,7 @@ export function verifyProblems({ pkg, check, release, lychee }) {
           `check.yml part job: the verify step does not set SPHICA_UNIT_MODE to tests-only on the first Node line (${floor ?? "?"}) alone`,
         );
       problems.push(...lycheeProblems("check.yml part job", all, at, lychee));
+      problems.push(...deferredProblems(all, floor));
     }
   }
   const gate = job(check, "check");
@@ -201,6 +202,36 @@ export function verifyProblems({ pkg, check, release, lychee }) {
         problems.push(`${file}: a setup-bun step restores Bun from a cache (no no-cache: true)`);
   }
   return problems;
+}
+
+/**
+ * A version check that defers the server's dependency files needs, later in the same job, the tarball verdict and the check that reads it,
+ * both on one line (the engines floor's static part) so a run has one verdict: without them a dependency change would pass unchecked.
+ */
+function deferredProblems(all, floor) {
+  const runs = (step, text) => step.some((l) => l.includes(text));
+  const early = all.findIndex((st) => runs(st, "scripts/check-mcp-version.mjs") && runs(st, "--defer-deps"));
+  if (early === -1) return [];
+  const only = `        if: matrix.part == 'static' && matrix.node == '${floor}'`;
+  const verdict = all.findIndex((st, i) => i > early && runs(st, "node scripts/release-verdict.mjs"));
+  const final = all.findIndex(
+    (st, i) =>
+      i > verdict &&
+      runs(
+        st,
+        'node scripts/check-mcp-version.mjs --base "$BASE" --verdict "$RUNNER_TEMP/release-verdict.json"',
+      ),
+  );
+  const tarball = all.findIndex((st) => st.some((l) => TARBALL_RUN.test(l)));
+  if (verdict === -1 || final === -1 || tarball === -1 || tarball > verdict)
+    return [
+      "check.yml part job: the version check defers dependency changes, but no tarball verdict after the pack and no version check reading it follow",
+    ];
+  if (!all[verdict].includes(only) || !all[final].includes(only))
+    return [
+      `check.yml part job: the tarball verdict and the check reading it do not both run on the static part of Node ${floor} alone`,
+    ];
+  return [];
 }
 
 /** What lets a push to main skip the heavy jobs without the evidence scripts/same-tree.mjs requires, or a pull request skip them */

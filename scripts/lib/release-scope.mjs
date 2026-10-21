@@ -17,6 +17,9 @@ export const EXACT_PACKAGE_INPUTS = new Set([
 
 export const PACKAGE_PREFIXES = ["plugin/", "server/src/", "db/", "scripts/licenses/"];
 
+/** Package inputs whose change ships nothing new unless the packed tarball shows it (scripts/check-mcp-version.mjs --verdict) */
+export const DEPENDENCY_INPUTS = new Set(["server/package.json", "server/bun.lock"]);
+
 export function isPackageInput(file) {
   return EXACT_PACKAGE_INPUTS.has(file) || PACKAGE_PREFIXES.some((prefix) => file.startsWith(prefix));
 }

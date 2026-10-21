@@ -66,13 +66,14 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 
 依存の 2 ファイルだけの変更は、pre-commit では保留し、CI と main と release:plan では確かめた判定が same のときだけ bump を求めない。
 
-- [ ] T05: バージョンの検査に保留と判定を入れ、CI の早い段階・pack の後・pre-commit から呼ぶ
+- [x] T05: バージョンの検査に保留と判定を入れ、CI の早い段階・pack の後・pre-commit から呼ぶ
   - 種別: 変更
   - 計画: S4, S5
   - 依存: T04（判定の JSON の形が要る）
-  - 変更: `scripts/check-mcp-version.mjs`, `server/test/check-mcp-version.test.ts`, `.github/workflows/check.yml`, `lefthook.yml`, `scripts/lib/verify-pairs.mjs`, `.agents/skills/plugin-release/SKILL.md`, `.claude/rules/verification.md`
+  - 変更: `scripts/check-mcp-version.mjs`, `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `server/test/check-mcp-version.test.ts`, `.github/workflows/check.yml`, `lefthook.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `.agents/skills/plugin-release/SKILL.md`, `.claude/rules/verification.md`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts` → 引数なしは今の規則、`--defer-deps` は依存の 2 ファイルだけを保留、`--verdict` は same のときだけ免除、ほかのパスと unknown と tree の不一致は bump を求める。`bun run verify` → 0 で終わる
   - コミット: `feat(release): let a dependency-only change skip the bump when CI found the tarball unchanged (T05)`
+  - 結果: `DEPENDENCY_INPUTS` を release-scope に置き、`--defer-deps` と `--verdict` を足した（引数なしは今の規則）。`cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts` → 13 件 pass（引数なしは失敗、--defer-deps は依存の 2 ファイルだけ通す、ほかのパスが混ざれば両方とも失敗、--verdict は same・同じ tree・同じ base のときだけ通し differs・unknown・別の tree・別の base・読めないファイルは失敗、bump 済みは verdict に関係なく通る）。check.yml の早い検査に --defer-deps、Node 24.15 の static の判定の後に --verdict の検査、lefthook の bundle に --defer-deps。verify-pairs は、保留する検査の後に pack・判定・判定を読む検査が floor の static で揃うことを検査（`test/verify-pairs.test.ts` 15 件 pass）。最初の `bun run verify` はテストの no-template-curly-in-string で exit 1、抑止を足して `bun run verify` → exit 0（acceptance 151 件 pass）
 
 - [ ] T06: release:plan が確かめた判定を読む
   - 種別: 変更
@@ -95,3 +96,5 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
 - 2026-10-21 / T02 / plugin-release の Shipping と依存 PR の節、verification.md の Release は依存の免除（3B）の説明なので、免除を入れる T05 に移した / T02 の変更欄から 2 件を外し、T05 に足した
 - 2026-10-21 / T04 / 判定の書き出しをテストできるよう lib と CLI に分け、verify-pairs の構造の検査は最終の検査と一緒に T05 で足す / T04 の変更欄を `scripts/release-verdict.mjs`, `server/test/release-verdict.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts` から上の値に、完了条件から verify-pairs のテストを外した
+- 2026-10-21 / T05 / 変更欄に `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `server/test/verify-pairs.test.ts` を足した / 免除の対象の集合を release-scope に置き、verify-pairs のテストを足したため
+- 2026-10-21 / T04 / Codex のタスクレビュー（high）: 指摘 0 件。指定のテストは Codex の sandbox で mkdtemp が EPERM になり走らせられなかった（手元では pass） / 対応なし

@@ -108,7 +108,8 @@ jobs:
           # Whether a change reaches users depends on whether the version differs from the previous main, so the whole range is compared.
           # On a work branch, pre-commit compares against the fork point from main (scripts/check-mcp-version.mjs).
           BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
-        run: node scripts/check-mcp-version.mjs --base "$BASE"
+        # A change to the server's dependency files alone waits for the tarball comparison after the pack below
+        run: node scripts/check-mcp-version.mjs --base "$BASE" --defer-deps
 
       # Hooks can be skipped, so check what was actually committed: the PR's own commits, or the commits pushed to main.
       - name: commit message
@@ -170,6 +171,12 @@ jobs:
           path: ${{ runner.temp }}/release-verdict.json
           if-no-files-found: error
           retention-days: 30
+      # The version check again, now with the verdict: a dependency-only change passes without a bump only when the tarball matched
+      - name: Is the plugin version bumped, after the tarball comparison
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: node scripts/check-mcp-version.mjs --base "$BASE" --verdict "$RUNNER_TEMP/release-verdict.json"
 
   # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
   # skipped, so this runs always and fails unless every part (on both lines) and both macos jobs succeeded.

@@ -343,3 +343,100 @@ test("a range that renames the package may start its versions over, and a lower 
     r.done();
   }
 });
+
+/** A repository at 1.0.0 whose next commit changes only the server's dependency files, unless more files are given */
+function dependencyChange(r: ReturnType<typeof repo>, more: Record<string, string> = {}) {
+  bump(r.dir, "1.0.0");
+  write(r.dir, "server/package.json", JSON.stringify({ devDependencies: { a: "1.0.0" } }));
+  write(r.dir, "server/bun.lock", "{ a 1.0.0 }");
+  r.git("add", "-A");
+  r.git("commit", "-qm", "base");
+  const base = r.git("rev-parse", "HEAD");
+  write(r.dir, "server/package.json", JSON.stringify({ devDependencies: { a: "1.0.1" } }));
+  write(r.dir, "server/bun.lock", "{ a 1.0.1 }");
+  for (const [file, body] of Object.entries(more)) write(r.dir, file, body);
+  r.git("add", "-A");
+  r.git("commit", "-qm", "dev dependency");
+  return base;
+}
+
+/** A verdict file as scripts/release-verdict.mjs writes it, for the repository's HEAD and the given base unless overridden */
+function verdictFile(r: ReturnType<typeof repo>, base: string, fields: Record<string, unknown> = {}) {
+  // Inside .git: out of the tree and the index the check reads, and removed with the repository
+  const file = path.join(r.dir, ".git", "verdict.json");
+  const v = {
+    verdict: "same",
+    reason: "match",
+    paths: [],
+    tree: r.git("rev-parse", "HEAD^{tree}"),
+    base,
+    ...fields,
+  };
+  fs.writeFileSync(file, JSON.stringify(v));
+  return file;
+}
+
+test("a dependency-only change still needs a bump by default, and --defer-deps leaves it to CI", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r);
+    const plain = check(r.dir, "--base", base);
+    assert.equal(plain.status, 1, plain.stdout);
+    assert.match(plain.stderr, /server\/(package\.json|bun\.lock)/);
+    const deferred = check(r.dir, "--base", base, "--defer-deps");
+    assert.equal(deferred.status, 0, deferred.stderr);
+    assert.match(deferred.stdout, /CI compares the packed tarball/);
+  } finally {
+    r.done();
+  }
+});
+
+test("--defer-deps and a same verdict do not cover a change to any other package input", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r, { "server/src/a.ts": "export {};\n" });
+    assert.equal(check(r.dir, "--base", base, "--defer-deps").status, 1);
+    assert.equal(check(r.dir, "--base", base, "--verdict", verdictFile(r, base)).status, 1);
+  } finally {
+    r.done();
+  }
+});
+
+test("--verdict lets a dependency-only change through only on same, for this tree and this base", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r);
+    const same = check(r.dir, "--base", base, "--verdict", verdictFile(r, base));
+    assert.equal(same.status, 0, same.stderr);
+    assert.match(same.stdout, /matches the last release/);
+    for (const [fields, why] of [
+      [{ verdict: "differs", reason: "1 shipped file(s) differ" }, /verdict is differs/],
+      [{ verdict: "unknown", reason: "sphica@1.0.0 is not published" }, /verdict is unknown/],
+      [{ tree: "0".repeat(40) }, /another tree/],
+      [{ base: "0".repeat(40) }, /another base/],
+    ] as const) {
+      const res = check(r.dir, "--base", base, "--verdict", verdictFile(r, base, fields));
+      assert.equal(res.status, 1, JSON.stringify(fields));
+      assert.match(res.stderr, why);
+      assert.match(res.stderr, /were not bumped together/);
+    }
+    const missing = check(r.dir, "--base", base, "--verdict", path.join(r.dir, "absent.json"));
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /cannot be read/);
+  } finally {
+    r.done();
+  }
+});
+
+test("a bumped dependency change passes with a verdict that is not same", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r);
+    bump(r.dir, "1.0.1");
+    r.git("commit", "-qam", "bump");
+    const res = check(r.dir, "--base", base, "--verdict", verdictFile(r, base, { verdict: "unknown" }));
+    assert.equal(res.status, 0, res.stderr);
+  } finally {
+    r.done();
+  }
+});

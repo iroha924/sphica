@@ -310,3 +310,20 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
   // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
   fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
 });
+
+test("a version check that defers dependency changes without the tarball verdict and the check reading it after the pack fails", () => {
+  const final =
+    'node scripts/check-mcp-version.mjs --base "$BASE" --verdict "$RUNNER_TEMP/release-verdict.json"';
+  fails(edit("check", final, "true"), /no tarball verdict after the pack/);
+  fails(
+    edit("check", "run: node scripts/release-verdict.mjs", "run: true"),
+    /no tarball verdict after the pack/,
+  );
+  const only =
+    // oxlint-disable-next-line no-template-curly-in-string -- the workflow lines under edit hold an expression
+    "        if: matrix.part == 'static' && matrix.node == '24.15'\n        env:\n          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}\n        run: node scripts/release-verdict.mjs";
+  fails(
+    edit("check", only, only.replace("'24.15'", "'26'")),
+    /do not both run on the static part of Node 24\.15/,
+  );
+});

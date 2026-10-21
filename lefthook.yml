@@ -45,7 +45,7 @@ pre-commit:
       run: |
         set -e
         bun run bundle
-        bun run scripts/check-mcp-version.mjs
+        bun run scripts/check-mcp-version.mjs --defer-deps
     # This checks only how SQL is written. Whether SQL ran against a real SQLite database (sql:reach) and the child process lane (sql:live)
     # rerun the tests, so CI checks them, and pre-push verify before a push to main.
     - name: sql
