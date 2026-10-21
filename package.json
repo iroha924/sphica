@@ -37,6 +37,7 @@
     "pairs": "node scripts/check-pairs.mjs",
     "rule-scopes": "node scripts/check-rule-scopes.mjs",
     "sql": "node scripts/check-sql.mjs",
-    "acceptance": "node --test --test-timeout=60000 server/evals/acceptance/shard-1.ts server/evals/acceptance/shard-2.ts server/evals/acceptance/shard-3.ts server/evals/acceptance/shard-4.ts server/evals/acceptance/shard-5.ts server/evals/acceptance/shard-6.ts server/evals/acceptance/shard-7.ts server/evals/acceptance/shard-8.ts"
+    "acceptance": "node --test --test-timeout=60000 server/evals/acceptance/shard-1.ts server/evals/acceptance/shard-2.ts server/evals/acceptance/shard-3.ts server/evals/acceptance/shard-4.ts server/evals/acceptance/shard-5.ts server/evals/acceptance/shard-6.ts server/evals/acceptance/shard-7.ts server/evals/acceptance/shard-8.ts",
+    "mutation": "bun install --cwd tools/mutation --frozen-lockfile --ignore-scripts && node tools/mutation/node_modules/@stryker-mutator/core/bin/stryker.js run tools/mutation/stryker.config.mjs"
   }
 }

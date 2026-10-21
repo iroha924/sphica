@@ -67,6 +67,7 @@ const TEXT = [
   "lefthook.yml",
   "renovate.json",
   "server/bunfig.toml",
+  "tools/mutation/bunfig.toml",
   "db/schema.sql",
   "CLAUDE.md",
   "AGENTS.md",
