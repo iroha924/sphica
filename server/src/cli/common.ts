@@ -4,9 +4,9 @@
 // Opens a connection by role for one CLI command and closes it after.
 import type { Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
-import { openReader, type Role } from "../db.ts";
 import type { DB } from "../db-types.ts";
 import { openWriter } from "../db-write.ts";
+import { openReader, type Role } from "../db.ts";
 
 export async function withDb<T>(role: "reader", fn: (db: ReadonlyKysely<DB>) => Promise<T>): Promise<T>;
 export async function withDb<T>(

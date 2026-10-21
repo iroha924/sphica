@@ -1,0 +1,7 @@
+{
+  "$schema": "./server/node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 110,
+  "sortImports": { "newlinesBetween": false },
+  "sortPackageJson": false,
+  "ignorePatterns": ["server/src/db-types.ts", "server/evals/conflict/*.json", "**/*.md"]
+}

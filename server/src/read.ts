@@ -6,8 +6,8 @@
 import { type Selectable, type SqlBool, sql } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
-import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { refusalText, renamesSince } from "./git.ts";
 import { inline, plain, STRING_SEQUENCE } from "./panel.ts";

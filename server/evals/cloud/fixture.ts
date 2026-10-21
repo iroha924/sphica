@@ -9,9 +9,9 @@
 import fs from "node:fs";
 import type { Kysely } from "kysely";
 import { dbInit } from "../../src/admin.ts";
-import { inTransaction } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { openWriter } from "../../src/db-write.ts";
+import { inTransaction } from "../../src/db.ts";
 import { beginHarvest, checkText, contextText, RecordRefused, saveText } from "../../src/extract.ts";
 import { gh } from "../../src/github.ts";
 import { morePage } from "../../src/result-pages.ts";

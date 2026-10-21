@@ -12,8 +12,8 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
 import { migrate as migrateFile } from "../src/admin.ts";
-import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter, openWriter } from "../src/db-write.ts";
+import { SCHEMA_REVISION } from "../src/db.ts";
 import { beginGlean, beginTrace, saveText } from "../src/extract.ts";
 import { sha256 } from "../src/text.ts";
 

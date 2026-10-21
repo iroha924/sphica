@@ -9,8 +9,8 @@ import { inTransaction } from "../src/db.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { READ_BUDGET } from "../src/reply-budget.ts";
-import { AI_DEPARTURE, parseDiff, reviewBatch, selectedText, selectForReview } from "../src/review.ts";
 import { checkedText, checkFindings } from "../src/review-findings.ts";
+import { AI_DEPARTURE, parseDiff, reviewBatch, selectedText, selectForReview } from "../src/review.ts";
 import { openRun } from "../src/trace.ts";
 import { aiDecided, manyAdopted, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 

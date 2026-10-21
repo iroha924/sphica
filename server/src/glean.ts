@@ -6,8 +6,8 @@
 // evidence and adoption are added or retracted, anchors are replaced or retired, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { iso, type Reads } from "./db.ts";
 import { blobBytes, blobSize, commitOf, treeEntry } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";

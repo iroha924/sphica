@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import {
   configGet,
   inIsolation,
@@ -17,7 +18,6 @@ import {
   unreadOf,
   workerPlace,
 } from "../src/git.ts";
-import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
 /** One word for a POSIX shell (git runs config commands and hooks through one), quoted so nothing in it is expanded */

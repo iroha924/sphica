@@ -5,7 +5,7 @@
     ".": {
       "entry": ["scripts/pre-push.mjs", "scripts/lint-plugin.mjs"],
       "project": ["scripts/**/*.{js,mjs,cjs,ts}"],
-      "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens", "oxlint"],
+      "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens", "oxlint", "oxfmt"],
       "ignoreBinaries": ["lefthook", "lychee"]
     },
     "server": {

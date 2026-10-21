@@ -521,10 +521,11 @@ function labelled(I: number, U: number, R: number, pad = 0): Labelled[] {
   ];
   return [
     ...settled.map((s, i): Labelled => ({ n: i + 1, settled: s, class: "finished-plan" })),
-    ...Array.from(
-      { length: pad },
-      (_, i): Labelled => ({ n: settled.length + i + 1, settled: "useful", class: "standing" }),
-    ),
+    ...Array.from({ length: pad }, (_, i): Labelled => ({
+      n: settled.length + i + 1,
+      settled: "useful",
+      class: "standing",
+    })),
   ];
 }
 

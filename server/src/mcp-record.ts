@@ -13,9 +13,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Kysely } from "kysely";
 import { z } from "zod";
 import { callerOf } from "./caller.ts";
-import { dbFile } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
+import { dbFile } from "./db.ts";
 import {
   beginGlean,
   beginHarvest,

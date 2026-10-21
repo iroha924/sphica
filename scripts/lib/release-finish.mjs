@@ -7,7 +7,7 @@
 export function releaseNotes(body) {
   // Remove comments until none is left, so nested markers cannot leave an opening `<!--` behind
   let text = String(body ?? "").replace(/\r/g, "");
-  for (let previous = ""; previous !== text; ) {
+  for (let previous = ""; previous !== text;) {
     previous = text;
     text = text.replace(/<!--[\s\S]*?-->/g, "");
   }

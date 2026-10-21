@@ -5,8 +5,9 @@
   "scripts": {
     "setup": "bun install --cwd server --frozen-lockfile --ignore-scripts && node scripts/install-hooks.mjs",
     "cli": "node server/src/cli.ts",
-    "lint": "node scripts/oxlint.mjs && server/node_modules/.bin/biome ci . --error-on-warnings",
-    "fix": "node scripts/oxlint.mjs --fix && server/node_modules/.bin/biome check --write .",
+    "lint": "node scripts/oxlint.mjs && bun run format:check",
+    "format:check": "node scripts/oxfmt.mjs --check",
+    "fix": "node scripts/oxlint.mjs --fix && node scripts/oxfmt.mjs",
     "verify:ai": "node scripts/check-ai-config.mjs && node scripts/check-links.mjs",
     "architecture": "node scripts/check-architecture.mjs",
     "english": "node scripts/check-english.mjs",

@@ -71,7 +71,7 @@ async function chainOf(db: Reads, entry: number): Promise<{ ids: number[]; edge:
   const ids = [entry];
   const seen = new Set(ids);
   const edge = new Set<number>();
-  for (let frontier = [entry]; frontier.length; ) {
+  for (let frontier = [entry]; frontier.length;) {
     const links = await db
       .selectFrom("unit_link")
       .select(["from_unit", "to_unit"])

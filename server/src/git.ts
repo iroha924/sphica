@@ -316,7 +316,7 @@ export async function renamesSince(
   const deleted: string[] = [];
   let added = 0;
   // "R<score>\0<old>\0<new>" for a rename or copy, "<status>\0<path>" otherwise
-  for (let i = 0; i < parts.length; ) {
+  for (let i = 0; i < parts.length;) {
     const status = parts[i] ?? "";
     if (/^[RC]\d*$/.test(status)) {
       if (status.startsWith("R")) renames.set(parts[i + 1] ?? "", parts[i + 2] ?? "");

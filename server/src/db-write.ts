@@ -6,8 +6,8 @@
 
 import { constants as C, DatabaseSync, type StatementSync } from "node:sqlite";
 import type { Kysely } from "kysely";
-import { kyselyOn } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { kyselyOn } from "./db.ts";
 import {
   dbFile,
   prepare,

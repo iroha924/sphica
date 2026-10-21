@@ -427,7 +427,7 @@ export type Successor = {
 export async function liveSuccessors(db: Reads, id: number, asOf?: string): Promise<Successor[]> {
   const seen = new Set([id]);
   let end: Successor | undefined;
-  for (let at = id; ; ) {
+  for (let at = id; ;) {
     const next =
       asOf === undefined
         ? await db

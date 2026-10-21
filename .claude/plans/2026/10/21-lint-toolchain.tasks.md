@@ -71,13 +71,14 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
   - コミット: `chore(lint): lint with Oxlint and its type-aware rules, and move two custom checks into rules (T05)`
   - 結果: `node scripts/oxlint.mjs` → 違反 0 件で exit 0（6 ルールを切り、prefer-string-starts-ends-with 8 件と no-useless-fallback-in-spread 2 件を直し、no-control-regex の 4 か所を Oxlint の抑止に書き換え）。`server/src/zz-float.ts` に待たない呼び出しを置いて `node scripts/oxlint.mjs` → `no-floating-promises` で exit 1、消すと exit 0。`node --test test/lint-plugin.test.ts` → 3 件 pass。`bun run knip` → 0 件。`bun run release:plan -- --base v0.6.63` → `plugin`（バージョンを上げる前）、4 か所を 0.6.64 に。`bun run verify` → exit 0（acceptance 151 件 pass）
 
-- [ ] T06: format を Oxfmt に移し、一括で reformat する
+- [x] T06: format を Oxfmt に移し、一括で reformat する
   - 種別: 変更
   - 計画: S5
   - 依存: T03（Oxfmt の設定）, T05（lint の差し替えと同じ lefthook の行を触る）
-  - 変更: `.oxfmtrc.json`, `biome.json`, `lefthook.yml`, `package.json`, `server/package.json`, `.git-blame-ignore-revs`
+  - 変更: `.oxfmtrc.json`, `scripts/oxfmt.mjs`, `lefthook.yml`, `package.json`, `server/package.json`, `server/bun.lock`, `knip.json`, `server/src/sqlite.ts`
   - 完了条件: `bun run format:check` → 0 で終わる。2 回目の `bun run fix` → 差分 0。`bun run verify` → 0 で終わる
   - コミット: `chore(format): format with Oxfmt (T06)`
+  - 結果: `oxfmt 0.73.0` を追加（+3 パッケージ）。`node scripts/oxfmt.mjs` → 50 ファイル（整形 47 と設定・依存）+172 / −69 行、2 回目と `bun run fix` の後は差分 0。`bun run format:check` → 337 ファイルで exit 0。範囲外のファイルだけを渡した `node scripts/oxfmt.mjs plugin/hooks/hooks.json README.md server/src/db-types.ts` → 0 ファイルで exit 0。`sqlite.ts` の `biome-ignore format` は、理由の行と `// oxfmt-ignore` の 2 行にした（`// oxfmt-ignore: 理由` の形は効かないことを試して確かめた）。最初の `bun run verify` は knip の Unlisted（`oxfmt/package.json`）で exit 1、`knip.json` を直して `bun run verify` → exit 0（acceptance 151 件 pass）
 
 - [ ] T07: lint と format から Biome を抜き、説明を Oxc の道具に合わせる
   - 種別: 削除
@@ -96,3 +97,4 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
 - 2026-10-21 / T05 / `server/package.json` は package の入力 / devDependencies を変える最初のコミット（T05）でバージョンを上げる
 - 2026-10-21 / T02 / 結果欄の「直す 34 件（no-useless-spread 24）」は誤り。24 件はすべて意図したコードで、`--fix` は `record.ts:869` の `[...quote.slice()].at(-1)` を UTF-16 単位に変え、`text.ts` の `english-exempt` を消した / 修正は戻した。持ち主の判断で `no-useless-spread` も切り（6 個目）、plan の上限を 6 個にした。直すのは prefer-string-starts-ends-with 8 件と no-useless-fallback-in-spread 2 件の 10 件
 - 2026-10-21 / T05 / 変更欄に、違反を直したファイル、Biome の lint の抑止コメントを消したファイル（Biome の linter を T05 で切るため。T07 から前倒し）、`knip.json`、プラグインのテストを足した（前の値は上の 15 件）
+- 2026-10-21 / T06 / 変更欄を `.oxfmtrc.json`, `biome.json`, `lefthook.yml`, `package.json`, `server/package.json`, `.git-blame-ignore-revs` から上の値にした / Oxfmt の glob 引数はディレクトリ引数を絞るので範囲を `scripts/oxfmt.mjs` で決めた。`biome.json` は T07 で消す。`.git-blame-ignore-revs` は整形のコミットの SHA が要るので T07 に移す

@@ -9,8 +9,8 @@ import crypto from "node:crypto";
 import type { Kysely } from "kysely";
 import { AUTHORITY, authorityOf } from "./authority.ts";
 import { flush, TOOL_FLUSH_BUDGET_MS } from "./capture.ts";
-import { inRolledBack, inTransaction, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { inRolledBack, inTransaction, type Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import {
   type Get,

@@ -74,7 +74,7 @@ const { problems, pull } = gateProblems({
 if (pull !== null) {
   const [owner, name] = repo.split("/");
   const threads = [];
-  for (let after = null; ; ) {
+  for (let after = null; ;) {
     const page = JSON.parse(
       run("gh", [
         "api",

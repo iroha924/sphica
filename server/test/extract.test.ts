@@ -341,7 +341,7 @@ test("harvest: context marks the sources an earlier run looked at, not a new com
       (body: string, comments: unknown[]): Get =>
       async (q) =>
         (
-          ({
+          {
             "pulls/3": {
               number: 3,
               title: "t",
@@ -356,7 +356,7 @@ test("harvest: context marks the sources an earlier run looked at, not a new com
             "pulls/3/reviews": [],
             "pulls/3/comments": [],
             "pulls/3/commits": [],
-          }) as Record<string, unknown>
+          } as Record<string, unknown>
         )[q.split("?")[0] ?? ""];
     const first = await beginHarvest(
       db.ingest,
@@ -409,7 +409,7 @@ test("harvest run keeps the sources it began with while another harvest of the p
       (body: string, comment: string): Get =>
       async (q) =>
         (
-          ({
+          {
             "pulls/3": {
               number: 3,
               title: "t",
@@ -437,7 +437,7 @@ test("harvest run keeps the sources it began with while another harvest of the p
             "issues/9/comments": [],
             "issues/12": issue(12, "Drafts are exported too."),
             "issues/12/comments": [],
-          }) as Record<string, unknown>
+          } as Record<string, unknown>
         )[q.split("?")[0] ?? ""];
     const a = await beginHarvest(db.ingest, p, 3, pull("Closes #9. Keep notes out of CSV.", "Old words."));
     const b = await beginHarvest(db.ingest, p, 3, pull("Closes #12. Keep notes out of CSV.", "New words."));
@@ -485,7 +485,7 @@ test("harvest run keeps the sources it began with, except what the owner forgets
       (body: string, comment: string): Get =>
       async (q) =>
         (
-          ({
+          {
             "pulls/3": {
               number: 3,
               title: "t",
@@ -509,7 +509,7 @@ test("harvest run keeps the sources it began with, except what the owner forgets
             "pulls/3/reviews": [],
             "pulls/3/comments": [],
             "pulls/3/commits": [],
-          }) as Record<string, unknown>
+          } as Record<string, unknown>
         )[q.split("?")[0] ?? ""];
     const a = await beginHarvest(db.ingest, p, 3, pull("Keep notes out of CSV.", "Old words."));
     await beginHarvest(db.ingest, p, 3, pull("Keep notes and drafts out of CSV.", "Old words."));
@@ -3335,7 +3335,7 @@ test("trace context: lists work in progress in full and the ten newest closed it
     for (let i = 1; i <= 11; i++) work(`closed-${i}`, i % 2 ? "done" : "abandoned", i);
     const run = await beginTrace(db.ingest, p, "s1");
     const pages: string[] = [];
-    for (let after: string | undefined; ; ) {
+    for (let after: string | undefined; ;) {
       const page = await contextText(db.ingest, run, p, null, after);
       assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
       pages.push(page);
@@ -3400,7 +3400,7 @@ test("trace context: with no work at all it says nothing of work, and long work 
       });
     const run = await beginTrace(db.ingest, p, "s1");
     const pages: string[] = [];
-    for (let after: string | undefined; ; ) {
+    for (let after: string | undefined; ;) {
       const page = await contextText(db.ingest, run, p, null, after);
       assert.ok(Buffer.byteLength(framed(page)) <= READ_BUDGET, `a page of ${Buffer.byteLength(page)} bytes`);
       pages.push(page);

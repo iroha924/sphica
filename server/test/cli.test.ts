@@ -10,7 +10,6 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-
 import { SAMPLES, splitLine } from "../src/split-check.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { fakeGhPath } from "./fake-gh.ts";
