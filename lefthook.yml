@@ -9,6 +9,9 @@ pre-commit:
     - name: actionlint
       glob: ".github/workflows/*.yml"
       run: mise exec -- actionlint {staged_files}
+    - name: json-keys
+      glob: "*.json"
+      run: node scripts/check-json-keys.mjs
     # scripts/oxfmt.mjs keeps only the files in its scope
     - name: oxfmt
       glob: "*.{ts,mts,mjs,json}"

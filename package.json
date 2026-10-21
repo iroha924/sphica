@@ -5,7 +5,7 @@
   "scripts": {
     "setup": "bun install --cwd server --frozen-lockfile --ignore-scripts && node scripts/install-hooks.mjs",
     "cli": "node server/src/cli.ts",
-    "lint": "node scripts/oxlint.mjs && bun run format:check",
+    "lint": "node scripts/oxlint.mjs && bun run format:check && node scripts/check-json-keys.mjs",
     "format:check": "node scripts/oxfmt.mjs --check",
     "fix": "node scripts/oxlint.mjs --fix && node scripts/oxfmt.mjs",
     "verify:ai": "node scripts/check-ai-config.mjs && node scripts/check-links.mjs",

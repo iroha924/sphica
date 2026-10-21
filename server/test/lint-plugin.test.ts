@@ -93,6 +93,7 @@ test("no-skipped-tests and no-focused-tests report node:test's skip and only, wh
       'test.skip("a", () => {});',
       'describe.only("b", () => {});',
       'test("c", () => {});',
+      'test["skip"]("d", () => {});',
       "",
     ].join("\n"),
   });
@@ -101,6 +102,7 @@ test("no-skipped-tests and no-focused-tests report node:test's skip and only, wh
     [
       ["server/test/a.test.ts", 2, "no-skipped-tests"],
       ["server/test/a.test.ts", 3, "no-focused-tests"],
+      ["server/test/a.test.ts", 5, "no-skipped-tests"],
     ],
   );
 });

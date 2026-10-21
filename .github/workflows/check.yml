@@ -278,6 +278,9 @@ jobs:
           set -e
           bun run setup
           bun run bundle
+      # The lint and format launchers start native binaries by path, and contributors on Windows run them in pre-commit
+      - name: Lint and format check on Windows
+        run: bun run lint
       # Exclusive create and rename over an existing file behave differently on Windows; init's lock and table replace rely on both
       - name: File lock and replace on Windows
         working-directory: server

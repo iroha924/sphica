@@ -23,8 +23,7 @@ const modifierRule = (modifier, message) => ({
           callee.type === "MemberExpression" &&
           callee.object.type === "Identifier" &&
           TEST_CALLS.has(callee.object.name) &&
-          !callee.computed &&
-          callee.property.name === modifier
+          (callee.computed ? callee.property.value : callee.property.name) === modifier
         )
           context.report({ node: callee.property, message });
       },

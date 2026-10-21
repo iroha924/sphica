@@ -27,6 +27,14 @@ const inScope = (file) =>
   (DIRS.some((d) => file.startsWith(`${d}/`)) && /\.(?:ts|mts|mjs|json)$/.test(file));
 
 const args = process.argv.slice(2);
+// A value after a separate flag would be read as a file here, and a file outside the scope leaves nothing to format
+const valued = args.find((a) =>
+  ["-c", "--config", "--ignore-path", "--threads", "--stdin-filepath", "--migrate"].includes(a),
+);
+if (valued) {
+  console.error(`oxfmt.mjs: write ${valued}=<value> as one argument`);
+  process.exit(2);
+}
 const flags = args.filter((a) => a.startsWith("-"));
 const files = args
   .filter((a) => !a.startsWith("-"))

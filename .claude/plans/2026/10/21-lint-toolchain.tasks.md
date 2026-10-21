@@ -99,6 +99,16 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
   - コミット: `fix(lint): lint top-level files in pre-commit, and carry over Biome's recommended rules (T08)`
   - 結果: red は上の 3 つで実測（skip / exit 0 と exit 0 / 指摘なし）。直した後 → `server/src/zz-red.ts:3:3: error typescript(no-floating-promises)`、exit 1 と exit 1、`eslint(eqeqeq)`・`typescript(no-explicit-any)`・`sphica(no-skipped-tests)`。Biome の recommended 215 個（A11y を除く）を名前で Oxlint に写し、今のコードで違反 0 の 51 個を有効にした（no-template-curly-in-string は T05 で消した 12 か所の抑止を Oxlint の形で戻した）。`node --test test/lint-plugin.test.ts` → 5 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
 
+- [x] T09: GitHub の Codex の指摘を直す（コメントの長さ、角括弧の skip、JSON の重複キー、Windows での lint、Oxfmt の値付きオプション）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T08（同じプラグインと launcher を直す）
+  - 変更: `scripts/lib/sql-style.mjs`, `scripts/lint-plugin.mjs`, `server/test/lint-plugin.test.ts`, `scripts/oxfmt.mjs`, `scripts/lib/json-keys.mjs`, `scripts/lib/json-keys.d.mts`, `scripts/check-json-keys.mjs`, `server/test/json-keys.test.ts`, `package.json`, `lefthook.yml`, `.github/workflows/check.yml`, `.gitattributes`
+  - red: プラグインの修正だけを戻した `node --test --test-name-pattern=no-skipped test/lint-plugin.test.ts` → `test["skip"]` を拾わず fail。launcher の修正を戻した `node scripts/oxfmt.mjs --check -c /tmp/x.json` → 何も整形せず exit 0。重複キーの `server/evals/zz-dup.json` を置いて `node scripts/oxlint.mjs && node scripts/oxfmt.mjs --check` → exit 0
+  - 完了条件: 同じ 3 つ → pass、exit 2、`node scripts/check-json-keys.mjs` が exit 1。`bun run verify` → 0 で終わる。PR の CI の windows ジョブで `bun run lint` → pass
+  - コミット: `fix(lint): catch bracket skips and repeated JSON keys, and lint on Windows (T09)`
+  - 結果: red は上の 3 つで実測（fail / exit 0 / exit 0）。直した後 → lint-plugin.test 5 件 pass、`oxfmt.mjs: write -c=<value> as one argument` で exit 2、`server/evals/zz-dup.json:3: "a" appears twice in one object` で exit 1。`node --test test/json-keys.test.ts` → 2 件 pass。`git ls-files --eol` → index は 450 ファイルすべて LF（`.gitattributes` で中身は変わらない）。`bun run verify` → exit 0（acceptance 151 件 pass）。windows ジョブは push 後の CI で見る
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が軽い進め方を選んだ / タスクごとの Codex レビューは行わず、merge 前に 1 回だけ流す
@@ -111,3 +121,4 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
 - 2026-10-21 / T06 / 変更欄を `.oxfmtrc.json`, `biome.json`, `lefthook.yml`, `package.json`, `server/package.json`, `.git-blame-ignore-revs` から上の値にした / Oxfmt の glob 引数はディレクトリ引数を絞るので範囲を `scripts/oxfmt.mjs` で決めた。`biome.json` は T07 で消す。`.git-blame-ignore-revs` は整形のコミットの SHA が要るので T07 に移す
 - 2026-10-21 / T07 / 変更欄に `server/package.json`, `knip.json`, `.git-blame-ignore-revs` を足した（前の値は `biome.json`, `CLAUDE.md`, `AGENTS.md`, `.github/workflows/check.yml`） / server の Biome のスクリプトが残っていた、knip の除外が要った、blame の除外を T06 から移した
 - 2026-10-21 / T08 / review-shipping 4 件と Codex 4 件（うち 2 件が重複）を受けて修正タスクを足した / 6 件とも採用。Biome の recommended で Oxlint に同じものが無い・動きが違うものは PR 本文に一覧を残す
+- 2026-10-21 / T09 / GitHub の Codex の 6 件 / 5 件を直した。`.git-blame-ignore-revs` の件は見送り（リリースは `gh pr merge --merge` で取り込むので 4024b4c6 は履歴に残る）。Windows の checkout は CRLF になり format の検査が落ちるので、`.gitattributes` を足した（plan に無い新しいファイル）

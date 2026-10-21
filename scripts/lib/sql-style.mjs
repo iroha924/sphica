@@ -5,11 +5,8 @@
 // **Types stop neither.** Handwritten result types are never checked against the SQL, and deprecated kysely calls only warn at run
 // time and still compile. Left alone, the next code written drifts back to the old form.
 
-/**
- * Files allowed to use node:sqlite directly: connection setup (sqlite.ts, db-write.ts), kysely construction (db.ts),
- * schema application and migrations (admin.ts), and the adapter passed to kysely. Other app code uses kysely
- * (so result types are inferred from the schema). Tests may use raw connections to insert fixtures.
- */
+// Only connection setup, kysely construction, migrations, and the kysely adapter use node:sqlite directly; other code uses kysely
+// so result types come from the schema. Tests may use raw connections to insert fixtures.
 const RAW_SQL_OK = new Set([
   "server/src/sqlite.ts",
   "server/src/db.ts",
@@ -40,11 +37,7 @@ const RULES = [
   REPLACE,
 ];
 
-/**
- * @param {string} file repository path with forward slashes
- * @param {string} text
- * @returns {{ line: number, why: string }[]}
- */
+/** @param {string} file repository path with forward slashes @returns {{ line: number, why: string }[]} */
 export function sqlStyleProblems(file, text) {
   const problems = [];
   for (const [re, why] of RULES) {
