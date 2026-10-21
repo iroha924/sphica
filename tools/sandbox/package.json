@@ -1,0 +1,9 @@
+{
+  "name": "sphica-sandbox",
+  "private": true,
+  "type": "module",
+  "description": "The sandbox runtime CI runs the test lanes in, apart from server/ so its tree never reaches the shipped notices or the SBOM",
+  "devDependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.79"
+  }
+}

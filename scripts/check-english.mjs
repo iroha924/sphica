@@ -68,6 +68,7 @@ const TEXT = [
   "renovate.json",
   "server/bunfig.toml",
   "tools/mutation/bunfig.toml",
+  "tools/sandbox/bunfig.toml",
   "db/schema.sql",
   "CLAUDE.md",
   "AGENTS.md",

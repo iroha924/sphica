@@ -113,7 +113,14 @@ test("a part left out of the matrix, a condition on the verify step, or a matrix
     ),
     /verify step runs only under a condition/,
   );
-  fails(edit("check", 'run: bun run "ci:$PART"', "run: bun run ci:static"), /no step with/);
+  fails(
+    edit("check", 'run: node scripts/sandboxed.mjs bun run "ci:$PART"', "run: bun run ci:static"),
+    /no step with/,
+  );
+  fails(
+    edit("check", 'run: node scripts/sandboxed.mjs bun run "ci:$PART"', 'run: bun run "ci:$PART"'),
+    /no step with/,
+  );
   fails(
     edit(
       "check",
