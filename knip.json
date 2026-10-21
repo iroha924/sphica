@@ -28,6 +28,7 @@
         "evals/asked/run.ts",
         "evals/delivery/sample.ts",
         "evals/order/run.ts",
+        "evals/plugin/seed.ts",
         "evals/retrieval/run.ts",
         "evals/post-write/replay.ts",
         "evals/post-write/shell-miss.ts",
