@@ -3,4 +3,7 @@
 
 export function trackedDistribution(root: string): string[];
 export const BUNDLE_ENTRIES: string[];
-export function tarballProblems(paths: Set<string>, tracked: string[]): string[];
+export function tarballProblems(
+  paths: Set<string>,
+  tracked: string[],
+): { what: string; why: string; fix: string }[];

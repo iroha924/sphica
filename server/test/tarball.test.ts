@@ -7,7 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BUNDLE_ENTRIES, tarballProblems, trackedDistribution } from "../../scripts/lib/tarball.mjs";
+import {
+  BUNDLE_ENTRIES,
+  tarballProblems as problemsOf,
+  trackedDistribution,
+} from "../../scripts/lib/tarball.mjs";
+
+const tarballProblems = (...args: Parameters<typeof problemsOf>) => problemsOf(...args).map((p) => p.what);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tracked = trackedDistribution(root);

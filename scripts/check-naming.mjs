@@ -10,8 +10,10 @@
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import process from "node:process";
 import { bannedNameLines, hasBannedName } from "./lib/banned-name.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("names", () => hits);
 
 /** Spellings allowed to remain, with the reason. */
 const ALLOWED = [
@@ -28,14 +30,32 @@ const ALLOWED = [
 ];
 
 const OLD = [
-  { name: "old tool name", re: /mitos/i },
+  { name: "the old tool name", re: /mitos/i, fix: "write Sphica" },
   // The old name's origin was written in Greek, so searching the Latin spelling would miss it.
-  { name: "origin of the old tool name", re: /μίτος/i },
+  { name: "the origin of the old tool name", re: /μίτος/i, fix: "drop it, or write Sphica" },
   // Only environment variables. Constant names such as the SQL column list (KNOWLEDGE_COLS) are out of scope.
-  { name: "old environment variable", re: /\bKNOWLEDGE_(DB_URL|ENV_DIR)\b/ },
-  { name: "old config file", re: /knowledge\.env/ },
-  { name: "removed service", re: /\b(Vercel|Neon|Clerk)\b/i },
+  {
+    name: "an old environment variable",
+    re: /\bKNOWLEDGE_(DB_URL|ENV_DIR)\b/,
+    fix: "use SPHICA_DB or SPHICA_HOME",
+  },
+  {
+    name: "the old config file",
+    re: /knowledge\.env/,
+    fix: "drop it: Sphica keeps its state under ~/.sphica",
+  },
+  {
+    name: "a removed service",
+    re: /\b(Vercel|Neon|Clerk)\b/i,
+    fix: "drop it: Sphica runs on a local SQLite database with no hosted service",
+  },
 ];
+const OLD_WHY = "the rename left this spelling behind, and a reader takes it for something that still exists";
+const BANNED = {
+  what: "a banned name appears",
+  why: "the name must not appear in the repository or the package, and lib/banned-name.mjs keeps only its hash",
+  fix: "remove the name; it has no exceptions",
+};
 
 const tracked = execFileSync("git", ["ls-files"], { encoding: "utf8" }).trim().split("\n");
 // This check holds the spellings it looks for as patterns, so it would always match itself.
@@ -54,17 +74,33 @@ for (const file of tracked) {
   }
   const lines = body.split("\n");
   for (const [i, line] of lines.entries()) {
-    for (const { name, re } of OLD) {
+    for (const { name, re, fix } of OLD) {
       if (!re.test(line)) continue;
       if (ALLOWED.some((a) => a.file === file && a.pattern.test(line))) continue;
-      hits.push(`${file}:${i + 1}  ${name}: ${line.trim().slice(0, 100)}`);
+      hits.push(
+        finding({
+          where: `${file}:${i + 1}`,
+          what: `${name} remains: ${line.trim().slice(0, 100)}`,
+          why: OLD_WHY,
+          fix: `${fix}, or add the line to ALLOWED in ${SELF} with the reason it must stay`,
+        }),
+      );
     }
   }
 }
 
 for (const file of tracked) {
-  if (/mitos/i.test(file)) hits.push(`${file}  old tool name in the file name`);
-  if (hasBannedName(file)) hits.push(`${file}  banned name in the file name`);
+  if (/mitos/i.test(file))
+    hits.push(
+      finding({
+        where: file,
+        what: "the file name holds the old tool name",
+        why: OLD_WHY,
+        fix: "rename the file with git mv, writing sphica, and update what points at it",
+      }),
+    );
+  if (hasBannedName(file))
+    hits.push(finding({ where: file, ...BANNED, what: "the file name holds a banned name" }));
   if (skip.test(file) || /\.(png|jpg|jpeg|gif|webp|ico|woff2?|ttf|zip)$/.test(file)) continue;
   // Lockfiles are text and name the package, so unlike the patterns above this check reads them too
   let body = "";
@@ -73,17 +109,7 @@ for (const file of tracked) {
   } catch {
     continue;
   }
-  for (const n of bannedNameLines(body)) hits.push(`${file}:${n}  banned name`);
+  for (const n of bannedNameLines(body)) hits.push(finding({ where: `${file}:${n}`, ...BANNED }));
 }
 
-if (hits.length) {
-  console.error(`old names remain in ${hits.length} places.\n`);
-  console.error(hits.slice(0, 40).join("\n"));
-  if (hits.length > 40) console.error(`\n…and ${hits.length - 40} more`);
-  console.error(
-    "\nIf there is a reason to keep a pattern hit, add it with the reason to ALLOWED in scripts/check-naming.mjs. the banned name has no exceptions.",
-  );
-  process.exit(1);
-}
-
-console.log(`names: no old spellings remain (${tracked.length} files checked)`);
+if (!report("names", hits)) console.log(`names: no old spellings remain (${tracked.length} files checked)`);

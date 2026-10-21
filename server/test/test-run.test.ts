@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runTestsIsolated } from "../../scripts/lib/test-run.mjs";
+import { assertFindings } from "./finding-shape.ts";
 
 const ROOT = path.join(import.meta.dirname, "..", "..");
 /** A child environment with none of the owner's Sphica paths or git's hook variables */
@@ -21,6 +22,7 @@ const childEnv = (): NodeJS.ProcessEnv => {
   for (const k of Object.keys(env)) if (k.startsWith("GIT_")) delete env[k];
   return env;
 };
+const whats = (r: ReturnType<typeof runTestsIsolated>) => r.problems.map((p) => p.what);
 const node = (script: string, maxBuffer?: number) =>
   runTestsIsolated(process.execPath, ["-e", script], { cwd: ROOT, env: childEnv(), maxBuffer });
 
@@ -37,7 +39,7 @@ test("what a run leaves in its temp directory fails it by name, together with a 
   const r = node(
     'const fs = require("node:fs"), os = require("node:os"), path = require("node:path"); fs.mkdirSync(path.join(os.tmpdir(), "left-dir")); fs.writeFileSync(path.join(os.tmpdir(), "left.txt"), "x"); process.exitCode = 1;',
   );
-  assert.deepEqual(r.problems, [
+  assert.deepEqual(whats(r), [
     "the tests failed (exit 1)",
     "the tests left 2 entries in their temp directory: left-dir, left.txt",
   ]);
@@ -48,7 +50,7 @@ test("a locked directory the run leaves is still removed", () => {
   const r = node(
     'const fs = require("node:fs"), os = require("node:os"), path = require("node:path"); const d = path.join(os.tmpdir(), "locked"); fs.mkdirSync(path.join(d, "inner"), { recursive: true }); fs.chmodSync(path.join(d, "inner"), 0); fs.chmodSync(d, 0);',
   );
-  assert.deepEqual(r.problems, ["the tests left 1 entry in their temp directory: locked"]);
+  assert.deepEqual(whats(r), ["the tests left 1 entry in their temp directory: locked"]);
   assert.equal(fs.existsSync(r.dir), false);
 });
 
@@ -71,17 +73,15 @@ test("a temp directory that cannot be read or removed is reported with the run's
   );
   t.after(() => fs.rmSync(r.dir, { force: true }));
   assert.equal(r.stdout.trim(), "OUT");
-  assert.equal(r.problems.length, 2, r.problems.join("\n"));
-  assert.ok(
-    r.problems[0]?.startsWith(`the run's temp directory ${r.dir} could not be read: ENOTDIR`),
-    r.problems[0],
-  );
-  assert.equal(r.problems[1], `the run's temp directory ${r.dir} could not be removed: busy`);
+  const [read, removed, ...more] = whats(r);
+  assert.deepEqual(more, []);
+  assert.ok(read?.startsWith(`the run's temp directory ${r.dir} could not be read: ENOTDIR`), read);
+  assert.equal(removed, `the run's temp directory ${r.dir} could not be removed: busy`);
 });
 
 test("output past the limit is a problem of its own, not a silent cut", () => {
   const r = node('process.stdout.write("x".repeat(5000));', 1000);
-  assert.deepEqual(r.problems, ["the test run's output passed 1000 bytes, so it was stopped"]);
+  assert.deepEqual(whats(r), ["the test run's output passed 1000 bytes, so it was stopped"]);
 });
 
 test("sql:reach shows a failed run's whole output and leaves no temp directory, with a fake bun standing in for the tests", (t) => {
@@ -106,6 +106,7 @@ test("sql:reach shows a failed run's whole output and leaves no temp directory, 
   assert.ok(out.includes("TAIL-OUT "), brief);
   assert.ok(out.includes("TAIL-ERR"), brief);
   assert.ok(out.includes("the tests failed (exit 1)"), brief);
+  assertFindings(r.stderr, "sql:reach");
   const used = /TAIL-OUT (\S+)/.exec(out)?.[1] ?? "";
   assert.ok(used && !fs.existsSync(used), `the run's temp directory ${used} is gone`);
 });

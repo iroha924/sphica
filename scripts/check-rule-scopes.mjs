@@ -12,11 +12,15 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("rule scopes", () => failures);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rulesDirectory = path.join(root, ".claude", "rules");
+const SELF = "scripts/check-rule-scopes.mjs";
+const at = (file) => `.claude/rules/${file}`;
 
 /** Real files each rule must load for, and real files it must not. **List only paths that exist.** */
 const EXPECTED = {
@@ -38,12 +42,17 @@ const ALWAYS = {
 };
 
 /** Converts a glob to a regex. `**` crosses directories, and `*` stays within one. */
-function toRegExp(glob) {
+function toRegExp(glob, file) {
   // **Unsupported syntax never passes silently.** Bracket expressions `[]` work in Claude,
   // but they are not implemented here, so failing beats misjudging.
   if (/[[\]]/.test(glob)) {
     failures.push(
-      `paths entry ${glob} contains a bracket expression. This check does not support it, so do not use it`,
+      finding({
+        where: at(file),
+        what: `the paths entry ${glob} holds a bracket expression`,
+        why: "this check cannot read bracket expressions, so it could not tell which files load the rule",
+        fix: "list the alternatives with braces ({a,b}) or as separate entries",
+      }),
     );
     return /$^/;
   }
@@ -86,7 +95,14 @@ function frontmatterPaths(source, file) {
   if (!source.startsWith("---\n")) return null;
   const end = source.indexOf("\n---\n", 4);
   if (end === -1) {
-    failures.push(`${file}: frontmatter is not closed`);
+    failures.push(
+      finding({
+        where: at(file),
+        what: "the frontmatter is not closed",
+        why: "the paths cannot be read from it, so neither this check nor a reader can tell where the rule loads",
+        fix: "end the frontmatter with a line of three dashes",
+      }),
+    );
     return null;
   }
   const lines = source.slice(4, end).split("\n");
@@ -128,7 +144,12 @@ const declared = new Set([...Object.keys(EXPECTED), ...Object.keys(ALWAYS)]);
 for (const name of declared) {
   if (!files.includes(name)) {
     failures.push(
-      `${name}: listed in the expectations but missing from .claude/rules/. If you deleted it, remove the expectation too`,
+      finding({
+        where: SELF,
+        what: `${name} has expectations, but .claude/rules/${name} does not exist`,
+        why: "an expectation for a missing rule checks nothing and hides that the rule is gone",
+        fix: `remove ${name} from EXPECTED or ALWAYS if the rule was deleted, or restore the rule`,
+      }),
     );
   }
 }
@@ -143,45 +164,76 @@ for (const file of files) {
     always.push(file);
     if (!ALWAYS[file]) {
       failures.push(
-        `${file}: has no paths, so it always loads. If every file needs it, add it with a reason to ALWAYS in ` +
-          "scripts/check-rule-scopes.mjs. Otherwise give it paths",
+        finding({
+          where: at(file),
+          what: "the rule has no paths, so it loads in every session",
+          why: "a rule loaded for unrelated work takes context from it",
+          fix: `give it paths, or add it to ALWAYS in ${SELF} with the reason every file needs it`,
+        }),
       );
     }
     continue;
   }
   scoped.push(file);
   if (globs.length === 0) {
-    failures.push(`${file}: paths is empty`);
+    failures.push(
+      finding({
+        where: at(file),
+        what: "paths is empty",
+        why: "a rule whose paths match nothing never loads",
+        fix: "list the globs of the files the rule is for, or remove paths to load it always",
+      }),
+    );
     continue;
   }
 
   const expected = EXPECTED[file];
   if (!expected) {
-    failures.push(`${file}: add its expectations to EXPECTED in scripts/check-rule-scopes.mjs`);
+    failures.push(
+      finding({
+        where: at(file),
+        what: "the rule has paths but no expectations",
+        why: "paths that are too broad or too narrow go unseen without real files to test them against",
+        fix: `add the rule to EXPECTED in ${SELF} with files it must load for and files it must not`,
+      }),
+    );
     continue;
   }
-  const patterns = globs.map(toRegExp);
+  const patterns = globs.map((g) => toRegExp(g, file));
   const hits = (target) => patterns.some((p) => p.test(target));
 
+  const missing = (target) =>
+    finding({
+      where: SELF,
+      what: `the expectation for ${file} names ${target}, which does not exist`,
+      why: "an expectation on a missing file tests the paths against nothing",
+      fix: `replace ${target} with a file that exists, or remove it`,
+    });
   for (const target of expected.match) {
-    if (!fs.existsSync(path.join(root, target))) {
-      failures.push(`${file}: expected file ${target} does not exist`);
-      continue;
-    }
-    if (!hits(target)) failures.push(`${file}: should load for ${target}, but paths does not match it`);
+    if (!fs.existsSync(path.join(root, target))) failures.push(missing(target));
+    else if (!hits(target))
+      failures.push(
+        finding({
+          where: at(file),
+          what: `paths does not match ${target}, which the rule must load for`,
+          why: "Claude Code loads a rule with paths only when it reads a matching file, so the rule would be missing there",
+          fix: `widen paths to cover ${target}, or move it to notMatch in ${SELF} if the rule is not for it`,
+        }),
+      );
   }
   for (const target of expected.notMatch) {
-    if (!fs.existsSync(path.join(root, target))) {
-      failures.push(`${file}: expected file ${target} does not exist`);
-      continue;
-    }
-    if (hits(target)) failures.push(`${file}: must not load for ${target}, but paths matches it`);
+    if (!fs.existsSync(path.join(root, target))) failures.push(missing(target));
+    else if (hits(target))
+      failures.push(
+        finding({
+          where: at(file),
+          what: `paths matches ${target}, which the rule must not load for`,
+          why: "a rule loaded for unrelated work takes context from it",
+          fix: `narrow paths to leave ${target} out, or move it to match in ${SELF} if the rule is for it`,
+        }),
+      );
   }
 }
 
-if (failures.length > 0) {
-  console.error(failures.map((f) => `- ${f}`).join("\n"));
-  process.exit(1);
-}
-
-console.log(`rule scopes: ${scoped.length} with paths / ${always.length} always loaded`);
+if (!report("rule scopes", failures))
+  console.log(`rule scopes: ${scoped.length} with paths / ${always.length} always loaded`);

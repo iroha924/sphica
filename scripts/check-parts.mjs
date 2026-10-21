@@ -7,6 +7,9 @@
 
 import process from "node:process";
 import { partProblems } from "./lib/check-parts.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("check");
 
 let needs;
 try {
@@ -14,8 +17,6 @@ try {
 } catch {
   needs = null;
 }
-const problems = partProblems(needs, process.argv.slice(2), process.env.EVENT);
-if (problems.length) {
-  for (const p of problems) console.error(p);
-  process.exitCode = 1;
-} else console.log(`every part succeeded: ${process.argv.slice(2).join(", ")}`);
+const jobs = process.argv.slice(2);
+const problems = partProblems(needs, jobs, process.env.EVENT).map(finding);
+if (!report("check", problems)) console.log(`every part succeeded: ${jobs.join(", ")}`);

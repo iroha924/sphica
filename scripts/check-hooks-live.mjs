@@ -15,12 +15,27 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
+import { fail as stop, finding, guard, report } from "./lib/finding.mjs";
 import { root, tempVars, withTempDir } from "./lib/live-harness.mjs";
+
+guard("hooks", () => failures);
 
 const windows = process.platform === "win32";
 const source = path.resolve(process.argv[2] ?? path.join(root, "plugin"));
 const failures = [];
-const fail = (what, detail = "") => failures.push(detail ? `${what}\n${String(detail).slice(0, 800)}` : what);
+const fail = ({ detail, ...parts }) =>
+  failures.push(
+    finding({ ...parts, detail: detail === undefined ? undefined : String(detail).slice(0, 800) }),
+  );
+const HOOKS = "plugin/hooks/hooks.json";
+const CODEX_HOOKS = "plugin/hooks/codex.json";
+const CAPTURE = "server/src/capture.ts";
+const DELIVER = "server/src/deliver.ts";
+// The hooks run here as the host would start them, from the package, so a failure is one the owner's sessions would hit
+const LAUNCHED = "the host starts these hooks the same way in every session, so what fails here fails there";
+// What this machine must have for the lane to run at all: a missing one is not skipped (invariant no-silent-skip)
+const NEEDED =
+  "the lane fails rather than skips when what it runs is missing, or CI would stay green while checking nothing";
 const TIMEOUT_MS = 60_000;
 // The placeholder as hooks.json writes it, joined so the source holds no template-looking literal
 const ROOT = ["$", "{CLAUDE_PLUGIN_ROOT}"].join("");
@@ -46,7 +61,13 @@ await withTempDir(async (dir) => {
   // Built from nothing, so no SPHICA_*, token, host session, or workspace of the parent leaks in. gh is left off PATH: init
   // then reports it could not bind an account, and nothing reaches api.github.com.
   const git = onPath("git");
-  if (!git) throw new Error("git is not on PATH");
+  if (!git)
+    stop({
+      where: "hooks:live",
+      what: "git is not on PATH",
+      why: NEEDED,
+      fix: "install git and put it on PATH",
+    });
   const dirs = [path.dirname(process.execPath), path.dirname(git)];
   // git reads no system or user config, so the owner's signing or hooks never run on the fixture
   const gitConfig = path.join(dir, "gitconfig");
@@ -73,7 +94,14 @@ await withTempDir(async (dir) => {
     ["commit", "-qm", "store"],
   ]) {
     const r = spawnSync(git, ["-C", repo, ...args], { env, encoding: "utf8" });
-    if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${r.stderr}`);
+    if (r.status !== 0)
+      stop({
+        where: "hooks:live (fixture repository)",
+        what: `git ${args[0]} failed`,
+        why: NEEDED,
+        fix: "run the same git command by hand in a temp directory and fix what git reports below",
+        detail: r.stderr,
+      });
   }
 
   const node = (args, extra = {}) =>
@@ -85,7 +113,14 @@ await withTempDir(async (dir) => {
     });
 
   const init = node([path.join(pkg, "dist", "cli.js"), "init", "--cwd", repo]);
-  if (init.status !== 0) fail("init exited non-zero", `${init.stdout}${init.stderr}`);
+  if (init.status !== 0)
+    fail({
+      where: "hooks:live sphica init",
+      what: `init exited ${init.status}`,
+      why: LAUNCHED,
+      fix: "fix server/src/cli.ts by the error in the output below",
+      detail: `${init.stdout}${init.stderr}`,
+    });
   const dbFile = path.join(home, ".sphica", "sphica.db");
   // A read-only connection cannot recover a WAL another process left behind, so the checks open it as the hooks do
   const query = (fn) => {
@@ -96,7 +131,14 @@ await withTempDir(async (dir) => {
       db.close();
     }
   };
-  if (!fs.existsSync(dbFile)) throw new Error(`init made no database\n${init.stdout}${init.stderr}`);
+  if (!fs.existsSync(dbFile))
+    stop({
+      where: "hooks:live sphica init",
+      what: "init made no database",
+      why: "every hook below reads or writes that database",
+      fix: "fix server/src/cli.ts by the output below",
+      detail: `${init.stdout}${init.stderr}`,
+    });
 
   const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "hooks.json"), "utf8")).hooks;
   /** Runs every entry Claude Code would run for this event (and tool), as the entry defines it. */
@@ -104,7 +146,13 @@ await withTempDir(async (dir) => {
     const entries = (manifest[event] ?? [])
       .filter((g) => !g.matcher || new RegExp(`^(?:${g.matcher})$`).test(input.tool_name ?? ""))
       .flatMap((g) => g.hooks ?? []);
-    if (!entries.length) fail(`hooks.json runs nothing for ${event} ${input.tool_name ?? ""}`);
+    if (!entries.length)
+      fail({
+        where: HOOKS,
+        what: `nothing runs for ${event} ${input.tool_name ?? ""}`.trim(),
+        why: LAUNCHED,
+        fix: `add the ${event} entry this event needs, with a matcher that matches ${input.tool_name ?? "it"}`,
+      });
     const hookEnv = {
       ...env,
       CLAUDE_PLUGIN_ROOT: pkg,
@@ -117,7 +165,13 @@ await withTempDir(async (dir) => {
     for (const h of entries) {
       // Only exec form ships (verify:ai pins it): node with the script path as one argument, never a shell
       if (h.command !== "node" || !Array.isArray(h.args)) {
-        fail(`${event} hook is not exec form with node`, JSON.stringify(h));
+        fail({
+          where: HOOKS,
+          what: `a ${event} hook is not exec form with node`,
+          why: "exec form starts node with no shell, which on Windows without Git Bash would otherwise be PowerShell at about 230 ms a launch",
+          fix: `write the hook as "command": "node", "args": ["${ROOT}/dist/<bundle>.js"]`,
+          detail: JSON.stringify(h),
+        });
         continue;
       }
       const args = h.args.map((a) => a.replaceAll(ROOT, pkg));
@@ -129,10 +183,13 @@ await withTempDir(async (dir) => {
         timeout: TIMEOUT_MS,
       });
       if (r.error || r.status !== 0)
-        fail(
-          `${event} hook ${h.command} ${(h.args ?? []).join(" ")} failed`,
-          r.error?.message ?? `${r.stdout}${r.stderr}`,
-        );
+        fail({
+          where: `hooks:live ${event} hook ${h.command} ${(h.args ?? []).join(" ")}`,
+          what: r.error ? `the hook could not run: ${r.error.message}` : `the hook exited ${r.status}`,
+          why: LAUNCHED,
+          fix: `fix ${/deliver/.test(h.args.join(" ")) ? DELIVER : CAPTURE} by the output below`,
+          detail: r.error?.message ?? `${r.stdout}${r.stderr}`,
+        });
       out += r.stdout ?? "";
     }
     return out;
@@ -168,7 +225,13 @@ await withTempDir(async (dir) => {
   const call = async (name, args) => {
     const r = await rpc("tools/call", { name, arguments: { cwd: repo, ...args } });
     const text = (r.result?.content ?? []).map((c) => c.text ?? "").join("\n");
-    if (r.error || r.result?.isError) throw new Error(`${name}: ${r.error?.message ?? text}`);
+    if (r.error || r.result?.isError)
+      stop({
+        where: `hooks:live record server ${name}`,
+        what: `${name} failed: ${r.error?.message ?? text}`,
+        why: "the seed record is saved through the record server as a trace would, and every delivery below needs it",
+        fix: `fix ${name} in server/src/mcp-record.ts by the error`,
+      });
     return text;
   };
   try {
@@ -179,10 +242,23 @@ await withTempDir(async (dir) => {
     });
     mcp.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     const run = /run: (\S+)/.exec(await call("trace_begin", { session: "fixture-1" }))?.[1];
-    if (!run) throw new Error("trace_begin returned no run");
+    if (!run)
+      stop({
+        where: "hooks:live record server trace_begin",
+        what: "trace_begin returned no run id",
+        why: "record_check and record_save take the run id trace_begin returns",
+        fix: "check that trace_begin in server/src/mcp-record.ts answers with `run: <id>`",
+      });
     const context = await call("record_context", { run });
     const ref = /## (s\d+) owner/.exec(context)?.[1];
-    if (!ref) throw new Error(`record_context shows no owner message\n${context.slice(0, 600)}`);
+    if (!ref)
+      stop({
+        where: "hooks:live record server record_context",
+        what: "record_context shows no owner message",
+        why: "the seed quotes the owner's prompt, which UserPromptSubmit captured, so capture or the context listing failed",
+        fix: `check that UserPromptSubmit reached the database through ${CAPTURE}, and that record_context lists it`,
+        detail: context.slice(0, 600),
+      });
     const quote = [{ source: ref, quote: decision }];
     const record = {
       units: [
@@ -201,7 +277,14 @@ await withTempDir(async (dir) => {
     };
     const checked = await call("record_check", { run, record });
     const saved = await call("record_save", { run, record });
-    if (!/saved/.test(saved)) fail("record_save did not save", `${checked}\n${saved}`);
+    if (!/saved/.test(saved))
+      fail({
+        where: "hooks:live record server record_save",
+        what: "record_save did not save the seed record",
+        why: "every delivery below needs the seed record",
+        fix: "read record_check's answer below and fix the record server or the seed",
+        detail: `${checked}\n${saved}`,
+      });
   } finally {
     // Closing stdin ends the server on its own. Killed mid-write on Windows, it left the database unreadable to the next reader
     const exited = new Promise((r) => mcp.once("exit", r));
@@ -214,7 +297,13 @@ await withTempDir(async (dir) => {
     db.prepare("select lifecycle, extraction, unsourced from unit where key like '%/map'").get(),
   );
   if (unit?.lifecycle !== "active" || unit.extraction !== "supported" || unit.unsourced !== 0)
-    fail("the seeded decision is not active, supported, and sourced", JSON.stringify(unit));
+    fail({
+      where: "hooks:live record server record_save",
+      what: "the seeded decision is not active, supported, and sourced",
+      why: "only an active, supported, sourced record is delivered, so the deliveries below would check nothing",
+      fix: "check how server/src/record.ts and server/src/reconcile.ts set the lifecycle of an owner's quoted decision",
+      detail: JSON.stringify(unit),
+    });
 
   // ---- The measured turn: no trace or flush runs until Stop's detached send ----
   const spool = path.join(home, ".sphica", "spool");
@@ -224,7 +313,13 @@ await withTempDir(async (dir) => {
     .readdirSync(spool)
     .filter((f) => f.endsWith(".json") && !f.startsWith("."))
     .some((f) => fs.readFileSync(path.join(spool, f), "utf8").includes(marker));
-  if (!queued) fail("UserPromptSubmit queued nothing with the owner's prompt");
+  if (!queued)
+    fail({
+      where: "hooks:live UserPromptSubmit",
+      what: "nothing with the owner's prompt was queued in the spool",
+      why: "UserPromptSubmit queues the prompt so Stop's send can write it without holding up the turn",
+      fix: `check that ${CAPTURE} writes the prompt to ~/.sphica/spool on UserPromptSubmit`,
+    });
 
   const delivered = fire(
     "PreToolUse",
@@ -232,11 +327,23 @@ await withTempDir(async (dir) => {
     "smoke-1",
   );
   if (!/\/map /.test(delivered) || !/which this command names/.test(delivered))
-    fail("a PowerShell command naming src/a.ts got no decision", delivered);
+    fail({
+      where: "hooks:live PreToolUse PowerShell",
+      what: "a PowerShell command naming src/a.ts got no decision delivered",
+      why: "on Windows without Git Bash, Claude Code reads files with PowerShell commands, so delivery must read their paths too",
+      fix: `check how ${DELIVER} finds the paths a PowerShell command names`,
+      detail: delivered,
+    });
 
   const inDb = () => query((db) => Boolean(db.prepare("select 1 from source where text = ?").get(marker)));
   // Sent only by Stop's detached process: already there would make the check below pass on its own
-  if (inDb()) fail("the owner's prompt reached the database before Stop");
+  if (inDb())
+    fail({
+      where: "hooks:live UserPromptSubmit",
+      what: "the owner's prompt reached the database before Stop",
+      why: "only Stop's detached send writes the queued turn, and a prompt already there would make the send check below pass on its own",
+      fix: `keep ${CAPTURE} from sending on UserPromptSubmit`,
+    });
   fire("Stop", { last_assistant_message: "Done.", prompt_id: "t1" }, "smoke-1");
   const deadline = Date.now() + 30_000;
   let sent = false;
@@ -255,11 +362,23 @@ await withTempDir(async (dir) => {
     if (sent) break;
     await new Promise((r) => setTimeout(r, 500));
   }
-  if (!sent) fail("Stop's detached send did not put the owner's prompt in the database within 30 seconds");
+  if (!sent)
+    fail({
+      where: "hooks:live Stop",
+      what: "Stop's detached send did not put the owner's prompt in the database within 30 seconds",
+      why: "the send runs detached so the turn ends at once, and it must still land",
+      fix: `check that Stop in ${CAPTURE} starts the detached send with the environment it needs`,
+    });
   // Windows cannot delete the temp directory while the detached sender still holds files in it: wait for it to empty the queue
   for (let i = 0; i < 20 && fs.readdirSync(spool).some((f) => f.endsWith(".json")); i++)
     await new Promise((r) => setTimeout(r, 250));
-  if (reads !== 1) fail(`expected one emitted pre_read delivery for the smoke session, found ${reads}`);
+  if (reads !== 1)
+    fail({
+      where: "hooks:live PreToolUse PowerShell",
+      what: `the smoke session logged ${reads} emitted pre_read deliveries, not 1`,
+      why: "each delivery is logged once, and the log is how delivery is measured",
+      fix: `check how ${DELIVER} logs a delivery`,
+    });
 
   // ---- A record tool hook that cannot write, within its own timeout, leaves its observation for the next send ----
   {
@@ -268,7 +387,13 @@ await withTempDir(async (dir) => {
       (g) => g.matcher && new RegExp(`^(?:${g.matcher})$`).test(tool),
     );
     const limitMs = (entry?.hooks?.[0]?.timeout ?? 0) * 1000;
-    if (!limitMs) fail("hooks.json gives the record tool hook no timeout");
+    if (!limitMs)
+      fail({
+        where: HOOKS,
+        what: "the record tool hook has no timeout",
+        why: "the hook runs before a record tool call, so without a timeout a held write lock would hold up the call",
+        fix: "give the mcp__plugin_sphica_record__.* PreToolUse hook a timeout",
+      });
     const calls = path.join(spool, "calls");
     const holder = new DatabaseSync(dbFile, { timeout: 5_000 });
     holder.exec("begin immediate");
@@ -281,31 +406,62 @@ await withTempDir(async (dir) => {
     }
     const took = Date.now() - started;
     if (limitMs && took >= limitMs)
-      fail(`the record tool hook took ${took} ms, past its ${limitMs} ms timeout`);
+      fail({
+        where: "hooks:live PreToolUse record tool under a write lock",
+        what: `the record tool hook took ${took} ms, past its ${limitMs} ms timeout`,
+        why: "the host kills a hook at its timeout, and the observation it held is lost",
+        fix: `make ${CAPTURE} give up on the lock before the timeout and keep the observation in spool/calls`,
+      });
     const kept = () =>
       fs.existsSync(calls)
         ? fs.readdirSync(calls).filter((f) => f.endsWith(".json") && !f.startsWith("."))
         : [];
     if (kept().length !== 1)
-      fail(`a record tool hook that could not write left ${kept().length} observations in ${calls}`);
+      fail({
+        where: "hooks:live PreToolUse record tool under a write lock",
+        what: `a record tool hook that could not write left ${kept().length} observations in spool/calls, not 1`,
+        why: "an observation the hook cannot write is kept for the next send, or the record server loses the call",
+        fix: `make ${CAPTURE} keep exactly the one observation it could not write`,
+      });
     const flushed = node([path.join(pkg, "dist", "capture.js"), "--flush"]);
-    if (flushed.status !== 0) fail("capture.js --flush failed", `${flushed.stdout}${flushed.stderr}`);
+    if (flushed.status !== 0)
+      fail({
+        where: "hooks:live capture.js --flush",
+        what: `the flush exited ${flushed.status}`,
+        why: LAUNCHED,
+        fix: `fix the flush in ${CAPTURE} by the output below`,
+        detail: `${flushed.stdout}${flushed.stderr}`,
+      });
     const seen = query((db) =>
       db.prepare("select turn_id from tool_call_observation where tool_use_id = 'toolu_locked'").get(),
     );
     if (seen?.turn_id !== "t2" || kept().length)
-      fail(
-        `the next send did not write the kept observation (got ${JSON.stringify(seen)}, left ${kept().length})`,
-      );
+      fail({
+        where: "hooks:live capture.js --flush",
+        what: `the next send did not write the kept observation (got ${JSON.stringify(seen)}, left ${kept().length})`,
+        why: "an observation kept in spool/calls must reach the database on the next send",
+        fix: `check that the flush in ${CAPTURE} sends spool/calls and removes each file it wrote`,
+      });
   }
 
   // ---- A new interactive session is asked once to trace the smoke session, which now waits ----
   const interactive = { CLAUDE_CODE_ENTRYPOINT: "cli" };
   const asked = fire("SessionStart", { source: "startup" }, "smoke-2", interactive);
   if (!/1 earlier session of this project waits to be traced/.test(asked))
-    fail("a new interactive session was not asked to trace the waiting session", asked);
+    fail({
+      where: "hooks:live SessionStart (interactive)",
+      what: "a new interactive session was not asked to trace the session that waits",
+      why: "sessions are traced only when one is asked to, so a waiting session would stay untraced",
+      fix: `check how ${DELIVER} counts sessions waiting to be traced at session start`,
+      detail: asked,
+    });
   if (/wait(s)? to be traced/.test(fire("SessionStart", { source: "compact" }, "smoke-2", interactive)))
-    fail("the automatic trace notice came twice in one session");
+    fail({
+      where: "hooks:live SessionStart (compact)",
+      what: "the automatic trace notice came twice in one session",
+      why: "the notice asks once per session; again after a compact it repeats work already asked for",
+      fix: `make ${DELIVER} give the notice once per session`,
+    });
 
   // ---- Nothing runs after a shell call in either host ----
   {
@@ -313,10 +469,23 @@ await withTempDir(async (dir) => {
       events.some((event) =>
         (hooks[event] ?? []).some((g) => tools.some((t) => !g.matcher || new RegExp(g.matcher).test(t))),
       );
+    const AFTER_SHELL =
+      "delivering after a shell call was tried and removed: most of what it delivered was noise";
     if (shellPost(manifest, ["PostToolUse", "PostToolUseFailure"], ["Bash", "PowerShell"]))
-      fail("hooks.json runs a hook after a shell call");
+      fail({
+        where: HOOKS,
+        what: "a hook runs after a shell call",
+        why: AFTER_SHELL,
+        fix: "keep Bash and PowerShell out of the PostToolUse and PostToolUseFailure matchers",
+      });
     const codex = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "codex.json"), "utf8")).hooks;
-    if (shellPost(codex, ["PostToolUse"], ["Bash"])) fail("codex.json runs a hook after a shell call");
+    if (shellPost(codex, ["PostToolUse"], ["Bash"]))
+      fail({
+        where: CODEX_HOOKS,
+        what: "a hook runs after a shell call",
+        why: AFTER_SHELL,
+        fix: "keep Bash out of the PostToolUse matchers",
+      });
     // A host still holding an older hooks.json may call the new bundle after a shell call: with the old trial option on, it answers
     // nothing and keeps nothing
     const old = {
@@ -342,10 +511,23 @@ await withTempDir(async (dir) => {
       fs.writeFileSync(path.join(repo, "src", "a.ts"), `export const store = new Map(); // ${n}\n`);
       const r = run(post);
       if (r.error || r.status !== 0 || r.stdout.trim())
-        fail(`${post} after a shell call answered`, r.error?.message ?? `${r.stdout}${r.stderr}`);
+        fail({
+          where: `hooks:live ${post} after a shell call (old hooks.json)`,
+          what: r.error
+            ? `the hook could not run: ${r.error.message}`
+            : `the hook answered or exited ${r.status}`,
+          why: "a host still holding an older hooks.json may call the new bundle there, and the removed trial must stay silent",
+          fix: `make ${DELIVER} answer nothing after a shell call, whatever the old option says`,
+          detail: r.error?.message ?? `${r.stdout}${r.stderr}`,
+        });
     }
     if (fs.existsSync(path.join(home, ".sphica", "shell-state")))
-      fail("a shell call left shell-state in the Sphica home");
+      fail({
+        where: "hooks:live after a shell call (old hooks.json)",
+        what: "a shell call left shell-state in the Sphica home",
+        why: "the removed trial kept file hashes there, and nothing reads them now",
+        fix: `remove what still writes shell-state from ${DELIVER}`,
+      });
   }
 
   // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
@@ -378,7 +560,13 @@ await withTempDir(async (dir) => {
       ]
     : [{ name: "sh", file: "/bin/sh", args: (l) => ["-c", l] }];
   for (const s of shells)
-    if (!s.file || !fs.existsSync(s.file)) throw new Error(`${s.name} is not installed here`);
+    if (!s.file || !fs.existsSync(s.file))
+      stop({
+        where: "hooks:live (Codex shells)",
+        what: `${s.name} is not installed here`,
+        why: NEEDED,
+        fix: `install ${s.name}, or run this lane where Codex's shells are all installed (the CI runners have them)`,
+      });
   // A sh expands $ and backquotes inside the double quotes command puts the path in, so that root runs only where commandWindows is used
   const roots = [
     { name: "control", dir: "plugin-control" },
@@ -458,10 +646,15 @@ await withTempDir(async (dir) => {
       };
       const check = (event, i, result) => {
         if (result.error || result.status !== 0)
-          fail(
-            `Codex ${event} hook ${i} through ${tag} failed (exit ${result.status})`,
-            result.error?.message ?? `${result.stdout}${result.stderr}`,
-          );
+          fail({
+            where: `hooks:live Codex ${event} hook ${i} through ${tag}`,
+            what: result.error
+              ? `the hook could not run: ${result.error.message}`
+              : `the hook exited ${result.status}`,
+            why: `${LAUNCHED}; Codex runs the line through the session's shell, from a plugin root that may hold spaces, quotes, and $`,
+            fix: `check how ${CODEX_HOOKS} quotes the plugin root for ${s.name}, then the bundle by the output below`,
+            detail: result.error?.message ?? `${result.stdout}${result.stderr}`,
+          });
       };
       // UserPromptSubmit first: its capture reads this case's own marker from stdin, so a queued marker proves stdin reached node
       // english-exempt: non-ASCII on purpose, so a shell that re-encodes stdin loses the marker
@@ -470,7 +663,12 @@ await withTempDir(async (dir) => {
         check("UserPromptSubmit", i, run("UserPromptSubmit", h, { prompt: marker }));
       });
       if (!queuedOrSent(marker))
-        fail(`Codex UserPromptSubmit through ${tag} queued nothing with this case's prompt`);
+        fail({
+          where: `hooks:live Codex UserPromptSubmit through ${tag}`,
+          what: "nothing with this case's prompt was queued or sent",
+          why: "the prompt reaches capture only through the shell's stdin, so a shell that re-encodes or drops it loses the owner's words",
+          fix: `check that the line in ${CODEX_HOOKS} hands stdin to node unchanged under ${s.name}`,
+        });
       let asked = "";
       for (const [event, input] of Object.entries(inputs))
         (codexHooks[event] ?? [])
@@ -484,10 +682,15 @@ await withTempDir(async (dir) => {
       // JSON in the hook's output escapes the path, so it is looked for as JSON writes it; a root with a backtick cannot be named
       const named = asked.includes(JSON.stringify(`read \`${skill}\` and run it`).slice(1, -1));
       if (named === at.includes("`"))
-        fail(
-          `Codex SessionStart through ${tag} ${named ? "named a Skill path holding a backtick" : "did not name the packed trace Skill"}`,
-          asked,
-        );
+        fail({
+          where: `hooks:live Codex SessionStart through ${tag}`,
+          what: named
+            ? "the notice named a Skill path holding a backtick"
+            : "the notice did not name the packed trace Skill",
+          why: "Codex finds the trace Skill only by the path the notice names, and a backtick in it would break the code span",
+          fix: `check how ${DELIVER} names the packed Skill path for Codex`,
+          detail: asked,
+        });
     }
   }
   const expected =
@@ -496,7 +699,13 @@ await withTempDir(async (dir) => {
     Object.values(codexHooks)
       .flat()
       .flatMap((g) => g.hooks).length;
-  if (launched !== expected) fail(`launched ${launched} Codex hooks, expected ${expected}`);
+  if (launched !== expected)
+    fail({
+      where: "hooks:live Codex",
+      what: `launched ${launched} Codex hooks, expected ${expected}`,
+      why: "every entry of codex.json must run through every shell and root, or some are not checked",
+      fix: `make the inputs in scripts/check-hooks-live.mjs cover every event ${CODEX_HOOKS} has`,
+    });
 
   // ---- The launch line itself, on a stub whose capture.js exits with a given code: what each shell makes of node's exit ----
   const stub = path.join(dir, "stub root");
@@ -511,13 +720,23 @@ await withTempDir(async (dir) => {
   // on Windows the inner PowerShell takes 24 to 50 seconds to report it
   const missingNodeShell = windows ? "cmd.exe" : "sh";
   if (!shells.some((s) => s.name === missingNodeShell))
-    throw new Error(`${missingNodeShell} is not among the shells`);
+    stop({
+      where: "scripts/check-hooks-live.mjs",
+      what: `${missingNodeShell} is not among the shells`,
+      why: "the missing-node case runs through that shell alone, so it would not run at all",
+      fix: `keep ${missingNodeShell} in the shells list, or change missingNodeShell`,
+    });
   for (const s of shells) {
     // PowerShell turns any failing native command into 1; the others pass node's code through
     const powershell = /powershell|pwsh/.test(s.name);
     const shellDirs = [...(windows ? [powershellDir] : []), path.dirname(s.file)];
     if ([...withoutNode, ...shellDirs].some((d) => fs.existsSync(path.join(d, nodeExe))))
-      throw new Error(`node is not the only one on PATH for ${s.name}, so a missing node cannot be shown`);
+      stop({
+        where: `hooks:live (PATH for ${s.name})`,
+        what: "another node is on the PATH this case removes node from",
+        why: "the case shows what the launch line does without node, which it cannot with another node found",
+        fix: "run the lane where node lives in its own directory on PATH",
+      });
     const took = [];
     for (const { what, code, expect, pathDirs } of [
       { what: "node exiting 0", code: "0", expect: (st) => st === 0, pathDirs: [...dirs, ...shellDirs] },
@@ -554,20 +773,20 @@ await withTempDir(async (dir) => {
       });
       took.push(`${what} → ${r.status} in ${Date.now() - started} ms`);
       if (r.error || !expect(r.status))
-        fail(
-          `the Codex launch line through ${s.name}, ${what}, exited ${r.status}`,
-          r.error?.message ?? r.stderr,
-        );
+        fail({
+          where: `hooks:live Codex launch line through ${s.name}, ${what}`,
+          what: r.error ? `the line could not run: ${r.error.message}` : `the line exited ${r.status}`,
+          why: "Codex learns a hook failed only from the exit code the shell passes on, and a missing node must not look like success",
+          fix: `check the launch line of ${CODEX_HOOKS} under ${s.name}: it must pass node's failure on`,
+          detail: r.error?.message ?? r.stderr,
+        });
     }
     console.log(`codex launch line through ${s.name}: ${took.join(", ")}`);
   }
 });
 
-if (failures.length) {
-  console.error(`hooks: ${failures.length} failure(s)\n${failures.map((f) => `- ${f}`).join("\n")}`);
-  // Exiting at once would drop output still in the pipe
-  process.exitCode = 1;
-} else
+// The process is left to end on its own: exiting at once would drop output still in the pipe
+if (!report("hooks", failures) && !process.exitCode)
   console.log(
     `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
   );

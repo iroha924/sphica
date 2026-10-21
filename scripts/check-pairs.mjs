@@ -11,25 +11,38 @@
 // (the same check at each stage of a path, the same data built in different shapes by two interfaces) are not caught here. A section in AGENTS.md covers them.
 
 import fs from "node:fs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { verifyProblems } from "./lib/verify-pairs.mjs";
 
+guard("pairs", () => fail);
+
+const SELF = "scripts/check-pairs.mjs";
 const read = (f) => fs.readFileSync(f, "utf8");
 const fail = [];
+const problem = (parts) => fail.push(finding(parts));
 
 // **Never pass silently when extraction fails.** If a regex drifts from the real file, extraction finds nothing
 // and reads as no difference. Report a broken check as loudly as a difference.
+const DRIFT = "if a pattern drifts from the file, the comparison finds nothing and reads as no difference";
+const drifted = (file, what) =>
+  problem({
+    where: file,
+    what: `${what} cannot be read`,
+    why: DRIFT,
+    fix: `fix the pattern for ${what} in ${SELF} to match the file`,
+  });
 const grab = (file, re, what) => {
   const m = read(file).match(re);
   if (!m?.[1]) {
-    fail.push(`cannot extract ${what} from ${file}. The regex in check-pairs.mjs has drifted from the file`);
+    drifted(file, what);
     return null;
   }
   return m[1];
 };
 /** Lists the quoted words. Finding none is reported as an extraction failure. */
-const words = (text, quote, what) => {
+const words = (text, quote, what, file) => {
   const got = [...(text ?? "").matchAll(new RegExp(`${quote}([a-z_-]+)${quote}`, "g"))].map((m) => m[1]);
-  if (text !== null && got.length === 0) fail.push(`cannot extract any values from ${what}`);
+  if (text !== null && got.length === 0) drifted(file, `the values of ${what}`);
   return got;
 };
 const same = (a, b) => [...a].sort().join() === [...b].sort().join();
@@ -62,20 +75,25 @@ const PAIRS = [
   ["field_def.kinds", /or value not in \(('decision'[^)]*)\)\)/, "UNIT_KINDS"],
 ];
 for (const [column, re, constant] of PAIRS) {
-  const db = words(grab("db/schema.sql", re, `the ${column} CHECK`), "'", `the ${column} CHECK`);
+  const db = words(
+    grab("db/schema.sql", re, `the ${column} CHECK`),
+    "'",
+    `the ${column} CHECK`,
+    "db/schema.sql",
+  );
   const code = words(
-    grab(
-      "server/src/knowledge.ts",
-      new RegExp(`export const ${constant} = \\[([^\\]]*)\\]`),
-      `${constant} in knowledge.ts`,
-    ),
+    grab("server/src/knowledge.ts", new RegExp(`export const ${constant} = \\[([^\\]]*)\\]`), constant),
     '"',
-    `${constant} in knowledge.ts`,
+    constant,
+    "server/src/knowledge.ts",
   );
   if (db.length && code.length && !same(db, code))
-    fail.push(
-      `${column} does not match: the database has ${db.join(" / ")}, and ${constant} in knowledge.ts has ${code.join(" / ")}`,
-    );
+    problem({
+      where: "server/src/knowledge.ts",
+      what: `${constant} has ${code.join(" / ")}, but the ${column} CHECK in db/schema.sql has ${db.join(" / ")}`,
+      why: "a value only in the code fails the CHECK on save, and one only in the database is never written or filtered on (invariant rg-pairs)",
+      fix: `make ${constant} and the CHECK list the same values; db/schema.sql is the source of truth`,
+    });
 }
 
 // ---- One path rule for sources, edit observations, and anchors ----
@@ -92,12 +110,16 @@ for (const [column, re, constant] of PAIRS) {
     ],
     ["unit_anchor", /create table unit_anchor[\s\S]*?path text not null check \(([\s\S]*?)\),\n {2}symbol/],
   ].map(([table, re]) => [table, schema.match(re)?.[1]?.replace(/\s+/g, " ").trim()]);
-  for (const [table, rule] of rules)
-    if (!rule) fail.push(`cannot find the path CHECK of ${table} in db/schema.sql`);
+  for (const [table, rule] of rules) if (!rule) drifted("db/schema.sql", `the path CHECK of ${table}`);
   const [, first] = rules[0];
   for (const [table, rule] of rules.slice(1))
     if (first && rule && rule !== first)
-      fail.push(`the path CHECK of ${table} differs from source's; keep the three the same expression`);
+      problem({
+        where: "db/schema.sql",
+        what: `the path CHECK of ${table} differs from the one of source`,
+        why: "anchors meet edit observations by exact path, so a path one table accepts must be accepted by all three",
+        fix: `copy the path CHECK of source into ${table} word for word`,
+      });
 }
 
 // ---- Status glyphs match between the CLI and the review ledger ----
@@ -124,19 +146,34 @@ if (Object.keys(LEDGER).every((k) => marks[k])) {
   const pairs = [];
   const legendAt = lines.findIndex((l) => l.includes("states use marks ("));
   const legend = lines[legendAt]?.match(/states use marks \((.*?)\)/)?.[1];
-  if (legend === undefined) fail.push("cannot extract the ledger legend line from the review Skill");
+  if (legend === undefined) drifted(skill, "the ledger legend line (states use marks (...))");
+  const GLYPHS = {
+    why: "the CLI and the review Skill must show one state with one glyph",
+    fix: "write the glyphs from MARKS in server/src/panel.ts",
+  };
   for (const part of legend?.split(" / ") ?? []) {
     const m = part.match(new RegExp(`^\`([^\`]+)\` (${states})$`));
-    if (m) pairs.push([m[1], m[2], "legend"]);
-    else fail.push(`write the review Skill ledger legend entry "${part}" as "\`glyph\` state"`);
+    if (m) pairs.push([m[1], m[2], "legend", legendAt + 1]);
+    else
+      problem({
+        where: `${skill}:${legendAt + 1}`,
+        what: `the ledger legend entry "${part}" is not in the form \`glyph\` state`,
+        why: DRIFT,
+        fix: `write it as \`glyph\` state, with a state from ${Object.values(LEDGER).join(" / ")}`,
+      });
   }
   const missing = Object.values(LEDGER).filter((state) => !pairs.some(([, s]) => s === state));
   if (legend !== undefined && missing.length)
-    fail.push(`the review Skill ledger legend is missing ${missing.join(" / ")}`);
+    problem({
+      where: `${skill}:${legendAt + 1}`,
+      what: `the ledger legend lacks ${missing.join(" / ")}`,
+      ...GLYPHS,
+      fix: `add ${missing.join(" / ")} with its glyph from MARKS in server/src/panel.ts`,
+    });
   const at = lines.indexOf("### Format");
   const open = at < 0 ? -1 : lines.indexOf("```", at);
   const close = open < 0 ? -1 : lines.indexOf("```", open + 1);
-  if (close < 0) fail.push("cannot extract the format example (the ``` block) from the review Skill");
+  if (close < 0) drifted(skill, "the format example (the ``` block under ### Format)");
   // A GFM table may omit the outer |, and \| is a | inside a cell. The table runs until a blank line.
   const cells = (line) =>
     line
@@ -156,9 +193,12 @@ if (Object.keys(LEDGER).every((k) => marks[k])) {
     const sep = cells(lines[i + 1] ?? "");
     if (!sep.every((c) => /^:?-+:?$/.test(c))) continue;
     if (sep.length !== head.length) {
-      fail.push(
-        `give the separator row on line ${i + 2} of the review Skill the same ${head.length} columns as the ledger table header`,
-      );
+      problem({
+        where: `${skill}:${i + 2}`,
+        what: `the separator row has ${sep.length} columns, but the ledger table header has ${head.length}`,
+        why: "GFM reads a header as a table only when a separator row with the same column count follows it",
+        fix: `give the separator row ${head.length} columns`,
+      });
       continue;
     }
     tables++;
@@ -170,37 +210,45 @@ if (Object.keys(LEDGER).every((k) => marks[k])) {
       for (const cell of row) {
         const m = cell.match(new RegExp(`^(\\S+) (${states})(?: \\(([^)]*)\\))?$`, "u"));
         if (!m) {
-          fail.push(
-            `write the ledger cell "${cell}" in the review Skill format example as "glyph state (note)"`,
-          );
+          problem({
+            where: `${skill}:${i + 1}`,
+            what: `the ledger cell "${cell}" is not in the form glyph state (note)`,
+            why: DRIFT,
+            fix: `write it as glyph state, or glyph state (note), with a state from ${Object.values(LEDGER).join(" / ")}`,
+          });
           continue;
         }
-        pairs.push([m[1], m[2], "example ledger"]);
+        pairs.push([m[1], m[2], "example ledger", i + 1]);
         outside[i] += ` ${m[3] ?? ""}`;
       }
     }
   }
   if (close >= 0 && tables === 0)
-    fail.push(
-      "the review Skill format example has no ledger table with Claude and Codex columns (a header followed by a separator row with the same column count)",
+    drifted(
+      skill,
+      "the ledger table of the format example (a header with Claude and Codex columns and a separator row)",
     );
   outside.forEach((text, i) => {
     for (const glyph of Object.values(marks).filter((g) => text.includes(g)))
-      fail.push(
-        `line ${i + 1} of the review Skill contains the glyph ${glyph}. Glyphs belong only in the legend and the state cells of the format example ledger (outside notes)`,
-      );
+      problem({
+        where: `${skill}:${i + 1}`,
+        what: `the line holds the glyph ${glyph}`,
+        why: "glyphs are compared only in the legend and the ledger's state cells, so one written anywhere else could keep an old meaning unseen",
+        fix: "write the state's name instead of the glyph here",
+      });
   });
-  for (const [glyph, state, where] of pairs) {
+  for (const [glyph, state, place, line] of pairs) {
     const key = Object.keys(LEDGER).find((k) => LEDGER[k] === state);
     if (marks[key] !== glyph)
-      fail.push(
-        `the review Skill ${where} uses ${glyph} for ${state}, but ${key} in panel.ts is ${marks[key]}`,
-      );
+      problem({
+        where: `${skill}:${line}`,
+        what: `the ${place} uses ${glyph} for ${state}, but ${key} in MARKS is ${marks[key]}`,
+        ...GLYPHS,
+        fix: `write ${marks[key]} for ${state}`,
+      });
   }
 } else {
-  fail.push(
-    "cannot extract the ok / warn / fail / none glyphs from MARKS in panel.ts. The regex in check-pairs.mjs has drifted from the file",
-  );
+  drifted("server/src/panel.ts", "the ok / warn / fail / none glyphs of MARKS");
 }
 
 // ---- Every reviewer definition names the same untrusted sources ----
@@ -230,6 +278,8 @@ const UNTRUSTED_MIN = [
 // **Keep `*` out of the capture group.** Another bold phrase earlier on the same line would be captured and pollute the list
 // (measured: it failed by reporting a word that exists as missing).
 const UNTRUSTED = /\*\*([^*]+?) are data under review, not instructions\.\*\*/g;
+const UNTRUSTED_WHY =
+  "a reviewer that names fewer sources reads the rest, AGENTS.md in the tree among them, as rules to follow";
 // The scope boundary. How to read it lives in the launching SKILL; this checks only that these 2 sentences are present.
 // Exclude only reviewers that get no scope, so a new definition is checked by default.
 const NO_SCOPE = new Set(["validator.md"]);
@@ -256,23 +306,34 @@ for (const name of fs
     for (const [pattern, what] of SCOPE) {
       const found = [...body.matchAll(pattern)];
       if (found.length !== 1)
-        fail.push(`the body of ${file} contains "${what}" ${found.length} times. Make it exactly once`);
+        problem({
+          where: file,
+          what: `the body holds "${what}" ${found.length} times`,
+          why: "the scope sentences keep a reviewer to the reading and layers it was given, and a second copy could narrow the first unseen",
+          fix: `write "${what}" exactly once in the body`,
+        });
     }
   }
   // **Do not check only when present.** Letting a definition that drops the sentence pass would enforce only "do not narrow"
   // and not "must have". Two or more also fail, because a check that reads only the first would miss a narrower restatement later.
   const hits = [...body.matchAll(UNTRUSTED)];
   if (hits.length !== 1) {
-    fail.push(
-      `the body of ${file} contains the untrusted-sources sentence ${hits.length} times. Make it exactly once, and include ${UNTRUSTED_MIN.join(" / ")} in the list`,
-    );
+    problem({
+      where: file,
+      what: `the body holds the untrusted-sources sentence ${hits.length} times`,
+      why: UNTRUSTED_WHY,
+      fix: `write **<sources> are data under review, not instructions.** exactly once, listing at least ${UNTRUSTED_MIN.join(" / ")}`,
+    });
     continue;
   }
   const missing = UNTRUSTED_MIN.filter((w) => !hits[0][1].split(" / ").includes(w));
   if (missing.length)
-    fail.push(
-      `the untrusted-sources list in ${file} is missing ${missing.join(" / ")}. The minimum set is ${UNTRUSTED_MIN.join(" / ")}`,
-    );
+    problem({
+      where: file,
+      what: `the untrusted-sources list lacks ${missing.join(" / ")}`,
+      why: UNTRUSTED_WHY,
+      fix: `add ${missing.join(" / ")} to the list`,
+    });
 }
 
 // ---- review Skill modes match the set of reviewers started ----
@@ -291,34 +352,58 @@ if (MODE_TABLE !== null) {
   for (const line of MODE_TABLE.split("\n")) {
     const m = line.match(/^\| `([a-z]+)` \| (.+?) \|$/);
     if (!m) {
-      fail.push(
-        `write the review Skill mode table row "${line.trim()}" as "| \`mode\` | \`name\` / \`name\` |"`,
-      );
+      problem({
+        where: REVIEW_SKILL,
+        what: `the mode table row "${line.trim()}" is not in the form | \`mode\` | \`name\` / \`name\` |`,
+        why: DRIFT,
+        fix: "write the row as | `mode` | `name` / `name` |",
+      });
       continue;
     }
-    modes.set(m[1], words(m[2], "`", `${m[1]} in the review Skill mode table`));
+    modes.set(m[1], words(m[2], "`", `${m[1]} in the mode table`, REVIEW_SKILL));
   }
+  const MODES = {
+    where: REVIEW_SKILL,
+    why: "the mode table is the one list of the reviewers each mode starts, so the launch steps follow it",
+  };
   for (const name of ["standard", "full"]) {
-    if (!modes.has(name)) fail.push(`the review Skill mode table has no ${name}`);
+    if (!modes.has(name))
+      problem({ ...MODES, what: `the mode table has no ${name}`, fix: `add a ${name} row` });
   }
   const standard = modes.get("standard") ?? [];
   const full = modes.get("full") ?? [];
   // **standard must be a subset of full.** Listed separately, an aspect added only to full drops out of standard.
   const outside = standard.filter((n) => !full.includes(n));
   if (outside.length)
-    fail.push(`review Skill mode table: ${outside.join(" / ")} in standard is missing from full`);
+    problem({
+      ...MODES,
+      what: `${outside.join(" / ")} in standard is not in full`,
+      why: "full starts every aspect, so an aspect only in standard would drop out of a full review",
+      fix: `add ${outside.join(" / ")} to full`,
+    });
   // The validator is not an aspect. It starts only when a candidate needs it; mixing it into a mode's plan would start it every time.
   for (const [mode, names] of modes) {
-    if (names.includes("validator")) fail.push(`review Skill mode table: do not put validator in ${mode}`);
+    if (names.includes("validator"))
+      problem({
+        ...MODES,
+        what: `${mode} lists validator`,
+        why: "the validator starts only when a candidate needs it, and in a mode it would start every time",
+        fix: `remove validator from ${mode}`,
+      });
     for (const name of names) {
       if (!fs.existsSync(`${AGENT_DIR}/${name}.md`)) {
-        fail.push(`review Skill mode table: ${AGENT_DIR}/${name}.md for ${name} does not exist`);
+        problem({
+          ...MODES,
+          what: `${mode} lists ${name}, but ${AGENT_DIR}/${name}.md does not exist`,
+          fix: `add ${AGENT_DIR}/${name}.md, or remove ${name} from the table`,
+        });
       }
     }
     if (new Set(names).size !== names.length)
-      fail.push(`review Skill mode table: ${mode} lists the same aspect twice`);
+      problem({ ...MODES, what: `${mode} lists an aspect twice`, fix: "list each aspect once" });
   }
-  if (standard.length === 0) fail.push("review Skill mode table: standard has no aspects");
+  if (standard.length === 0)
+    problem({ ...MODES, what: "standard has no aspects", fix: "list the aspects a standard review starts" });
   // **full starts every shipped finder.** Which ones go in standard is a judgment and is not checked, but
   // listing names here would **let a new finder pass while missing from the mode table** (the same shape as k:871).
   const finders = fs
@@ -327,7 +412,13 @@ if (MODE_TABLE !== null) {
     .map((f) => f.slice(0, -3))
     .filter((n) => n !== "validator");
   const missing = finders.filter((n) => !full.includes(n));
-  if (missing.length) fail.push(`review Skill mode table: full is missing ${missing.join(" / ")}`);
+  if (missing.length)
+    problem({
+      ...MODES,
+      what: `full lacks ${missing.join(" / ")}`,
+      why: `full starts every shipped finder, and a new one in ${AGENT_DIR} missing from it never runs`,
+      fix: `add ${missing.join(" / ")} to full`,
+    });
 }
 
 // ---- The overall state and continuation words match between the source tables and the format example ----
@@ -341,11 +432,17 @@ const vocab = (re, what) => {
   if (table === null) return null;
   const got = [...table.matchAll(/^\| `([A-Z_]+)` \|/gm)].map((m) => m[1]);
   if (got.length === 0) {
-    fail.push(`cannot extract any words from ${what}`);
+    drifted(REVIEW_SKILL, `the words of ${what}`);
     return null;
   }
   const dup = got.filter((v, i) => got.indexOf(v) !== i);
-  if (dup.length) fail.push(`${what} lists ${dup.join(" / ")} twice`);
+  if (dup.length)
+    problem({
+      where: REVIEW_SKILL,
+      what: `${what} lists ${dup.join(" / ")} twice`,
+      why: "each word is defined once, so two rows would give it two meanings",
+      fix: "keep one row for each word",
+    });
   return new Set(got);
 };
 const OVERALL = vocab(
@@ -363,12 +460,15 @@ for (const [label, allowed] of [
 ]) {
   if (allowed === null) continue;
   const used = [...REVIEW_SRC.matchAll(new RegExp(`^${label}: ([A-Z_]+)`, "gm"))].map((m) => m[1]);
-  if (used.length === 0) fail.push(`the review Skill format example has no "${label}: …" line`);
+  if (used.length === 0) drifted(REVIEW_SKILL, `the "${label}: …" line of the format example`);
   for (const v of used) {
     if (!allowed.has(v))
-      fail.push(
-        `"${label}: ${v}" in the review Skill example is not in the table. The table has ${[...allowed].join(" / ")}`,
-      );
+      problem({
+        where: REVIEW_SKILL,
+        what: `the format example says "${label}: ${v}", which the table does not define`,
+        why: "the example gets copied, so a word the table renamed lives on in every copy",
+        fix: `use one of ${[...allowed].join(" / ")}`,
+      });
   }
 }
 // Lane coverage. Only ran and cut short get coverage; not run and unable do not (do not mix "could not observe" with "not planned").
@@ -383,13 +483,32 @@ for (const line of (coverageTable ?? "").split("\n")) {
   if (!m) continue;
   const [, state, cov] = m;
   const got = [...cov.matchAll(/`([A-Z]+)`/g)].map((x) => x[1]);
+  const COVER = {
+    where: REVIEW_SKILL,
+    why: "coverage tells what a lane that ran saw, and a lane that did not run saw nothing",
+  };
   if (["not run", "unable"].includes(state)) {
-    if (got.length) fail.push(`review Skill: ${state} must not have coverage (${got.join(" / ")})`);
+    if (got.length)
+      problem({
+        ...COVER,
+        what: `${state} has coverage ${got.join(" / ")}`,
+        fix: `leave the coverage of ${state} empty`,
+      });
     continue;
   }
-  if (got.length === 0) fail.push(`review Skill: ${state} has no coverage`);
+  if (got.length === 0)
+    problem({
+      ...COVER,
+      what: `${state} has no coverage`,
+      fix: `give ${state} coverage from ${[...COVERAGE].join(" / ")}`,
+    });
   const unknown = got.filter((g) => !COVERAGE.has(g));
-  if (unknown.length) fail.push(`review Skill: ${unknown.join(" / ")} is not a valid coverage for ${state}`);
+  if (unknown.length)
+    problem({
+      ...COVER,
+      what: `${state} has coverage ${unknown.join(" / ")}`,
+      fix: `use only ${[...COVERAGE].join(" / ")}`,
+    });
 }
 
 // Whether each status word in the body appears in some table. **Renaming a word only in a table leaves the old word in the body**
@@ -401,9 +520,12 @@ if (OVERALL && CONTINUE && VERDICTS) {
     (w) => !known.has(w),
   );
   if (orphan.length) {
-    fail.push(
-      `${orphan.join(" / ")} in the review Skill body is in none of the overall, continuation, coverage, or verdict tables`,
-    );
+    problem({
+      where: REVIEW_SKILL,
+      what: `${orphan.join(" / ")} in the body is in none of the overall, continuation, coverage, or verdict tables`,
+      why: "a word renamed only in a table leaves the old word in the body",
+      fix: "use the word the table defines, or define it in its table",
+    });
   }
 }
 
@@ -414,21 +536,38 @@ if (OVERALL && CONTINUE && VERDICTS) {
 // never widens permissions directly; this is not a one-sided "if not in SKILL.md, it is in the reference" check.
 const PEER = "plugin/skills/review/references/peer-model.md";
 const links = [...REVIEW_SRC.matchAll(/\(references\/peer-model\.md\)/g)].length;
+const WIDENS = "dropping a flag from the peer model's launch lets the reviewer keep a session or write files";
 if (links !== 1)
-  fail.push(`the review Skill links to references/peer-model.md ${links} times (make it once)`);
+  problem({
+    where: REVIEW_SKILL,
+    what: `the Skill links to references/peer-model.md ${links} times`,
+    why: "the launch steps are read through that one link",
+    fix: "link to (references/peer-model.md) exactly once",
+  });
 if (!fs.existsSync(PEER)) {
-  fail.push(`${PEER} does not exist`);
+  problem({
+    where: PEER,
+    what: "the file does not exist",
+    why: "the review Skill sends the other model's launch steps there",
+    fix: "restore it, or move the launch steps and the link together",
+  });
 } else {
   const peer = read(PEER);
   // Flags whose removal widens permissions. Both the SKILL.md safety conditions and the reference's commands need them.
   for (const flag of ["--no-session-persistence", "--ephemeral", "-s read-only"]) {
-    if (!REVIEW_SRC.includes(flag)) fail.push(`the review Skill safety conditions are missing ${flag}`);
+    if (!REVIEW_SRC.includes(flag))
+      problem({
+        where: REVIEW_SKILL,
+        what: `the safety conditions lack ${flag}`,
+        why: `${WIDENS}, and SKILL.md holds them too so a reference left unread cannot drop one`,
+        fix: `name ${flag} in the safety conditions`,
+      });
   }
   // **Check the command text itself.** Searching the whole file passes as soon as prose mentions the same word
   // (measured: dropping a flag from the table went undetected because a paragraph below still spelled it).
   const command = (needle, what) => {
     const found = [...peer.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]).filter((c) => c.includes(needle));
-    if (found.length === 0) fail.push(`${PEER} has no ${what} launch command`);
+    if (found.length === 0) drifted(PEER, `the ${what} launch command (a code span holding ${needle})`);
     return found;
   };
   for (const [needle, what, flags] of [
@@ -437,21 +576,43 @@ if (!fs.existsSync(PEER)) {
   ]) {
     for (const flag of flags) {
       if (!command(needle, what).some((c) => c.includes(flag))) {
-        fail.push(`the ${what} launch command in ${PEER} is missing ${flag}`);
+        problem({
+          where: PEER,
+          what: `the ${what} launch command lacks ${flag}`,
+          why: WIDENS,
+          fix: `add ${flag} to the ${what} launch command`,
+        });
       }
     }
   }
   // --resume opens a path where, if --agent is dropped, the reviewer runs with Edit and Write.
-  if (/`[^`]*claude -p[^`]*--resume/.test(peer)) fail.push(`the claude launch in ${PEER} uses --resume`);
+  if (/`[^`]*claude -p[^`]*--resume/.test(peer))
+    problem({
+      where: PEER,
+      what: "the claude launch uses --resume",
+      why: "a resumed session without --agent runs the reviewer with Edit and Write",
+      fix: "start a new session for each review",
+    });
   // **Limit the tools that can write to Bash** (measured: a reviewer with only Read and Bash created a file).
   // Bash goes only to aspects that need to run things, so it is allowed, but no aspect needs Edit or Write.
   for (const tool of ["Edit", "Write", "NotebookEdit"]) {
     if (new RegExp(`"tools"[^\\]]*${tool}`).test(peer)) {
-      fail.push(`"tools" in ${PEER} includes ${tool}. Reviewers do not modify files`);
+      problem({
+        where: PEER,
+        what: `"tools" includes ${tool}`,
+        why: "reviewers do not modify files, and a reviewer with write tools has created files",
+        fix: `remove ${tool} from "tools"`,
+      });
     }
   }
   for (const shell of ["# POSIX", "# PowerShell"]) {
-    if (!peer.includes(shell)) fail.push(`${PEER} has no ${shell} launch example`);
+    if (!peer.includes(shell))
+      problem({
+        where: PEER,
+        what: `no ${shell} launch example`,
+        why: "the review runs on POSIX shells and on Windows PowerShell (invariant windows)",
+        fix: `add the launch under a ${shell} comment`,
+      });
   }
 }
 
@@ -463,14 +624,32 @@ const TRAILER = grab(REVIEW_SKILL, /^completion: (.+)$/m, "the review Skill comp
 if (TRAILER !== null) {
   const keys = [...TRAILER.matchAll(/(\w+)=/g)].map((m) => m[1]);
   for (const key of ["lane", "model", "coverage", "unfinished", "findings"]) {
-    if (!keys.includes(key)) fail.push(`the review Skill completion line is missing ${key}=`);
+    if (!keys.includes(key))
+      problem({
+        where: REVIEW_SKILL,
+        what: `the completion line lacks ${key}=`,
+        why: "the launcher reads each lane's result from these keys",
+        fix: `add ${key}=<value> to the completion line`,
+      });
   }
+  const ONE_SOURCE =
+    "the launcher owns the output contract, and a copy would get keys added on one side only";
   const trailers = [...REVIEW_SRC.matchAll(/^completion: /gm)].length;
   if (trailers !== 1)
-    fail.push(`the review Skill defines the completion line ${trailers} times (make it once)`);
+    problem({
+      where: REVIEW_SKILL,
+      what: `the completion line is defined ${trailers} times`,
+      why: ONE_SOURCE,
+      fix: "define it once",
+    });
   for (const file of fs.readdirSync(AGENT_DIR).map((f) => `${AGENT_DIR}/${f}`)) {
     if (/^completion: /m.test(read(file)))
-      fail.push(`${file}: the completion line belongs only in the launching Skill`);
+      problem({
+        where: file,
+        what: "the reviewer defines a completion line",
+        why: ONE_SOURCE,
+        fix: `remove it; ${REVIEW_SKILL} defines it`,
+      });
   }
 }
 
@@ -484,25 +663,58 @@ if (TRAILER !== null) {
   const bun = tool("bun");
   const actionlint = tool("actionlint");
   if (mise && node && bun && actionlint) {
+    const TOOLS = "local runs and CI must use the same tools, and mise.toml pins the local ones";
     const packageManager = grab("package.json", /"packageManager": "bun@([^"]+)"/, "packageManager");
     if (packageManager !== bun)
-      fail.push(`mise.toml bun ${bun} differs from package.json packageManager bun@${packageManager}`);
+      problem({
+        where: "package.json",
+        what: `packageManager is bun@${packageManager}, but mise.toml pins bun ${bun}`,
+        why: TOOLS,
+        fix: `set the two to the same Bun version`,
+      });
     const engines = grab("server/package.json", /"node": ">=([^"]+)"/, "engines.node");
     if (engines && !node.startsWith(`${engines}.`))
-      fail.push(`mise.toml node ${node} is not on the engines floor ${engines}`);
+      problem({
+        where: "mise.toml",
+        what: `node ${node} is not on the engines floor ${engines} of server/package.json`,
+        why: "local runs must use the oldest Node the package supports, so what passes here passes for users",
+        fix: `pin a ${engines}.x Node in mise.toml, or move the engines floor with it`,
+      });
     // Workflows that install Bun must keep pinning it, so a deleted pin fails too.
     for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
       const pins = [...read(file).matchAll(/bun-version: (\S+)/g)].map((m) => m[1]);
-      if (pins.length === 0) fail.push(`${file}: no bun-version pin`);
+      if (pins.length === 0)
+        problem({
+          where: file,
+          what: "no bun-version pin",
+          why: TOOLS,
+          fix: `pin bun-version: ${bun} where the workflow installs Bun`,
+        });
       for (const pin of pins)
-        if (pin !== bun) fail.push(`${file}: bun-version ${pin} differs from mise.toml bun ${bun}`);
+        if (pin !== bun)
+          problem({
+            where: file,
+            what: `bun-version is ${pin}, but mise.toml pins bun ${bun}`,
+            why: TOOLS,
+            fix: "set the two to the same Bun version",
+          });
     }
-    const ci = grab(".github/workflows/check.yml", /node: \["([^"]+)"/, "check.yml node matrix");
+    const ci = grab(".github/workflows/check.yml", /node: \["([^"]+)"/, "the node matrix");
     if (ci && !node.startsWith(`${ci}.`))
-      fail.push(`mise.toml node ${node} is not the check.yml node floor ${ci}`);
-    const pinned = grab(".github/workflows/zizmor.yml", /ACTIONLINT: "([^"]+)"/, "zizmor.yml ACTIONLINT");
+      problem({
+        where: "mise.toml",
+        what: `node ${node} is not on the first node of the check.yml matrix, ${ci}`,
+        why: TOOLS,
+        fix: `pin a ${ci}.x Node in mise.toml, or move the matrix with it`,
+      });
+    const pinned = grab(".github/workflows/zizmor.yml", /ACTIONLINT: "([^"]+)"/, "ACTIONLINT");
     if (pinned !== actionlint)
-      fail.push(`mise.toml actionlint ${actionlint} differs from zizmor.yml ACTIONLINT ${pinned}`);
+      problem({
+        where: ".github/workflows/zizmor.yml",
+        what: `ACTIONLINT is ${pinned}, but mise.toml pins actionlint ${actionlint}`,
+        why: TOOLS,
+        fix: "set the two to the same actionlint version",
+      });
   }
 }
 
@@ -522,7 +734,7 @@ if (TRAILER !== null) {
       check: read(".github/workflows/check.yml"),
       release: read(".github/workflows/release.yml"),
       lychee,
-    }),
+    }).map(finding),
   );
 }
 
@@ -538,7 +750,7 @@ if (TRAILER !== null) {
       `the ${name} object`,
     );
     const keys = [...(block ?? "").matchAll(/^ {4}([a-z_]+):/gm)].map((m) => m[1]);
-    if (block !== null && keys.length === 0) fail.push(`cannot extract any keys of ${name} from ${file}`);
+    if (block !== null && keys.length === 0) drifted(file, `the keys of ${name}`);
     return keys;
   };
   /** The backticked names in the first column of the Skill table that starts with the given header. */
@@ -551,8 +763,7 @@ if (TRAILER !== null) {
     const names = (table ?? "")
       .split("\n")
       .flatMap((row) => [...(row.split("|")[1] ?? "").matchAll(/`([a-z_]+)`/g)].map((m) => m[1]));
-    if (table !== null && names.length === 0)
-      fail.push(`cannot extract any names from the ${header} table in ${file}`);
+    if (table !== null && names.length === 0) drifted(file, `the names of the ${header} table`);
     return { names, text: table ?? "" };
   };
   const recordKeys = [
@@ -560,42 +771,56 @@ if (TRAILER !== null) {
     ...zodKeys("server/src/record.ts", "Record"),
   ].filter((k) => k !== "units");
   const trace = tableNames("plugin/skills/trace/SKILL.md", "\\| Field \\| Rule \\|");
+  const STRICT =
+    "the save paths refuse any field their strict zod types lack, so a field on one side only is refused or never written";
   const unknown = trace.names.filter((n) => !recordKeys.includes(n));
   if (unknown.length)
-    fail.push(`the trace Skill's field table names fields the save path refuses: ${unknown.join(", ")}`);
+    problem({
+      where: "plugin/skills/trace/SKILL.md",
+      what: `the field table names fields the save path refuses: ${unknown.join(", ")}`,
+      why: STRICT,
+      fix: "rename them as the Unit and Record types in server/src/record.ts spell them, or add them there",
+    });
   const untold = recordKeys.filter((k) => !trace.text.includes(`\`${k}\``));
   if (untold.length)
-    fail.push(
-      `the trace Skill's field table never mentions fields the save path accepts: ${untold.join(", ")}`,
-    );
+    problem({
+      where: "plugin/skills/trace/SKILL.md",
+      what: `the field table never mentions fields the save path accepts: ${untold.join(", ")}`,
+      why: STRICT,
+      fix: "describe them in the field table, or remove them from server/src/record.ts",
+    });
   const ops = [...read("server/src/glean.ts").matchAll(/op: z\.literal\("([a-z_]+)"\)/g)].map((m) => m[1]);
-  if (ops.length === 0) fail.push("cannot extract any op literals from server/src/glean.ts");
+  if (ops.length === 0) drifted("server/src/glean.ts", 'the op literals (op: z.literal("..."))');
   const glean = tableNames("plugin/skills/glean/SKILL.md", "\\| Op \\| What it does \\|");
   if (!same(glean.names, ops))
-    fail.push(
-      `the glean Skill's op table (${glean.names.join(", ")}) differs from the ops glean.ts accepts (${ops.join(", ")})`,
-    );
+    problem({
+      where: "plugin/skills/glean/SKILL.md",
+      what: `the op table lists ${glean.names.join(", ")}, but glean.ts accepts ${ops.join(", ")}`,
+      why: STRICT,
+      fix: "make the op table list exactly the ops server/src/glean.ts accepts",
+    });
   // The harvest and glean Skills borrow trace's record shape, and the save refuses the fields only a trace may write: a Skill
   // that does not name one of them tells its reader to send a record the save turns down
   const record = read("server/src/record.ts");
   const refusals = [...record.matchAll(/errors\.push\(\s*"([a-z_ ]+): only trace /g)];
   // A refusal worded this way but written as a template, or in a call the pattern does not fit, would drop out of the list unseen
   if (refusals.length === 0 || refusals.length !== (record.match(/: only trace /g) ?? []).length)
-    fail.push(
-      'cannot read every ": only trace" refusal in server/src/record.ts as errors.push("<keys>: only trace ...")',
-    );
+    drifted("server/src/record.ts", 'every ": only trace" refusal as errors.push("<keys>: only trace ...")');
   // The one evidence role only a trace may cite is refused in words of its own
   if (!/decides quotes[^"`]*only a trace records it/.test(record))
-    fail.push("cannot find the refusal of decides evidence outside a trace in server/src/record.ts");
+    drifted("server/src/record.ts", "the refusal of decides evidence outside a trace");
   // Keys are named as JSON keys: a bare `fields` in a Skill reads as the MCP tool of that name
   const traceOnly = [...refusals.flatMap((m) => m[1].split(" and ").map((k) => `\`"${k}"\``)), "`decides`"];
   for (const skill of ["harvest", "glean"]) {
     const text = read(`plugin/skills/${skill}/SKILL.md`);
     const unsaid = traceOnly.filter((name) => !text.includes(name));
     if (unsaid.length)
-      fail.push(
-        `the ${skill} Skill borrows trace's record shape without naming what only a trace may send: ${unsaid.join(", ")}`,
-      );
+      problem({
+        where: `plugin/skills/${skill}/SKILL.md`,
+        what: `the Skill borrows trace's record shape without naming what only a trace may send: ${unsaid.join(", ")}`,
+        why: "a reader told to send trace's shape would send fields the save turns down",
+        fix: `say that ${unsaid.join(", ")} are for a trace only`,
+      });
   }
 }
 
@@ -608,7 +833,7 @@ if (TRAILER !== null) {
   const declared = Object.keys(JSON.parse(read(MANIFEST)).userConfig ?? {}).map(
     (k) => `CLAUDE_PLUGIN_OPTION_${k.toUpperCase()}`,
   );
-  if (declared.length === 0) fail.push(`cannot extract any userConfig keys from ${MANIFEST}`);
+  if (declared.length === 0) drifted(MANIFEST, "the userConfig keys");
   const sources = fs
     .readdirSync("server/src", { recursive: true })
     .filter((f) => f.endsWith(".ts"))
@@ -617,14 +842,23 @@ if (TRAILER !== null) {
     ...new Set(sources.flatMap((t) => [...t.matchAll(/CLAUDE_PLUGIN_OPTION_[A-Z0-9_]+/g)].map((m) => m[0]))),
   ];
   const unread = declared.filter((v) => !used.includes(v));
+  const OPTION =
+    "Claude Code hands a saved setting to hooks as CLAUDE_PLUGIN_OPTION_<KEY>, so renaming one side leaves the setting with no effect while tests stay green";
   if (unread.length)
-    fail.push(`${MANIFEST} declares userConfig that no code in server/src reads: ${unread.join(", ")}`);
+    problem({
+      where: MANIFEST,
+      what: `userConfig declares settings no code in server/src reads: ${unread.join(", ")}`,
+      why: OPTION,
+      fix: "read them in server/src, or remove them from userConfig",
+    });
   const undeclared = used.filter((v) => !declared.includes(v));
   if (undeclared.length)
-    fail.push(`server/src reads plugin options ${MANIFEST} does not declare: ${undeclared.join(", ")}`);
+    problem({
+      where: "server/src",
+      what: `the code reads settings ${MANIFEST} does not declare: ${undeclared.join(", ")}`,
+      why: OPTION,
+      fix: `declare them in userConfig of ${MANIFEST}, or stop reading them`,
+    });
 }
 
-if (fail.length) {
-  console.error(`\n${fail.map((f) => `  ${f}`).join("\n\n")}\n`);
-  process.exit(1);
-}
+report("pairs", fail);

@@ -51,7 +51,11 @@ test("only git.ts and the git worker start git, and only a few modules start pro
   ]) {
     const r = check({ "github.ts": `${loads}${call}\n` });
     assert.equal(r.status, 1, call);
-    assert.match(r.stderr, /server\/src\/github\.ts starts git/, call);
+    assert.match(
+      r.stderr,
+      /^server\/src\/github\.ts: the module starts git\. Why: .+\. Fix: start git through server\/src\/git\.ts/m,
+      call,
+    );
   }
   // Any other module may not load node:child_process at all, in whatever form
   for (const load of [
@@ -62,7 +66,11 @@ test("only git.ts and the git worker start git, and only a few modules start pro
   ]) {
     const r = check({ "stray.ts": `${load}\n` });
     assert.equal(r.status, 1, load);
-    assert.match(r.stderr, /server\/src\/stray\.ts loads node:child_process/, load);
+    assert.match(
+      r.stderr,
+      /^server\/src\/stray\.ts: the module loads node:child_process\. Why: .+\. Fix: /m,
+      load,
+    );
   }
   // Words in comments and messages are not starts
   assert.equal(
@@ -79,7 +87,7 @@ test("only git.ts and the git worker start git, and only a few modules start pro
   ]) {
     const r = check({ "git.ts": text });
     assert.equal(r.status, 1, text);
-    assert.match(r.stderr, /server\/src\/git\.ts names no git to start/);
+    assert.match(r.stderr, /^server\/src\/git\.ts: the module names no git to start/m);
   }
 });
 
@@ -112,7 +120,7 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     assert.equal(r.status, 1, cast);
     assert.match(
       r.stderr,
-      /server\/src\/stray\.ts casts a value to OwnWords or imports it under another name/,
+      /^server\/src\/stray\.ts: the module casts a value to OwnWords or imports it under another name\. Why: .+\. Fix: /m,
       cast,
     );
   }
@@ -149,7 +157,7 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
   ]) {
     const r = check({ "stray.ts": `${write}\n` });
     assert.equal(r.status, 1, write);
-    assert.match(r.stderr, /server\/src\/stray\.ts writes evidence, an adoption/, write);
+    assert.match(r.stderr, /^server\/src\/stray\.ts: the module writes evidence, an adoption/m, write);
   }
   // Shaping rows that were read is not a write, whatever the fields are called
   assert.equal(
@@ -186,10 +194,16 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
   // A writer or the maker that the patterns no longer see has stopped being looked at
   const blank = check({ "own-words.ts": "export {};\n" });
   assert.equal(blank.status, 1);
-  assert.match(blank.stderr, /own-words\.ts makes no OwnWords where check-architecture\.mjs looks/);
+  assert.match(
+    blank.stderr,
+    /^server\/src\/own-words\.ts: the module makes no OwnWords where scripts\/check-architecture\.mjs looks/m,
+  );
   const moved = check({ "glean.ts": "export {};\n" });
   assert.equal(moved.status, 1);
-  assert.match(moved.stderr, /glean\.ts writes no authority row where check-architecture\.mjs looks/);
+  assert.match(
+    moved.stderr,
+    /^server\/src\/glean\.ts: the module writes no authority row where scripts\/check-architecture\.mjs looks/m,
+  );
 });
 
 test("only reconcile.ts writes states, replacements, and the record that answered a question", () => {
@@ -217,8 +231,18 @@ test("only reconcile.ts writes states, replacements, and the record that answere
     assert.equal(r.status, 1, write);
     assert.match(
       r.stderr,
-      /server\/src\/stray\.ts writes unit_state, unit_replacement, or unit_answer; only server\/src\/reconcile\.ts may/,
+      /^server\/src\/stray\.ts: the module writes unit_state, unit_replacement, or unit_answer\. Why: .+\. Fix: .*only it may write these tables$/m,
       write,
     );
   }
+});
+
+test("the read server reaching the write connection fails with the chain of imports that leads there", () => {
+  const mcp = fs.readFileSync(path.join(REPO, "server", "src", "mcp.ts"), "utf8");
+  const r = check({ "mcp.ts": `${mcp}\nimport "./db-write.ts";\n` });
+  assert.equal(r.status, 1);
+  assert.match(
+    r.stderr,
+    /^server\/src\/mcp\.ts: the read server reaches the write connection: server\/src\/mcp\.ts → server\/src\/db-write\.ts\. Why: .+\. Fix: .+$/m,
+  );
 });

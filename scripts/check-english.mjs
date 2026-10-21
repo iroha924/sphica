@@ -11,6 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { englishProblems, JAPANESE } from "./lib/english.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("english");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -94,31 +97,39 @@ function textProblems(source) {
   return problems;
 }
 
-let count = 0;
-for (const file of TEXT) {
-  for (const p of textProblems(fs.readFileSync(path.join(root, file), "utf8"))) {
-    console.error(`${file}:${p.line}: ${p.reason}: ${p.text}`);
-    count++;
-  }
-}
-for (const [files, mode] of [
-  [ENGLISH, "all"],
-  [COMMENTS, "comments"],
-]) {
-  for (const file of files) {
-    const source = fs.readFileSync(path.join(root, file), "utf8");
-    for (const p of englishProblems(source, mode)) {
-      console.error(`${file}:${p.line}: ${p.reason}: ${p.text}`);
-      count++;
-    }
-  }
-}
-if (count) {
-  console.error(
-    `\n${count} problem(s). Write these in English, or mark a required Japanese literal with // english-exempt: <reason>.`,
+const WHY =
+  "Sphica writes its own code, strings, comments, and documents in English, file by file (invariant english-code)";
+const FIX = {
+  all: "write it in English, or put `// english-exempt: <reason>` on the line before a Japanese literal the code needs",
+  comments:
+    "write the comment in English; Japanese stays only in strings, as test fixtures and measured prompts",
+  text: "write it in English, or put an `english-exempt: <reason>` comment (#, --, //, or <!--) on the line before one that must stay",
+};
+const STALE = {
+  what: "an english-exempt marker has no Japanese on the next line",
+  why: "a marker left behind would let Japanese written there later pass unseen",
+  fix: "remove the marker, or move it to the line just before the Japanese it exempts",
+};
+
+const toFinding = (file, mode) => (p) =>
+  p.reason === "Japanese text"
+    ? finding({ where: `${file}:${p.line}`, what: `Japanese text: ${p.text}`, why: WHY, fix: FIX[mode] })
+    : finding({ where: `${file}:${p.line}`, ...STALE });
+
+const fail = [
+  ...TEXT.flatMap((file) =>
+    textProblems(fs.readFileSync(path.join(root, file), "utf8")).map(toFinding(file, "text")),
+  ),
+  ...[
+    [ENGLISH, "all"],
+    [COMMENTS, "comments"],
+  ].flatMap(([files, mode]) =>
+    files.flatMap((file) =>
+      englishProblems(fs.readFileSync(path.join(root, file), "utf8"), mode).map(toFinding(file, mode)),
+    ),
+  ),
+];
+if (!report("english", fail))
+  console.log(
+    `english: ${ENGLISH.length} English-only files, ${COMMENTS.length} files with English comments, ${TEXT.length} text files`,
   );
-  process.exit(1);
-}
-console.log(
-  `english: ${ENGLISH.length} English-only files, ${COMMENTS.length} files with English comments, ${TEXT.length} text files`,
-);

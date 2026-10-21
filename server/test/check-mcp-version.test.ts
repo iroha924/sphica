@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertFindings } from "./finding-shape.ts";
 
 const SCRIPT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -73,6 +74,7 @@ test("with a base, fails a range that changes the plugin afterwards without a ve
     const missed = check(r.dir, "--base", base);
     assert.equal(missed.status, 1, missed.stderr);
     assert.match(missed.stderr, /plugin\/skills\/a\.md/);
+    assertFindings(missed.stderr, "check-mcp-version");
 
     bump(r.dir, "1.0.1");
     r.git("commit", "-qam", "bump the version");
@@ -143,7 +145,8 @@ test("a change to README.md alone needs no version bump, staged on main or in a 
     const mixed = check(r.dir);
     assert.equal(mixed.status, 1, mixed.stderr);
     // The README is not the file the failure names
-    assert.match(mixed.stderr, /for example plugin\/skills\/a\.md/);
+    assert.match(mixed.stderr, /^plugin\/skills\/a\.md: 1 package input\(s\) changed/m);
+    assert.doesNotMatch(mixed.stderr, /README/);
     r.git("commit", "-qm", "change the README and the plugin");
     assert.equal(check(r.dir, "--base", readme).status, 1);
   } finally {

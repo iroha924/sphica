@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { readerProblems, reviewCommandProblems, settingsProblems } from "../../scripts/lib/fork-intake.mjs";
+import { assertFindings } from "./finding-shape.ts";
 import { tempDir } from "./temp-dir.ts";
 
 const REPO = path.join(import.meta.dirname, "..", "..");
@@ -197,10 +198,11 @@ test("check-ai-config passes on a copy of the tree, and fails once the project s
   const file = (root: string) => path.join(root, ".claude", "settings.json");
   const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
   assert.equal(emptied.status, 1);
-  assert.match(emptied.output, /\.claude\/settings\.json: not JSON/);
+  assert.match(emptied.output, /^\.claude\/settings\.json: not JSON\. Why: .+\. Fix: .+$/m);
   const removed = aiConfig((root) => fs.rmSync(file(root)));
   assert.equal(removed.status, 1);
-  assert.match(removed.output, /\.claude\/settings\.json: ENOENT/);
+  assert.match(removed.output, /^\.claude\/settings\.json: the file cannot be read: ENOENT/m);
+  assertFindings(removed.output, "check-ai-config");
   const widened = aiConfig((root) =>
     fs.writeFileSync(
       file(root),
@@ -208,17 +210,20 @@ test("check-ai-config passes on a copy of the tree, and fails once the project s
     ),
   );
   assert.equal(widened.status, 1);
-  assert.match(widened.output, /\.claude\/settings\.json: the only key of permissions must be deny/);
+  assert.match(widened.output, /^\.claude\/settings\.json: the only key of permissions must be deny/m);
 });
 
 test("check-ai-config fails once the reader's definition is emptied, removed, or given another tool", () => {
   const file = (root: string) => path.join(root, ".claude", "agents", "fork-reader.md");
   const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
   assert.equal(emptied.status, 1);
-  assert.match(emptied.output, /fork-reader\.md: no closed YAML frontmatter/);
+  assert.match(
+    emptied.output,
+    /^\.claude\/agents\/fork-reader\.md: no closed YAML frontmatter\. Why: .+\. Fix: .+$/m,
+  );
   const removed = aiConfig((root) => fs.rmSync(file(root)));
   assert.equal(removed.status, 1);
-  assert.match(removed.output, /fork-reader\.md: ENOENT/);
+  assert.match(removed.output, /^\.claude\/agents\/fork-reader\.md: the file cannot be read: ENOENT/m);
   const armed = aiConfig((root) =>
     fs.writeFileSync(
       file(root),
@@ -226,7 +231,10 @@ test("check-ai-config fails once the reader's definition is emptied, removed, or
     ),
   );
   assert.equal(armed.status, 1);
-  assert.match(armed.output, /fork-reader\.md: tools must be Read, Grep, Glob and nothing else/);
+  assert.match(
+    armed.output,
+    /^\.claude\/agents\/fork-reader\.md: tools must be Read, Grep, Glob and nothing else/m,
+  );
 });
 
 test("a reader whose frontmatter the host would read differently from this check is refused", () => {

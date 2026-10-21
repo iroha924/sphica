@@ -6,16 +6,47 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
+import { fail, guard, report } from "./lib/finding.mjs";
 import { sbomProblems } from "./lib/sbom.mjs";
 
+guard("SBOM");
 const file = process.argv[2];
-if (!file) throw new Error("pass the SBOM path");
+if (!file)
+  fail({
+    where: "node scripts/check-sbom.mjs",
+    what: "no SBOM path was given",
+    why: "the check compares one SBOM file with the notices table",
+    fix: "run node scripts/check-sbom.mjs <sbom.cdx.json>",
+  });
 const root = path.resolve(import.meta.dirname, "..");
-const notices = fs.readFileSync(path.join(root, "plugin", "THIRD_PARTY_NOTICES.md"), "utf8");
-const bom = JSON.parse(fs.readFileSync(file, "utf8"));
-const problems = sbomProblems(notices, bom);
-if (problems.length) {
-  console.error(problems.join("\n"));
-  process.exit(1);
+const read = (at, parts) => {
+  try {
+    return fs.readFileSync(at, "utf8");
+  } catch (error) {
+    return fail({ ...parts, what: `the file cannot be read: ${error.message}` });
+  }
+};
+const notices = read(path.join(root, "plugin", "THIRD_PARTY_NOTICES.md"), {
+  where: "plugin/THIRD_PARTY_NOTICES.md",
+  why: "the SBOM is compared with the table of bundled packages this file holds",
+  fix: "run `bun run bundle`, which writes it from the bundled node_modules",
+});
+const text = read(file, {
+  where: file,
+  why: "the check compares this SBOM with the notices table",
+  fix: "pass the path of the cyclonedx-json file the release workflow's sbom job builds",
+});
+let bom;
+try {
+  bom = JSON.parse(text);
+} catch (error) {
+  fail({
+    where: file,
+    what: `the SBOM is not JSON: ${error.message}`,
+    why: "the check compares this SBOM with the notices table",
+    fix: "pass the cyclonedx-json file the release workflow's sbom job builds",
+  });
 }
-console.log(`SBOM: ${bom.components.length} components, exactly matching the bundled dependencies`);
+if (!report("SBOM", sbomProblems(notices, bom, file)))
+  console.log(`SBOM: ${bom.components.length} components, exactly matching the bundled dependencies`);

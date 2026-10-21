@@ -4,4 +4,4 @@
 export function commitMessageProblems(
   text: string,
   opts?: { merge?: boolean; hook?: boolean; commentChar?: string; cleanup?: string },
-): string[];
+): { what: string; why: string; fix: string }[];
