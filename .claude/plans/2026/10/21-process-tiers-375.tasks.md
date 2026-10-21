@@ -143,6 +143,16 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `fix(release): escape pull request text in the verdict line (T12)`
   - 結果: red は上のとおり fail を実測。`verdictLine` がパスと理由を JSON 文字列として 1 行にし、Markdown の記号をエスケープする。`cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts` → 2 件 pass（`dist/a\n\#\# T \[x\]\(u\)` のように出る）。`bun run verify` → exit 0（acceptance 151 件 pass）
 
+- [x] T13: CodeQL の指摘を直す（判定の行のエスケープがバックスラッシュを二重にエスケープする）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T12（直す対象のエスケープ）
+  - 変更: `scripts/lib/release-verdict.mjs`
+  - red: 0a605500 の PR の CI で `CodeQL` → fail（js の double escaping、high、`scripts/lib/release-verdict.mjs:92`）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts` → 全件 pass。PR の CI の `CodeQL` → pass
+  - コミット: `fix(release): leave backslashes to JSON's escaping in the verdict line (T13)`
+  - 結果: red は上のとおり CodeQL の fail を観測。バックスラッシュは JSON の文字列化に任せ、Markdown のエスケープの対象から外した。`cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts` → 2 件 pass。CodeQL は push の後の CI で見る
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
@@ -159,3 +169,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T10 / Codex の再レビュー（medium）: 直っていて新しい欠陥なし / 対応なし
 - 2026-10-21 / 全体 / review-shipping: 3 件（失敗したジョブだけの再実行で static が再利用され release-verdict-<最新の attempt> が無く main が赤くなる、main への管理者の直接 push で依存だけの変更が pre-commit を通る、lefthook の古いコメント） / 3 件とも採り、修正タスク T11 を足した
 - 2026-10-21 / 全体 / GitHub の Codex のレビュー（PR #377、99d20939）: 1 件（P2）。改行と Markdown を含むファイル名が job summary で見出しやリンクとして出る（Codex が再現） / 採り、修正タスク T12 を足した
+- 2026-10-21 / T12 / PR の CI の CodeQL が high の double escaping を 1 件出した（JSON の文字列化の後にバックスラッシュをもう一度エスケープしていた） / 採り、修正タスク T13 を足した

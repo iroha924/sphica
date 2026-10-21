@@ -87,13 +87,16 @@ export function verdictMismatch(v, { run, attempt, tree, version }) {
   return null;
 }
 
-/** Text from the pull request (shipped paths, tar's messages) as one line with Markdown's characters escaped, for the log and the summary */
+/**
+ * Text from the pull request (shipped paths, tar's messages) as one line for the log and the summary: JSON's escapes take care of line
+ * breaks and backslashes, then Markdown's other characters are escaped so nothing forms a heading, link, or emphasis
+ */
 const plain = (text) =>
   JSON.stringify(String(text))
     .slice(1, -1)
-    .replaceAll(" ", "\\u2028")
-    .replaceAll(" ", "\\u2029")
-    .replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029")
+    .replace(/[`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
 
 /** The verdict as the one line the CI log and job summary show */
 export function verdictLine(v) {
