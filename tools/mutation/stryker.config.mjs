@@ -1,11 +1,8 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Mutation testing of the modules where a weak test costs the most (`bun run mutation`, kept out of verify). Stryker lives here with its
-// own lockfile, not in server/: the shipped notices and the release SBOM are read from server/'s tree. It runs from the repository
-// root, so the sandbox holds db/ beside server/ as the code expects, and the paths below start at the root.
-// Survivors are sorted (no coverage, weak assertion, equivalent) and the owner rules on which become tests: a test written to kill a
-// mutant can pin a bug as the intended behavior.
+// Stryker lives here with its own lockfile, not in server/, whose tree the shipped notices and the release SBOM are read from.
+// It runs from the repository root so the sandbox holds db/ beside server/ as the code expects; the paths below start at the root.
 
 export default {
   testRunner: "tap",
