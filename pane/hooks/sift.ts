@@ -44,7 +44,7 @@ export function layout(
   let used = 0;
   let cut = 0;
   for (const row of [...list].reverse()) {
-    const text = row.text.length > each ? `${row.text.slice(0, each)}…` : row.text;
+    const text = row.text.length > each ? `${row.text.slice(0, each - 1)}…` : row.text;
     const size = heading(row).length + text.length;
     if (used + size > room) break;
     used += size;

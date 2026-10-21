@@ -27,12 +27,23 @@ for (const k of [
 ])
   delete process.env[k];
 
-function checkout(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-pane-sift-")));
-  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
-  execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://github.com/o/r.git"], {
+const git = (dir: string, ...args: string[]) =>
+  execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
     stdio: "ignore",
   });
+
+/** A checkout whose default branch (origin/HEAD) holds src/dates.ts, on a feature branch, so a review has something to compare */
+function checkout(): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-pane-sift-")));
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "remote", "add", "origin", "https://github.com/o/r.git");
+  fs.mkdirSync(path.join(dir, "src"));
+  fs.writeFileSync(path.join(dir, "src", "dates.ts"), "export const toStored = (d: Date) => d;\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "base");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  git(dir, "switch", "-q", "-c", "feature");
   return dir;
 }
 
@@ -76,13 +87,14 @@ test("every kind of text deliver.ts writes passes the sift, and other hooks' tex
             adoption: [{ source: `s${m}`, quote: "Store every timestamp in UTC." }],
             anchors: [{ path: "src/dates.ts", symbol: "toStored", role: "applies_to" }],
           },
-          {
-            key: "thumbs",
+          // A stop shows five dead ends, so the sixth is what the same call run again shows (RAN)
+          ...Array.from({ length: 6 }, (_, n) => ({
+            key: `thumbs-${n}`,
             kind: "dead_end",
-            text: "Thumbnails in a worker fail",
+            text: `Thumbnails in a worker fail (${n})`,
             evidence: [{ source: `s${m}`, quote: "The worker build of thumbs failed.", role: "states" }],
             commands: ["npm run thumbs --worker"],
-          },
+          })),
         ],
       };
       return saveRecord(trx, t, run, await checkRecord(trx, t, record), []);
@@ -132,6 +144,39 @@ test("every kind of text deliver.ts writes passes the sift, and other hooks' tex
         path.join(repo, "missing", "sphica.db"),
       ),
     };
+    // The same call run again goes through, with the dead end shown instead
+    const ran = await call({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm run thumbs --worker" },
+    });
+    // A new interactive session gets the request to trace the sessions that wait
+    const today = new Date().toISOString();
+    message(db, p, { id: "u1", text: "untraced", session: "u1", sent: today });
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    const traced = await call({
+      hook_event_name: "SessionStart",
+      source: "startup",
+      session_id: crypto.randomUUID(),
+    });
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    const review = () =>
+      call({
+        hook_event_name: "UserPromptExpansion",
+        session_id: crypto.randomUUID(),
+        expansion_type: "slash_command",
+        command_name: "review",
+        command_args: "",
+        prompt: "/review",
+      });
+    const unchanged = await review();
+    fs.appendFileSync(file("src/dates.ts"), "export const toDisplay = (d: Date) => toStored(d);\n");
+    const changed = await review();
+    Object.assign(said, { ran, traced, unchanged, changed });
+    assert.match(String(ran), /Dead ends recorded for a command this call runs/);
+    assert.match(String(traced), /earlier session/);
+    assert.match(String(unchanged), /^Sphica: no local change/);
+    assert.match(String(changed), /^Sphica: past decisions that apply to this change/);
     for (const [kind, r] of Object.entries(said)) {
       assert.ok(typeof r !== "string" || r !== "", `${kind}: deliver.ts said something to test against`);
       const kept = sift(asResult(r), kind, "12:00:00");
@@ -177,7 +222,7 @@ test("the layout shows the newest first within its budget and says what it cut o
   assert.equal(fitted.shown[0]?.text.startsWith("Sphica: "), true);
   assert.equal(fitted.cut, fitted.shown.length, "every long row is cut");
   assert.equal(fitted.hidden, LIMITS.kept - fitted.shown.length);
-  for (const r of fitted.shown) assert.ok(r.text.length <= LIMITS.each + 1);
+  for (const r of fitted.shown) assert.ok(r.text.length <= LIMITS.each, `${r.text.length} characters`);
   const drawn = fitted.shown.reduce((n, r) => n + `${r.at} ${r.event}`.length + r.text.length, 0);
   assert.ok(drawn + omitted(fitted.cut, fitted.hidden).length <= LIMITS.chars, `${drawn} drawn`);
 

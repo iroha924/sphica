@@ -42,6 +42,17 @@ base: main
   - 結果: `claude plugin test pane` → 4 件 pass（4 つの classic で返り値が下流と同じ・下流 1 回・入力の source が残る、PreToolUse の context と stop、updatedInput が下の tool.call に届き deny は呼び出しを止める、同時の 2 件が両方残り 122 件のうち新しい 100 件、/sphica-pane と新しい順の描画）。hook の返り値を書き換える壊し方では 1 件目が落ちた
   - 結果: エンジンの型（2.1.306 の claude-code.d.ts）を置いた scratch の写しで `tsc -p` → 0 で終わった。`bun run lint`・`bun run typecheck`・`bun run english`・`bun run headers`・`node --test test/pane-sift.test.ts` → 0 で終わった
 
+- [x] T07: 1 件の上限に省略記号を含め、RAN・AUTO_TRACE 付きの SessionStart・review の実際の出力も sift のテストに足す（T01 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T01（直す sift.ts とテストが要る）
+  - 変更: `pane/hooks/sift.ts`, `server/test/pane-sift.test.ts`
+  - red: `node --input-type=module -e 'import("./pane/hooks/sift.ts").then(({layout}) => console.log(layout([{at:"t",event:"e",kind:"context",text:"x".repeat(1501)}]).shown[0].text.length))'` → 1501（上限の 1500 を超える）
+  - 完了条件: `cd server && node --test test/pane-sift.test.ts` → pass（RAN、AUTO_TRACE の行が付いた SessionStart、review の「no local change」と「past decisions that apply to this change」も、空でない実際の出力を 1 件ずつ拾う。各行が 1500 文字以内）
+  - コミット: `fix(pane): keep a cut row within its limit and test every text deliver writes (T07)`
+  - 結果: `node --input-type=module -e ...` → 直す前は 1501（red と同じコマンド）
+  - 結果: `cd server && node --test test/pane-sift.test.ts` → 2 件 pass。RAN（dead end 6 件で止めた後の再実行）、AUTO_TRACE の付いた SessionStart（CLAUDE_CODE_ENTRYPOINT=cli）、review の no local change と past decisions を含む 11 種の出力を 1 件ずつ拾い、各行が 1500 文字以内。拾う条件を `Sphica` で始まるものだけに狭めると edit の出力で落ちた
+
 ## P2: CI で配る実物を検査する
 
 固定した Claude Code CLI で、Linux と Windows の CI が `pane/` を validate と test にかけ、許可した hook と呼び出しの外に出たら落ちる
@@ -86,3 +97,4 @@ base: main
 - 2026-10-22 / T02 / types の契約は自己完結でなければ validate が落とす（import 禁止）ため、Delivered の型を types/index.d.ts に置き、sift.ts がそこから import する形に直した / 変更欄に sift.ts と types/index.d.ts を足した（前の値は 3 ファイル、新しい値は 5 ファイル）
 - 2026-10-22 / T02 / keep が失敗したときに結果をそのまま返すことはテストで確かめられなかった。テストキットは下流の結果の形を先に検査し、state.set の stub は mod の書き込みに届かない。テストを書くと常に通るので外した / 実装は try 相当の .catch(() => {}) と、hook の .catch（Caught の replay で下流を再実行しない）で守る。未検証として PR 本文に書く
 - 2026-10-22 / T02 / Registration の .catch の引数名 next が oxlint の promise(no-callback-in-promise) に Promise の catch と誤って当たった / 引数名を replay にした
+- 2026-10-22 / T07 / T01 の Codex レビュー（b87808f7）の F1（省略記号で 1 件が 1501 文字になる、再現済み）と F2（RAN・AUTO_TRACE・review の出力がテストに無い）を受理 / 修正タスク T07 を足した
