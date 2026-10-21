@@ -22,13 +22,14 @@ base: main
 
 plan ファイルと grill-codex を戻しにくい変更に絞り、ローカルのレビューの要否をリリースの種別と分けて書く。
 
-- [ ] T01: CLAUDE.md の「Before implementing」と「Review」を書き換える
+- [x] T01: CLAUDE.md の「Before implementing」と「Review」を書き換える
   - 種別: 変更
   - 計画: S1
   - 依存: なし
   - 変更: `CLAUDE.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる。`rg -n "grill-codex" CLAUDE.md` → 戻しにくい変更の一覧と一緒の 1 か所
   - コミット: `docs(claude): require plans and local reviews only for hard-to-undo changes (T01)`
+  - 結果: 「Before implementing」は plan と grill-codex を戻しにくい変更の一覧に限り、ほかは PR 本文に判断・棄却した案・検証を書く、verify・red・最終判断は省かないとした。「Review」は review-shipping を package の入力・依存・バージョン・検査・リリースの仕組みの変更（種別が none でも）、codex-review を戻しにくい領域とそれらに触れる PR に限った。`bun run verify:ai` → 0。`rg -n "grill-codex" CLAUDE.md` → 62 行目の 1 か所
 
 - [ ] T02: 関連の Skill・Agent・テンプレート・rule を合わせる
   - 種別: 変更

@@ -59,16 +59,17 @@ Everything else, and any change whose impact you cannot state right away, goes t
 
 ## Before implementing
 
-For a change in behavior, work out the plan with Codex using the `grill-codex` Skill before implementing, and get the owner's Go on the plan in `.claude/plans/`.
+A change that is hard to undo (the DB schema and migrations, write paths and connection roles, permissions, security, public contracts such as MCP tools and the CLI, and release machinery) gets a plan: work it out with Codex using the `grill-codex` Skill before implementing, and get the owner's Go on the plan in `.claude/plans/`.
 The plan records the implementation plan as agreed (do not append progress to it); progress goes in its task list beside it. Both are tracked in git while the work goes on.
 When the work is done and its reviews are over, remove both in the pull request's last commit, name the removed files in the PR body, and carry the decisions, declined options, and verification there.
+Any other change in behavior needs no plan file: get the owner's Go on the approach in the conversation, and write the decisions, the declined options with their reasons, and the verification in the PR body. No plan file skips none of `bun run verify`, the red check before a fix, or the owner's final call.
 
 ## Review
 
 Hand it over only after `bun run verify` passes.
 
-- `review-shipping`: before a commit that changes the package, versions, bundle inputs, or check scripts
-- Codex: before merging each PR. Ask by following the `codex-review` Skill
+- `review-shipping`: before a commit that changes package inputs, dependencies, versions, bundle inputs, check scripts, or release machinery, also when the release kind is `none`
+- Codex: before merging a PR that touches a hard-to-undo area (the list under "Before implementing"), package inputs, dependencies, version checks, or release machinery. Ask by following the `codex-review` Skill. Other PRs rely on GitHub's Codex review
 - GitHub's Codex (ChatGPT connector) reviews a PR when it is created and when someone comments `@codex review`. Claude watches CI, then reads the review's findings on the PR itself; it comments `@codex review` only when the owner asks.
   For each finding, decide whether to fix or decline it, then resolve its thread. Record declined ones in the PR body's "Declined findings".
   File an issue for a declined finding only when it will really help later (you can say what would make it worth revisiting), and ask the owner first. If none is worth one, finish without mentioning it.
