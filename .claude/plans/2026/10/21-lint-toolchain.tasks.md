@@ -89,6 +89,16 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
   - コミット: `chore(lint): drop Biome from linting and formatting (T07)`
   - 結果: `biome.json` と server の `check` / `fix`（Biome）を消し、CLAUDE.md・AGENTS.md・check.yml の説明を直し、`.git-blame-ignore-revs` に T06 の 4024b4c6 を入れた。`rg -n -i biome lefthook.yml package.json CLAUDE.md AGENTS.md .github` → 0 件。最初の `bun run verify` は knip が `@biomejs/biome` を未使用と判定して exit 1（評価が `createRequire` で読むため見えない）、server の ignoreDependencies に足して `bun run verify` → exit 0（acceptance 151 件 pass）
 
+- [x] T08: レビューの指摘を直す（pre-commit の glob、Oxfmt の範囲、Biome の recommended の写し、node:test の skip と only、設定のガード、古いコメント）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T07（Biome を抜いた後の構成を直す）
+  - 変更: `lefthook.yml`, `scripts/oxfmt.mjs`, `.oxlintrc.json`, `scripts/lint-plugin.mjs`, `scripts/lint-plugin.d.mts`, `server/test/lint-plugin.test.ts`, `server/src/db-write.ts`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `server/test/architecture.test.ts`, `server/test/capture.test.ts`
+  - red: 未追跡の `server/src/zz-red.ts`（待たない呼び出し）で `lefthook run pre-commit --job oxlint --file server/src/zz-red.ts` → `oxlint (skip) no files for inspection`。崩した `scripts/zz-red.mjs` と `server/evals/zz-red.json` で `node scripts/oxfmt.mjs --check ./scripts/zz-red.mjs` と `node scripts/oxfmt.mjs --check server/evals/zz-red.json` → どちらも exit 0。HEAD の設定で `a == b`・`(a: any)`・node:test の `test.skip` を置いて `node scripts/oxlint.mjs -c <HEAD の設定>` → eqeqeq・no-explicit-any・skip の指摘が出ない
+  - 完了条件: 同じ 3 つ → 順に no-floating-promises で落ちる、exit 1 と exit 1、eqeqeq・no-explicit-any・sphica(no-skipped-tests) が出る。`bun run verify` → 0 で終わる
+  - コミット: `fix(lint): lint top-level files in pre-commit, and carry over Biome's recommended rules (T08)`
+  - 結果: red は上の 3 つで実測（skip / exit 0 と exit 0 / 指摘なし）。直した後 → `server/src/zz-red.ts:3:3: error typescript(no-floating-promises)`、exit 1 と exit 1、`eslint(eqeqeq)`・`typescript(no-explicit-any)`・`sphica(no-skipped-tests)`。Biome の recommended 215 個（A11y を除く）を名前で Oxlint に写し、今のコードで違反 0 の 51 個を有効にした（no-template-curly-in-string は T05 で消した 12 か所の抑止を Oxlint の形で戻した）。`node --test test/lint-plugin.test.ts` → 5 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が軽い進め方を選んだ / タスクごとの Codex レビューは行わず、merge 前に 1 回だけ流す
@@ -100,3 +110,4 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
 - 2026-10-21 / T05 / 変更欄に、違反を直したファイル、Biome の lint の抑止コメントを消したファイル（Biome の linter を T05 で切るため。T07 から前倒し）、`knip.json`、プラグインのテストを足した（前の値は上の 15 件）
 - 2026-10-21 / T06 / 変更欄を `.oxfmtrc.json`, `biome.json`, `lefthook.yml`, `package.json`, `server/package.json`, `.git-blame-ignore-revs` から上の値にした / Oxfmt の glob 引数はディレクトリ引数を絞るので範囲を `scripts/oxfmt.mjs` で決めた。`biome.json` は T07 で消す。`.git-blame-ignore-revs` は整形のコミットの SHA が要るので T07 に移す
 - 2026-10-21 / T07 / 変更欄に `server/package.json`, `knip.json`, `.git-blame-ignore-revs` を足した（前の値は `biome.json`, `CLAUDE.md`, `AGENTS.md`, `.github/workflows/check.yml`） / server の Biome のスクリプトが残っていた、knip の除外が要った、blame の除外を T06 から移した
+- 2026-10-21 / T08 / review-shipping 4 件と Codex 4 件（うち 2 件が重複）を受けて修正タスクを足した / 6 件とも採用。Biome の recommended で Oxlint に同じものが無い・動きが違うものは PR 本文に一覧を残す

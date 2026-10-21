@@ -15,7 +15,8 @@ pre-commit:
       run: node scripts/oxfmt.mjs {staged_files}
       stage_fixed: true
     - name: oxlint
-      glob: "{server/src,server/test,server/evals,scripts}/**/*.{ts,mts,mjs}"
+      # `**/` needs a directory between, so each place is listed at its top level too
+      glob: "{server/src/*.ts,server/src/**/*.ts,server/test/*.ts,server/test/**/*.ts,server/evals/*.ts,server/evals/**/*.ts,scripts/*.mjs,scripts/**/*.mjs,scripts/*.mts,scripts/**/*.mts}"
       run: node scripts/oxlint.mjs {staged_files}
     - name: typecheck-server
       root: server/

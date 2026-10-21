@@ -2,7 +2,9 @@
   "$schema": "./server/node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "import", "node", "promise"],
   "jsPlugins": ["./scripts/lint-plugin.mjs"],
-  "categories": { "correctness": "error" },
+  "categories": {
+    "correctness": "error"
+  },
   "ignorePatterns": ["server/src/db-types.ts"],
   "rules": {
     "typescript/no-floating-promises": [
@@ -18,7 +20,80 @@
       }
     ],
     "typescript/no-misused-promises": "error",
-    "eslint/no-unused-vars": ["error", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_" }],
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "ignoreRestSiblings": true,
+        "argsIgnorePattern": "^_"
+      }
+    ],
+    "eslint/array-callback-return": "error",
+    "eslint/default-case-last": "error",
+    "eslint/eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
+    "eslint/no-array-constructor": "error",
+    "eslint/no-case-declarations": "error",
+    "eslint/no-constructor-return": "error",
+    "eslint/no-extra-label": "error",
+    "eslint/no-fallthrough": "error",
+    "eslint/no-inner-declarations": "error",
+    "eslint/no-label-var": "error",
+    "eslint/no-lone-blocks": "error",
+    "eslint/no-new-wrappers": "error",
+    "eslint/no-proto": "error",
+    "eslint/no-prototype-builtins": "error",
+    "eslint/no-regex-spaces": "error",
+    "eslint/no-self-compare": "error",
+    "eslint/no-sequences": "error",
+    "eslint/no-template-curly-in-string": "error",
+    "eslint/no-unneeded-ternary": "error",
+    "eslint/no-use-before-define": [
+      "error",
+      {
+        "functions": false,
+        "classes": false,
+        "variables": false,
+        "enums": false,
+        "typedefs": false,
+        "ignoreTypeReferences": true
+      }
+    ],
+    "eslint/no-useless-constructor": "error",
+    "eslint/prefer-arrow-callback": "error",
+    "eslint/prefer-const": "error",
+    "eslint/prefer-exponentiation-operator": "error",
+    "eslint/prefer-numeric-literals": "error",
+    "eslint/prefer-regex-literals": "error",
+    "eslint/prefer-rest-params": "error",
+    "eslint/radix": "error",
+    "oxc/no-accumulating-spread": "error",
+    "oxc/no-const-enum": "error",
+    "typescript/adjacent-overload-signatures": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/consistent-type-exports": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/dot-notation": "error",
+    "typescript/no-empty-interface": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-extraneous-class": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-restricted-types": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/prefer-function-type": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "unicorn/no-document-cookie": "error",
+    "unicorn/no-instanceof-array": "error",
+    "unicorn/no-useless-switch-case": "error",
+    "unicorn/prefer-array-index-of": "error",
+    "unicorn/prefer-date-now": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/prefer-number-properties": "error",
     "typescript/unbound-method": "off",
     "typescript/no-misused-spread": "off",
     "typescript/no-base-to-string": "off",
@@ -26,13 +101,15 @@
     "typescript/require-array-sort-compare": "off",
     "unicorn/no-useless-spread": "off",
     "sphica/comment-refs": "error",
-    "sphica/sql-style": "error"
+    "sphica/sql-style": "error",
+    "sphica/no-focused-tests": "error"
   },
   "overrides": [
     {
       "files": ["server/test/**"],
-      "plugins": ["typescript", "unicorn", "oxc", "import", "node", "promise", "jest"],
-      "rules": { "jest/no-disabled-tests": "error" }
+      "rules": {
+        "sphica/no-skipped-tests": "error"
+      }
     }
   ]
 }

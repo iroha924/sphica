@@ -35,15 +35,18 @@ test("only git.ts and the git worker start git, and only a few modules start pro
     'execFileSync("git", ["status"]);',
     "spawn('git', []);",
     'exec("git status");',
+    // oxlint-disable-next-line no-template-curly-in-string -- the source under check holds a template
     "const sub = 'status';\nexec(`git ${sub}`);",
     'const command = "git";\nexecFileSync(command, ["status"]);',
     'const run = promisify(execFile);\nrun("git", ["status"]);',
+    // oxlint-disable-next-line no-template-curly-in-string -- the source under check holds a template
     'spawn(`${"git"}`, ["status"]);',
     'spawn("git" /* the program */, ["status"]);',
     'execFileSync("git.exe", ["status"]);',
     'spawn("\\x67it", []);',
     'exec("git\\tstatus");',
     'spawn("g\\\nit", []);',
+    // oxlint-disable-next-line no-template-curly-in-string -- the source under check holds a template
     "const prefix = '';\nexec(`${prefix}git status`);",
   ]) {
     const r = check({ "github.ts": `${loads}${call}\n` });

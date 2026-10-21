@@ -10,10 +10,40 @@ import { sqlStyleProblems } from "./lib/sql-style.mjs";
 
 const lineLoc = (line) => ({ start: { line, column: 0 }, end: { line, column: 0 } });
 
-/** @public Oxlint imports it; nothing in the repository does */
+/** node:test's names: the jest plugin's rules see only globals, and the tests import these from node:test */
+const TEST_CALLS = new Set(["test", "it", "describe", "suite"]);
+
+/** A rule reporting `test.<modifier>(...)` and the like, with the message given */
+const modifierRule = (modifier, message) => ({
+  create(context) {
+    return {
+      CallExpression(node) {
+        const callee = node.callee;
+        if (
+          callee.type === "MemberExpression" &&
+          callee.object.type === "Identifier" &&
+          TEST_CALLS.has(callee.object.name) &&
+          !callee.computed &&
+          callee.property.name === modifier
+        )
+          context.report({ node: callee.property, message });
+      },
+    };
+  },
+});
+
+/** Oxlint loads this through jsPlugins; the tests read its rule names */
 export default {
   meta: { name: "sphica" },
   rules: {
+    "no-skipped-tests": modifierRule(
+      "skip",
+      "A skipped test stays green in CI. Fix the test, or delete it and say why in the commit.",
+    ),
+    "no-focused-tests": modifierRule(
+      "only",
+      "`.only` leaves the other tests in the file unrun. Remove it before committing.",
+    ),
     "comment-refs": {
       create(context) {
         return {

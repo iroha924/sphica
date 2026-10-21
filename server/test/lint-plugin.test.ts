@@ -9,6 +9,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
+import plugin from "../../scripts/lint-plugin.mjs";
 import { tempDir } from "./temp-dir.ts";
 
 const REPO = path.join(import.meta.dirname, "..", "..");
@@ -30,7 +31,7 @@ function lint(files: Record<string, string>) {
     plugins: [],
     jsPlugins: [path.join(REPO, "scripts", "lint-plugin.mjs")],
     categories: {},
-    rules: { "sphica/comment-refs": "error", "sphica/sql-style": "error" },
+    rules: Object.fromEntries(Object.keys(plugin.rules).map((r) => [`sphica/${r}`, "error"])),
   };
   fs.writeFileSync(path.join(root, ".oxlintrc.json"), JSON.stringify(config));
   for (const [rel, text] of Object.entries(files)) {
@@ -83,4 +84,33 @@ test("files that break neither rule pass", () => {
   });
   assert.deepEqual(found, []);
   assert.equal(status, 0);
+});
+
+test("no-skipped-tests and no-focused-tests report node:test's skip and only, which the jest plugin does not see", () => {
+  const { found } = lint({
+    "server/test/a.test.ts": [
+      'import { describe, test } from "node:test";',
+      'test.skip("a", () => {});',
+      'describe.only("b", () => {});',
+      'test("c", () => {});',
+      "",
+    ].join("\n"),
+  });
+  assert.deepEqual(
+    found.map((f) => f.slice(0, 3)),
+    [
+      ["server/test/a.test.ts", 2, "no-skipped-tests"],
+      ["server/test/a.test.ts", 3, "no-focused-tests"],
+    ],
+  );
+});
+
+test("the repository's .oxlintrc.json loads the plugin and turns every one of its rules on", () => {
+  const config = JSON.parse(fs.readFileSync(path.join(REPO, ".oxlintrc.json"), "utf8"));
+  assert.deepEqual(config.jsPlugins, ["./scripts/lint-plugin.mjs"]);
+  const on = { ...config.rules };
+  for (const o of config.overrides ?? []) Object.assign(on, o.rules);
+  for (const rule of Object.keys(plugin.rules)) assert.equal(on[`sphica/${rule}`], "error", rule);
+  for (const rule of ["typescript/no-floating-promises", "typescript/no-misused-promises"])
+    assert.equal([on[rule]].flat()[0], "error", rule);
 });

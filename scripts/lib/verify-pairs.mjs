@@ -14,6 +14,7 @@ const TARBALL_RUN = /node (\.\.\/)?scripts\/check-tarball\.mjs/;
 // Jobs a push to main skips when its pull request already passed the same tree; each must run on anything else
 const HEAVY = ["part", "macos", "windows", "git-2-34"];
 const SKIP_IF =
+  // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
   "    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}";
 
 /** The script names of a `bun run a && bun run b` line, or null for anything else */
@@ -128,6 +129,7 @@ export function verifyProblems({ pkg, check, release, lychee }) {
     else {
       if (conditional(all[at]))
         problems.push("check.yml part job: the verify step runs only under a condition");
+      // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
       if (!all[at].includes("          PART: ${{ matrix.part }}"))
         problems.push("check.yml part job: the verify step does not take PART from matrix.part");
       // Reach is counted on every line but the first (the engines floor), and nowhere else is it skipped
@@ -159,6 +161,7 @@ export function verifyProblems({ pkg, check, release, lychee }) {
       !gate.includes("    if: always()") ||
       !judge ||
       conditional(judge) ||
+      // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
       !judge.includes("          EVENT: ${{ github.event_name }}")
     )
       problems.push(
@@ -215,6 +218,7 @@ function sameTreeProblems(check) {
     if (
       !detector.includes("    if: github.event_name == 'push'") ||
       !detector.includes("      actions: read") ||
+      // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
       !detector.includes("      tested: ${{ steps.decide.outputs.tested }}") ||
       !all.some(
         (st) => st.includes("        id: decide") && st.includes("        run: node scripts/same-tree.mjs"),

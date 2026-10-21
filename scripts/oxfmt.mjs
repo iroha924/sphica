@@ -24,11 +24,13 @@ const json = (dir) =>
     .map((f) => (dir === "." ? f : `${dir}/${f}`));
 const inScope = (file) =>
   /^[^/]+\.json$|^server\/[^/]+\.json$/.test(file) ||
-  (DIRS.some((d) => file.startsWith(`${d}/`)) && /\.(?:ts|mts|mjs)$/.test(file));
+  (DIRS.some((d) => file.startsWith(`${d}/`)) && /\.(?:ts|mts|mjs|json)$/.test(file));
 
 const args = process.argv.slice(2);
 const flags = args.filter((a) => a.startsWith("-"));
-const files = args.filter((a) => !a.startsWith("-")).map((f) => f.split(path.sep).join("/"));
+const files = args
+  .filter((a) => !a.startsWith("-"))
+  .map((f) => path.relative(root, path.resolve(f)).split(path.sep).join("/"));
 const targets = files.length ? files.filter(inScope) : [...DIRS, ...json("."), ...json("server")];
 if (targets.length === 0) process.exit(0);
 const r = spawnSync(process.execPath, [oxfmt, "--no-error-on-unmatched-pattern", ...flags, ...targets], {
