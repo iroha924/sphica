@@ -59,7 +59,10 @@ test("comment-refs reports a comment that points at an issue, and not the same w
     found.map((f) => f.slice(0, 3)),
     [["server/src/a.ts", 2, "comment-refs"]],
   );
-  assert.match(String(found[0]?.[3]), /Write the reason itself/);
+  assert.match(
+    String(found[0]?.[3]),
+    /^the comment points at an issue number\. Why: .+\. Fix: write the reason itself/,
+  );
 });
 
 test("sql-style reports raw connections outside the allowed files, and REPLACE and string directions anywhere it looks", () => {
@@ -115,4 +118,40 @@ test("the repository's .oxlintrc.json loads the plugin and turns every one of it
   for (const rule of Object.keys(plugin.rules)) assert.equal(on[`sphica/${rule}`], "error", rule);
   for (const rule of ["typescript/no-floating-promises", "typescript/no-misused-promises"])
     assert.equal([on[rule]].flat()[0], "error", rule);
+});
+
+test("check-findings reports a check script that prints, throws, or fails outside finding.mjs, and nothing elsewhere", () => {
+  const raw = [
+    'console.error("broke");',
+    'process.stderr.write("broke");',
+    'throw new Error("broke");',
+    "process.exitCode = 1;",
+    "process.exit(1);",
+    "console.warn('broke');",
+    "",
+  ].join("\n");
+  const kept = [
+    'import { finding, report } from "./lib/finding.mjs";',
+    'report("x", [finding({ where: "a", what: "b", why: "c", fix: "d" })]);',
+    "process.exit(0);",
+    "process.exit();",
+    'console.log("passed");',
+    "",
+  ].join("\n");
+  const { found } = lint({
+    "scripts/check-x.mjs": raw,
+    "scripts/run-unit.mjs": raw,
+    "scripts/check-ok.mjs": kept,
+    "scripts/release-plan.mjs": raw,
+    "scripts/lib/check-y.mjs": raw,
+  });
+  const lines = [1, 2, 3, 4, 5, 6];
+  assert.deepEqual(
+    found.map((f) => f.slice(0, 3)).sort(),
+    [
+      ...lines.map((l) => ["scripts/check-x.mjs", l, "check-findings"]),
+      ...lines.map((l) => ["scripts/run-unit.mjs", l, "check-findings"]),
+    ].sort(),
+  );
+  assert.match(String(found[0]?.[3]), /^the check prints, throws, or fails outside .+\. Why: .+\. Fix: .+$/);
 });

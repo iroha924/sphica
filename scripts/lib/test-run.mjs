@@ -21,8 +21,11 @@ function removeTree(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+const UNFINISHED = "a run that did not finish proves nothing about the tests";
+const LEFTOVERS = "a test that leaves files behind can make a later test pass or fail by chance";
+
 /**
- * Runs `command` with `args`; `problems` says why it did not pass cleanly (empty when it did), beside the run's whole output. `remove`
+ * Runs `command` with `args`; `problems` says why it did not pass cleanly, each with why it matters and the fix (empty when it did), beside the run's whole output. `remove`
  * is how the directory goes away, replaced only by tests.
  */
 export function runTestsIsolated(
@@ -45,11 +48,29 @@ export function runTestsIsolated(
     if (r.error)
       result.problems.push(
         r.error.code === "ENOBUFS"
-          ? `the test run's output passed ${maxBuffer} bytes, so it was stopped`
-          : `the test run could not finish: ${r.error.message}`,
+          ? {
+              what: `the test run's output passed ${maxBuffer} bytes, so it was stopped`,
+              why: UNFINISHED,
+              fix: "find the test that prints that much in the output below and make it quieter",
+            }
+          : {
+              what: `the test run could not finish: ${r.error.message}`,
+              why: UNFINISHED,
+              fix: `check that ${command} starts (run \`mise install\` for the pinned tools)`,
+            },
       );
-    else if (r.signal) result.problems.push(`the test run was stopped by ${r.signal}`);
-    else if (r.status !== 0) result.problems.push(`the tests failed (exit ${r.status})`);
+    else if (r.signal)
+      result.problems.push({
+        what: `the test run was stopped by ${r.signal}`,
+        why: UNFINISHED,
+        fix: "run `bun run test` to see where it stops: a test may hang or run out of memory",
+      });
+    else if (r.status !== 0)
+      result.problems.push({
+        what: `the tests failed (exit ${r.status})`,
+        why: "a failing test means the change broke what that test checks",
+        fix: "fix each test marked `not ok` in the output below",
+      });
     let left;
     try {
       // npm keeps a compile cache in the temp directory, also for a child given only TMPDIR; it is a tool's cache, not a leftover
@@ -58,19 +79,29 @@ export function runTestsIsolated(
         .filter((name) => name !== "node-compile-cache")
         .sort();
     } catch (e) {
-      result.problems.push(`the run's temp directory ${dir} could not be read: ${e.message}`);
+      result.problems.push({
+        what: `the run's temp directory ${dir} could not be read: ${e.message}`,
+        why: LEFTOVERS,
+        fix: "check that the system temp directory can be read and written",
+      });
       left = [];
     }
     if (left.length)
-      result.problems.push(
-        `the tests left ${left.length} entr${left.length === 1 ? "y" : "ies"} in their temp directory: ${left.slice(0, 50).join(", ")}${left.length > 50 ? ", ..." : ""}`,
-      );
+      result.problems.push({
+        what: `the tests left ${left.length} entr${left.length === 1 ? "y" : "ies"} in their temp directory: ${left.slice(0, 50).join(", ")}${left.length > 50 ? ", ..." : ""}`,
+        why: LEFTOVERS,
+        fix: "have the test that writes each entry remove it, with tempDir from server/test/temp-dir.ts",
+      });
   } finally {
     try {
       remove(dir);
     } catch (e) {
       // A process a test left running can still be writing there; the run's output and problems must still be shown
-      result.problems.push(`the run's temp directory ${dir} could not be removed: ${e.message}`);
+      result.problems.push({
+        what: `the run's temp directory ${dir} could not be removed: ${e.message}`,
+        why: "a process a test left running may still be writing there",
+        fix: "have the test wait for or stop each process it starts",
+      });
     }
   }
   return result;

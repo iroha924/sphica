@@ -31,7 +31,7 @@ const scripts = (files: ReturnType<typeof real>, change: (s: Record<string, stri
   return { ...files, pkg: JSON.stringify(pkg) };
 };
 const fails = (files: ReturnType<typeof real>, want: RegExp) => {
-  const problems = verifyProblems(files);
+  const problems = verifyProblems(files).map((p) => `${p.where}: ${p.what}`);
   assert.ok(
     problems.some((p) => want.test(p)),
     `expected a problem matching ${want}, got:\n${problems.join("\n")}`,
@@ -95,7 +95,7 @@ test("a part left out of the matrix, a condition on the verify step, or a matrix
   );
   fails(
     edit("check", "part: [static, unit, acceptance]", "part:\n          - static"),
-    /cannot read its `part: \[\.\.\.\]` matrix/,
+    /the `part: \[\.\.\.\]` matrix cannot be read/,
   );
   fails(
     edit(
@@ -103,7 +103,7 @@ test("a part left out of the matrix, a condition on the verify step, or a matrix
       "        part: [static, unit, acceptance]\n",
       "        part: [static, unit, acceptance]\n        exclude:\n",
     ),
-    /include and exclude are not read/,
+    /the matrix has include or exclude/,
   );
   fails(
     edit(
@@ -136,7 +136,7 @@ test("lychee missing, late, conditional, unchecked, or at another version fails"
   const check = real().check;
   const step = / {6}- name: Install lychee\n(?: {8}.*\n| {10}.*\n)+/.exec(check)?.[0];
   assert.ok(step);
-  fails(edit("check", step, ""), /check.yml part job: no Install lychee step/);
+  fails(edit("check", step, ""), /check\.yml \(part job\): no Install lychee step/);
   fails(
     edit(
       "check",
@@ -146,21 +146,21 @@ test("lychee missing, late, conditional, unchecked, or at another version fails"
     /runs only under a condition/,
   );
   fails(edit("check", "| sha256sum -c -", "| true"), /check its SHA-256/);
-  fails({ ...real(), lychee: "0.0.1" }, /LYCHEE .* differs from mise.toml lychee 0\.0\.1/);
+  fails({ ...real(), lychee: "0.0.1" }, /LYCHEE is .*, but mise\.toml pins lychee 0\.0\.1/);
   const release = real().release;
   const releaseStep = / {6}- name: Install lychee\n(?: {8}.*\n| {10}.*\n)+/.exec(release)?.[0];
   assert.ok(releaseStep);
-  fails(edit("release", releaseStep, ""), /release.yml prepare job: no Install lychee step/);
+  fails(edit("release", releaseStep, ""), /release\.yml \(prepare job\): no Install lychee step/);
 });
 
 test("a setup-bun step without no-cache fails, in either workflow", () => {
   fails(
     edit("check", /bun-version: 1\.4\.0\n {10}no-cache: true\n/, "bun-version: 1.4.0\n"),
-    /check.yml: a setup-bun step restores Bun/,
+    /check\.yml: a setup-bun step restores Bun/,
   );
   fails(
     edit("release", /bun-version: 1\.4\.0\n {10}no-cache: true\n/, "bun-version: 1.4.0\n"),
-    /release.yml: a setup-bun step restores Bun/,
+    /release\.yml: a setup-bun step restores Bun/,
   );
 });
 
@@ -235,7 +235,7 @@ test("a part matrix with only the floor line, once or repeated, where nothing co
   for (const only of ['["24.15"]', '["24.15", "24.15"]']) {
     const files = real();
     files.check = files.check.replaceAll('        node: ["24.15", "26"]\n', `        node: ${only}\n`);
-    fails(files, /has no line other than the first, so SQL reach and coverage are counted nowhere/);
+    fails(files, /the Node matrix \[.*\] has no line other than the first/);
   }
 });
 
@@ -254,7 +254,7 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
   const trigger = /does not run on pushes to main and on pull requests into main only/;
   fails(edit("check", "  pull_request:\n    branches: [main]\n", "  pull_request:\n"), trigger);
   fails(edit("check", "  push:\n    branches: [main]\n", "  push:\n"), trigger);
-  const detector = /same-tree job does not run only on push/;
+  const detector = /check\.yml \(same-tree job\): the job does not run only on push/;
   fails(edit("check", "    if: github.event_name == 'push'\n", ""), detector);
   fails(edit("check", "      actions: read\n", ""), detector);
   fails(edit("check", "        id: decide\n", ""), detector);
@@ -275,13 +275,13 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
     detector,
   );
   fails(edit("check", / {8}run: node scripts\/main-version-check\.mjs\n/, "        run: true\n"), detector);
-  fails(edit("check", /\n {2}same-tree:\n[\s\S]*?\n\n/, "\n"), /has no same-tree job/);
+  fails(edit("check", /\n {2}same-tree:\n[\s\S]*?\n\n/, "\n"), /check\.yml: no same-tree job/);
   for (const name of ["part", "macos", "windows", "git-2-34"]) {
     const at = new RegExp(
       `(\\n {2}${name}:\\n(?: {4}name: .*\\n)?) {4}needs: same-tree\\n${skipIf.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&")}`,
     );
     const want = new RegExp(
-      `${name} job is not skipped exactly when same-tree found the tree already passed`,
+      `\\(${name} job\\): the job is not skipped exactly when same-tree found the tree already passed`,
     );
     fails(edit("check", at, "$1"), want);
     fails(edit("check", at, `$1    needs: same-tree\n${skipIf.replace("!cancelled() && ", "")}`), want);

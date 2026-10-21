@@ -12,6 +12,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import url from "node:url";
+import { finding, report } from "./lib/finding.mjs";
 
 const repo = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
 // --root points the check at a copy of the sources, so a test can show it failing
@@ -21,6 +22,8 @@ const root = at > 0 ? path.resolve(process.argv[at + 1] ?? "") : repo;
 const jsTokens = createRequire(path.join(repo, "server/package.json"))("js-tokens");
 /** Read-only interfaces. No module reachable from these may import the write connection. */
 const READERS = ["server/src/mcp.ts"];
+const SELF = "scripts/check-architecture.mjs";
+const VACUOUS = "if its pattern stopped matching, this check would pass while looking at nothing";
 const WRITER = "server/src/db-write.ts";
 
 // Four forms: `import x from`, `export ... from`, side-effect-only `import "..."`, and `import(...)`.
@@ -49,19 +52,40 @@ function reach(entry) {
 const fail = [];
 for (const entry of READERS) {
   if (!fs.existsSync(path.join(root, entry))) {
-    fail.push(`${entry} does not exist. Fix READERS in check-architecture.mjs`);
+    fail.push(
+      finding({
+        where: SELF,
+        what: `READERS names ${entry}, which does not exist`,
+        why: "the boundary would be checked from no reader",
+        fix: "point READERS at the entry file of the read MCP server",
+      }),
+    );
     continue;
   }
   const via = reach(entry);
   if (!via.has(WRITER)) continue;
   const chain = [];
   for (let at = WRITER; at; at = via.get(at)) chain.unshift(at);
-  fail.push(`${entry} reaches the write connection: ${chain.join(" → ")}`);
+  fail.push(
+    finding({
+      where: entry,
+      what: `the read server reaches the write connection: ${chain.join(" → ")}`,
+      why: "text the read server reads could steer it into writing once a write connection is in reach (invariant connection-roles)",
+      fix: `remove the import in the chain that leads to ${WRITER}, and do the write in the record server (server/src/mcp-record.ts)`,
+    }),
+  );
 }
 // If the import regex broke and matched nothing, the check would pass while looking at nothing. Confirm each entry imports a src module.
 for (const entry of READERS)
   if (fs.existsSync(path.join(root, entry)) && reach(entry).size < 3)
-    fail.push(`cannot follow the imports of ${entry}`);
+    fail.push(
+      finding({
+        where: entry,
+        what: "the imports cannot be followed: fewer than 3 modules were reached",
+        why: VACUOUS,
+        fix: `fix IMPORT in ${SELF} to match the import forms the entry uses`,
+      }),
+    );
 
 // Lifecycles and replacements are judged, never written directly: only reconcile writes them, after judging the facts a save changed.
 // The record that answered a question is written with the withdrawal it caused, so it has the same one writer
@@ -74,10 +98,24 @@ const sources = fs
   .map((f) => `server/src/${String(f).split(path.sep).join("/")}`)
   .filter((f) => f.endsWith(".ts"));
 if (!sources.includes(RECONCILE))
-  fail.push(`${RECONCILE} does not exist. Fix RECONCILE in check-architecture.mjs`);
+  fail.push(
+    finding({
+      where: SELF,
+      what: `RECONCILE names ${RECONCILE}, which does not exist`,
+      why: "the only writer of lifecycles would be checked against a missing file",
+      fix: "point RECONCILE at the module that judges lifecycles and replacements",
+    }),
+  );
 for (const f of sources)
   if (!SPARED.has(f) && JUDGED.test(fs.readFileSync(path.join(root, f), "utf8")))
-    fail.push(`${f} writes unit_state, unit_replacement, or unit_answer; only ${RECONCILE} may`);
+    fail.push(
+      finding({
+        where: f,
+        what: "the module writes unit_state, unit_replacement, or unit_answer",
+        why: "lifecycles, replacements, and answers are judged from the facts a save changed, never written directly",
+        fix: `write the facts and let ${RECONCILE} judge them; only it may write these tables`,
+      }),
+    );
 
 // git runs outside the agent's sandbox in a repository whose config the agent writes: only GIT_STARTERS start it, with the options and
 // environment that keep that config from running a command. Two layers, read as tokens so comments do not count: only the modules in
@@ -119,16 +157,37 @@ const namesGit = (texts) => texts.some((s) => /^git(?:\.exe)?$/i.test(s) || /^gi
 for (const f of sources) {
   const texts = strings(fs.readFileSync(path.join(root, f), "utf8"));
   if (!SPAWNERS.has(f) && loadsSpawn(texts))
-    fail.push(`${f} loads node:child_process; only ${[...SPAWNERS].join(", ")} may start processes`);
+    fail.push(
+      finding({
+        where: f,
+        what: "the module loads node:child_process",
+        why: "git runs outside the agent's sandbox, so only the few modules a review reads may start processes",
+        fix: `start the process through one of ${[...SPAWNERS].join(", ")}, or add this module to SPAWNERS in ${SELF} if it must`,
+      }),
+    );
   else if (SPAWNERS.has(f) && !GIT_STARTERS.has(f) && namesGit(texts))
-    fail.push(`${f} starts git; only ${[...GIT_STARTERS].join(" and ")} may`);
+    fail.push(
+      finding({
+        where: f,
+        what: "the module starts git",
+        why: "git started without the starters' options and environment can run a command the repository's config names",
+        fix: `start git through ${[...GIT_STARTERS].join(" or ")}`,
+      }),
+    );
 }
 // If the tokens stopped being read, the check would pass while looking at nothing: each starter must still load node:child_process and
 // name git
 for (const f of GIT_STARTERS) {
   const texts = sources.includes(f) ? strings(fs.readFileSync(path.join(root, f), "utf8")) : [];
   if (!loadsSpawn(texts) || !namesGit(texts))
-    fail.push(`${f} names no git to start where check-architecture.mjs looks; fix GIT_STARTERS`);
+    fail.push(
+      finding({
+        where: f,
+        what: `the module names no git to start where ${SELF} looks`,
+        why: VACUOUS,
+        fix: `fix GIT_STARTERS in ${SELF} to list the modules that start git`,
+      }),
+    );
 }
 
 // Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords, and only AUTHORITY_WRITERS write the rows that
@@ -165,32 +224,54 @@ for (const f of sources) {
   const text = code(fs.readFileSync(path.join(root, f), "utf8"));
   if (f !== OWN_WORDS && forged(text))
     fail.push(
-      `${f} casts a value to OwnWords or imports it under another name; only ${OWN_WORDS} makes one, by checking the words`,
+      finding({
+        where: f,
+        what: "the module casts a value to OwnWords or imports it under another name",
+        why: "an OwnWords vouches whose words a quotation is, and a cast skips the check that decides it",
+        fix: `get one from ownWords in ${OWN_WORDS}, which makes it by checking where the words sit`,
+      }),
     );
   if (!AUTHORITY_WRITERS.has(f) && AUTHORITY.test(text))
     fail.push(
-      `${f} writes evidence, an adoption, a retraction, an anchor's reason, or a field definition; only ${[...AUTHORITY_WRITERS].join(" and ")} may, from an OwnWords`,
+      finding({
+        where: f,
+        what: "the module writes evidence, an adoption, a retraction, an anchor's reason, or a field definition",
+        why: "these rows carry authority, so only the writers that take an OwnWords may write them",
+        fix: `write them through ${[...AUTHORITY_WRITERS].join(" or ")}, from an OwnWords`,
+      }),
     );
 }
 // If the patterns stopped matching, the check would pass while looking at nothing
 if (!sources.includes(OWN_WORDS) || !forged(code(fs.readFileSync(path.join(root, OWN_WORDS), "utf8"))))
-  fail.push(`${OWN_WORDS} makes no OwnWords where check-architecture.mjs looks; fix OWN_WORDS`);
+  fail.push(
+    finding({
+      where: OWN_WORDS,
+      what: `the module makes no OwnWords where ${SELF} looks`,
+      why: VACUOUS,
+      fix: `fix OWN_WORDS in ${SELF} to name the module that makes an OwnWords`,
+    }),
+  );
 for (const f of AUTHORITY_WRITERS)
   if (!sources.includes(f) || !AUTHORITY.test(code(fs.readFileSync(path.join(root, f), "utf8"))))
-    fail.push(`${f} writes no authority row where check-architecture.mjs looks; fix AUTHORITY_WRITERS`);
+    fail.push(
+      finding({
+        where: f,
+        what: `the module writes no authority row where ${SELF} looks`,
+        why: VACUOUS,
+        fix: `fix AUTHORITY_WRITERS in ${SELF} to list the modules that write those rows`,
+      }),
+    );
 
-if (fail.length) {
-  console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
-  process.exit(1);
+if (!report("architecture", fail)) {
+  console.log(`lifecycle writers: only ${RECONCILE} writes unit_state, unit_replacement, and unit_answer`);
+  console.log(
+    `authority rows: only ${[...AUTHORITY_WRITERS].join(" and ")} write them, from words ${OWN_WORDS} checked`,
+  );
+  console.log(
+    `git starters: only ${[...GIT_STARTERS].join(" and ")} start git, among the ${SPAWNERS.size} modules that start processes`,
+  );
+  const count = new Set(READERS.flatMap((e) => [...reach(e).keys()])).size;
+  console.log(
+    `reader boundary: none of the ${count} modules reachable from ${READERS.join(" / ")} import the write connection`,
+  );
 }
-console.log(`lifecycle writers: only ${RECONCILE} writes unit_state, unit_replacement, and unit_answer`);
-console.log(
-  `authority rows: only ${[...AUTHORITY_WRITERS].join(" and ")} write them, from words ${OWN_WORDS} checked`,
-);
-console.log(
-  `git starters: only ${[...GIT_STARTERS].join(" and ")} start git, among the ${SPAWNERS.size} modules that start processes`,
-);
-const count = new Set(READERS.flatMap((e) => [...reach(e).keys()])).size;
-console.log(
-  `reader boundary: none of the ${count} modules reachable from ${READERS.join(" / ")} import the write connection`,
-);

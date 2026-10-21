@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
-import { partProblems } from "../../scripts/lib/check-parts.mjs";
+import { partProblems as problemsOf } from "../../scripts/lib/check-parts.mjs";
+
+const partProblems = (...args: Parameters<typeof problemsOf>) => problemsOf(...args).map((p) => p.what);
 
 const SCRIPT = path.join(import.meta.dirname, "..", "..", "scripts", "check-parts.mjs");
 const PR_DETECTOR = { result: "skipped", outputs: {} };

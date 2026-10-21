@@ -7,4 +7,4 @@ export function verifyProblems(files: {
   check: string;
   release: string;
   lychee: string | null;
-}): string[];
+}): { where: string; what: string; why: string; fix: string }[];

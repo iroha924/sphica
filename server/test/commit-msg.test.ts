@@ -10,11 +10,13 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { commitMessageProblems } from "../../scripts/lib/commit-msg.mjs";
+import { ruleMessage } from "../../scripts/lib/finding.mjs";
+import { assertFindings } from "./finding-shape.ts";
 
 type Opts = { merge?: boolean; hook?: boolean; commentChar?: string; cleanup?: string };
 const ok = (m: string, opts: Opts = {}) => assert.deepEqual(commitMessageProblems(m, opts), [], m);
 const bad = (m: string, re: RegExp, opts: Opts = {}) =>
-  assert.match(commitMessageProblems(m, opts).join("\n"), re, m);
+  assert.match(commitMessageProblems(m, opts).map(ruleMessage).join("\n"), re, m);
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const SCRIPT = fileURLToPath(new URL("../../scripts/check-commit-msg.mjs", import.meta.url));
 const SCISSORS = "------------------------ >8 ------------------------";
@@ -107,6 +109,7 @@ test("--pre-push checks the stored messages of the pushed refs, not HEAD and not
     const rejected = check(`refs/heads/bodied ${bodied} refs/heads/bodied ${zero}\n`);
     assert.equal(rejected.status, 1);
     assert.match(String(rejected.stderr), /use a one-line subject with no body/);
+    assertFindings(String(rejected.stderr), "check-commit-msg --pre-push");
     assert.doesNotMatch(String(rejected.stderr), /write the message in English/);
 
     // HEAD is on bodied, but only clean is pushed.

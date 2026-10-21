@@ -16,12 +16,17 @@ import path from "node:path";
 import process from "node:process";
 import { unmeasured } from "./lib/coverage-report.mjs";
 import { coveredSites } from "./lib/coverage.mjs";
+import { finding, report } from "./lib/finding.mjs";
 import { root } from "./lib/live-harness.mjs";
 import { ALLOWED_UNCOVERED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
 import { runTestsIsolated } from "./lib/test-run.mjs";
 
 // Source files that hold only types: nothing in them runs, so the coverage report never lists them
 const TYPES_ONLY = ["src/db-types.ts"];
+const SELF = "scripts/check-sql-reach.mjs";
+const LEDGER = "scripts/lib/sql-call-sites.mjs";
+const UNRUN =
+  "SQL that no test runs can hold what SQLite rejects, and neither types nor unit tests notice (invariant real-sqlite-tests)";
 
 // A failure is printed and the process left to end on its own: exiting at once would drop output still waiting in the pipe
 export function sqlReach() {
@@ -41,11 +46,18 @@ function reach(covDir) {
     env: { ...process.env, NODE_V8_COVERAGE: covDir },
   });
   if (r.problems.length) {
-    // node --test writes failure details to stdout.
-    console.error("tests did not pass cleanly, so reach cannot be counted. Fix `bun run test` first.\n");
-    console.error(`${r.stdout}${r.stderr}`);
-    for (const p of r.problems) console.error(`  ${p}`);
-    process.exitCode = 1;
+    // node --test writes failure details to stdout, so the whole output goes with the first finding
+    report(
+      "sql:reach",
+      r.problems.map((p, i) =>
+        finding({
+          where: "bun run test",
+          ...p,
+          why: `${p.why}, and reach is counted only from a clean run`,
+          detail: i === 0 ? `${r.stdout}${r.stderr}` : undefined,
+        }),
+      ),
+    );
     return;
   }
   // The test output is hidden on success, so a randomized run shows its seed here to be rerun in the same order
@@ -60,28 +72,42 @@ function reach(covDir) {
     .map((f) => `src/${f.split(path.sep).join("/")}`);
   const missing = unmeasured(`${r.stdout}${r.stderr}`, sources, TYPES_ONLY);
   if (!missing) {
-    console.error(
-      "the test output does not hold exactly one coverage report, so which files the thresholds counted cannot be told. A test may have printed one.",
-    );
-    process.exitCode = 1;
+    report("sql:reach", [
+      finding({
+        where: "bun run test",
+        what: "the test output does not hold exactly one coverage report",
+        why: "which files the coverage thresholds counted cannot be told from it",
+        fix: "find the test that prints a coverage report of its own (one that runs node --test with coverage) and quiet it",
+      }),
+    ]);
     return;
   }
-  if (missing.length) {
-    console.error(
-      `the coverage report does not list ${missing.length} of ${sources.length} files in server/src, so the thresholds did not count them:\n  ${missing.join("\n  ")}`,
-    );
-    console.error(
-      "\nHave a test load each file, or add one that holds only types to TYPES_ONLY in scripts/check-sql-reach.mjs.",
-    );
-    process.exitCode = 1;
+  if (
+    report(
+      "sql:reach",
+      missing.map((f) =>
+        finding({
+          where: `server/${f}`,
+          what: "the coverage report does not list the file",
+          why: "the coverage thresholds count only the files a test loaded, so none of its lines are counted",
+          fix: `have a test import it, or add it to TYPES_ONLY in ${SELF} if it holds only types`,
+        }),
+      ),
+    )
+  )
     return;
-  }
 
   const sites = callSites(root).filter((s) => !LIVE_FILES.some((f) => s.startsWith(`${f}:`)));
   const covered = coveredSites(covDir, root, sites);
   if (covered.size === 0) {
-    console.error("no reached sites were counted. Coverage output may be broken.");
-    process.exitCode = 1;
+    report("sql:reach", [
+      finding({
+        where: "scripts/lib/coverage.mjs",
+        what: "no reached call site was counted",
+        why: "coverage output that cannot be read makes every site look unrun, or hides that none is",
+        fix: "check that the test run writes V8 coverage to NODE_V8_COVERAGE and that coveredSites reads it",
+      }),
+    ]);
     return;
   }
   const uncovered = sites.filter((s) => !covered.has(s));
@@ -95,30 +121,51 @@ function reach(covDir) {
   for (const [file, list] of [...byFile].sort()) {
     const allowed = ALLOWED_UNCOVERED.find((a) => a.file === file);
     if (!allowed)
-      ledger.push(`${file}: ${list.length} sites are not run by any test\n    ${list.join("\n    ")}`);
+      ledger.push(
+        ...list.map((site) =>
+          finding({
+            where: site,
+            what: "no test runs the SQL at this call site",
+            why: UNRUN,
+            fix: `run it in a test against a temp database (server/test/temp-db.ts), or, if no test can, add the file with the reason to ALLOWED_UNCOVERED in ${LEDGER}`,
+          }),
+        ),
+      );
     else if (list.length > allowed.uncovered)
       ledger.push(
-        `${file}: unrun call sites grew from ${allowed.uncovered} to ${list.length}\n    ${list.join("\n    ")}`,
+        finding({
+          where: file,
+          what: `unrun call sites grew from ${allowed.uncovered} to ${list.length}`,
+          why: UNRUN,
+          fix: `run the new sites in a test against a temp database (server/test/temp-db.ts), or raise uncovered in ${LEDGER} with the reason`,
+          detail: list.join("\n"),
+        }),
       );
   }
   for (const a of ALLOWED_UNCOVERED) {
     const now = (byFile.get(a.file) ?? []).length;
     if (now < a.uncovered)
-      ledger.push(`${a.file}: unrun call sites dropped to ${now}. Lower the count in ALLOWED_UNCOVERED`);
+      ledger.push(
+        finding({
+          where: LEDGER,
+          what: `${a.file} allows ${a.uncovered} unrun call sites, but only ${now} are unrun now`,
+          why: "an allowance larger than needed would let a site stop being run unseen",
+          fix: `lower uncovered for ${a.file} to ${now} in ALLOWED_UNCOVERED`,
+        }),
+      );
     // Check the total too. A swap that reaches one site and adds another nets zero in the unrun count alone.
     const total = sites.filter((s) => s.startsWith(`${a.file}:`)).length;
     if (total !== a.sites)
-      ledger.push(`${a.file}: call sites changed from ${a.sites} to ${total}. Review ALLOWED_UNCOVERED`);
+      ledger.push(
+        finding({
+          where: LEDGER,
+          what: `${a.file} has ${total} call sites, but ALLOWED_UNCOVERED records ${a.sites}`,
+          why: "a change that runs one site and adds an unrun one leaves the unrun count alone, so the total is kept too",
+          fix: `check that the added or moved sites are run by tests, then set sites for ${a.file} to ${total}`,
+        }),
+      );
   }
-  if (ledger.length) {
-    console.error("some call sites never run their SQL.\n");
-    for (const l of ledger) console.error(`  ${l}`);
-    console.error(
-      "\nIf one cannot be run, add it with a reason to ALLOWED_UNCOVERED in scripts/lib/sql-call-sites.mjs.",
-    );
-    process.exitCode = 1;
-    return;
-  }
+  if (report("sql:reach", ledger)) return;
   console.log(
     `SQL: tests ran ${sites.length - uncovered.length} / ${sites.length} sites against a real SQLite database` +
       (uncovered.length

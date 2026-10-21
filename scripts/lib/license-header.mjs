@@ -19,14 +19,14 @@ export function commentMarker(file) {
 /** The two header lines for a comment marker. */
 export const headerLines = (marker) => [`${marker} ${COPYRIGHT}`, `${marker} ${LICENSE_ID}`];
 
-/** What is wrong with a file's header, or null. The header is the first two lines, after a shebang line when there is one. */
+/** The first line of a file's header that is wrong and what it should be, or null. The header is the first two lines, after a shebang line when there is one. */
 export function headerProblem(source, marker) {
   // A checkout with CRLF line endings has the same header
   const lines = source.split(/\r?\n/);
   const at = lines[0]?.startsWith("#!") ? 1 : 0;
   const [copyright, license] = headerLines(marker);
-  if (lines[at] !== copyright) return `line ${at + 1} is not "${copyright}"`;
-  if (lines[at + 1] !== license) return `line ${at + 2} is not "${license}"`;
+  if (lines[at] !== copyright) return { line: at + 1, expected: copyright };
+  if (lines[at + 1] !== license) return { line: at + 2, expected: license };
   return null;
 }
 

@@ -6,6 +6,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { finding, report } from "./lib/finding.mjs";
 import { isChecked, markdownFiles } from "./lib/markdown-files.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,5 +26,12 @@ try {
     },
   );
 } catch {
-  process.exit(1);
+  report("Markdown", [
+    finding({
+      where: "the markdownlint-cli2 output above",
+      what: "markdownlint found Markdown that renders or links wrong",
+      why: ".markdownlint-cli2.jsonc turns on only rules whose failure breaks rendering or links",
+      fix: "fix each line markdownlint names; its rule id (MD042 and the like) is explained in markdownlint's doc/Rules.md",
+    }),
+  ]);
 }

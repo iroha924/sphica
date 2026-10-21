@@ -20,30 +20,44 @@ const RAW_SQL_OK = new Set([
 // means the call forms (exec, prepare) need not be counted one by one.
 const RAW = /from\s+["']node:sqlite["']|\bconnect(?:Reader|Writer)\s*\(/g;
 
-/** REPLACE deletes the conflicting row without telling the authorizer or firing delete triggers, so it bypasses the write limits. */
-export const REPLACE = [
-  /\.orReplace\s*\(|\.replaceInto\s*\(|\bor\s+replace\b|\breplace\s+into\b|\bconflict\s+replace\b/gi,
-  "REPLACE deletes rows the authorizer never sees. Use onConflict(doNothing / doUpdateSet)",
-];
+/** check-sql.mjs applies this rule alone to schema.sql */
+export const REPLACE = {
+  re: /\.orReplace\s*\(|\.replaceInto\s*\(|\bor\s+replace\b|\breplace\s+into\b|\bconflict\s+replace\b/gi,
+  what: "REPLACE is used",
+  why: "REPLACE deletes the conflicting row without the authorizer seeing it or a delete trigger firing, so it slips past the write limits",
+  fix: "use onConflict with doNothing or doUpdateSet (`on conflict do nothing` / `do update` in SQL)",
+};
 
 const RULES = [
-  [RAW, "uses a node:sqlite connection directly. Use kysely (openReader / openWriter)"],
-  [/\.orderBy\(\s*\[/g, "orderBy(array) is deprecated. Chain orderBy(expr, 'asc') calls"],
-  [
-    /\.orderBy\(\s*([`'"])[^`'"]*\s+(?:asc|desc)\1/g,
-    "do not embed the direction in the string. Write orderBy(expr, 'desc')",
-  ],
+  {
+    re: RAW,
+    what: "a node:sqlite connection is used directly",
+    why: "only kysely gives result types from the schema, and a raw connection's rows are typed by hand and never checked",
+    fix: "use kysely through openReader or openWriter",
+  },
+  {
+    re: /\.orderBy\(\s*\[/g,
+    what: "orderBy is given an array",
+    why: "kysely deprecates the form and only warns at run time, so it compiles until a release removes it",
+    fix: "chain orderBy(expr, 'asc') calls, one per column",
+  },
+  {
+    re: /\.orderBy\(\s*([`'"])[^`'"]*\s+(?:asc|desc)\1/g,
+    what: "the sort direction is written inside the orderBy string",
+    why: "kysely deprecates the form and only warns at run time, so it compiles until a release removes it",
+    fix: "write orderBy(expr, 'desc') with the direction as its own argument",
+  },
   // A constraint's `on conflict replace` in the schema turns every plain insert into one
   REPLACE,
 ];
 
-/** @param {string} file repository path with forward slashes @returns {{ line: number, why: string }[]} */
+/** @param {string} file repository path with forward slashes @returns {{ line: number, what: string, why: string, fix: string }[]} */
 export function sqlStyleProblems(file, text) {
   const problems = [];
-  for (const [re, why] of RULES) {
+  for (const { re, what, why, fix } of RULES) {
     if (re === RAW && (RAW_SQL_OK.has(file) || file.startsWith("server/test/"))) continue;
     for (const m of text.matchAll(re))
-      problems.push({ line: text.slice(0, m.index).split("\n").length, why });
+      problems.push({ line: text.slice(0, m.index).split("\n").length, what, why, fix });
   }
   return problems;
 }

@@ -23,13 +23,13 @@ test("a file with the two lines first has no problem, with or without a shebang"
 });
 
 test("a missing, misplaced, or half header is a problem that names the line", () => {
-  assert.match(headerProblem("const a = 1;\n", "//") ?? "", /^line 1 /);
-  assert.match(headerProblem(`${copyright}\nconst a = 1;\n`, "//") ?? "", /^line 2 /);
-  assert.match(headerProblem(`#!/usr/bin/env node\nconst a = 1;\n`, "//") ?? "", /^line 2 /);
+  assert.equal(headerProblem("const a = 1;\n", "//")?.line, 1);
+  assert.equal(headerProblem(`${copyright}\nconst a = 1;\n`, "//")?.line, 2);
+  assert.equal(headerProblem(`#!/usr/bin/env node\nconst a = 1;\n`, "//")?.line, 2);
   // The lines somewhere below the top do not count
-  assert.match(headerProblem(`// what this file does\n${copyright}\n${license}\n`, "//") ?? "", /^line 1 /);
+  assert.equal(headerProblem(`// what this file does\n${copyright}\n${license}\n`, "//")?.line, 1);
   // An SQL file takes SQL comments
-  assert.match(headerProblem(`${copyright}\n${license}\n`, "--") ?? "", /^line 1 /);
+  assert.equal(headerProblem(`${copyright}\n${license}\n`, "--")?.line, 1);
 });
 
 test("adding the header keeps the shebang first and leaves a file that has it unchanged", () => {

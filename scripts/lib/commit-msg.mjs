@@ -36,12 +36,30 @@ export function commitMessageProblems(text, opts = {}) {
     lines = lines.slice(0, blank);
   const [subject = "", ...rest] = lines;
   const problems = [];
-  if (JAPANESE.test(lines.join("\n"))) problems.push("write the message in English");
+  if (JAPANESE.test(lines.join("\n")))
+    problems.push({
+      what: "the message holds Japanese",
+      why: "commit messages are written in English (invariant english-code)",
+      fix: "write the message in English",
+    });
   if ((opts.merge && MERGE.test(subject)) || REVERT.test(lines.join("\n"))) return problems;
-  if (rest.some((l) => l !== "")) problems.push("use a one-line subject with no body");
+  if (rest.some((l) => l !== ""))
+    problems.push({
+      what: "the message has lines after the subject",
+      why: "commits here are one line, and the reasoning goes in the pull request body",
+      fix: "use a one-line subject with no body",
+    });
   if (!CONVENTIONAL.test(subject))
-    problems.push(`start with <type>(<scope>)?: where type is one of ${TYPES.replaceAll("|", ", ")}`);
+    problems.push({
+      what: "the subject is not in Conventional Commits form",
+      why: "a subject that leads with its type lets the history be scanned for what changed",
+      fix: `start with <type>(<scope>)?: where type is one of ${TYPES.replaceAll("|", ", ")}, and the scope is lowercase`,
+    });
   if (subject.length > MAX)
-    problems.push(`keep the subject within ${MAX} characters (it has ${subject.length})`);
+    problems.push({
+      what: `the subject has ${subject.length} characters`,
+      why: "one-line logs and GitHub's lists cut a long subject off",
+      fix: `keep the subject within ${MAX} characters`,
+    });
   return problems;
 }

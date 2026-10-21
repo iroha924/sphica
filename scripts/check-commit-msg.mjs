@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { commitMessageProblems } from "./lib/commit-msg.mjs";
+import { finding, report } from "./lib/finding.mjs";
 
 const args = process.argv.slice(2);
 
@@ -115,25 +116,24 @@ function mergeInProgress() {
 // Read once: one `git config` per commit made a 300-commit push take about 10 seconds.
 const comment = commentChar();
 const cleanup = cleanupMode();
-let failed = 0;
-for (const m of messages) {
-  const problems = commitMessageProblems(m.body, {
+// A stored commit is fixed by rewording it: before the push it has not left, and in CI the branch is pushed again over it
+const REWORD =
+  args[0] === "--range"
+    ? "reword the commit (git rebase -i) and push the branch with --force-with-lease"
+    : "reword the commit (git rebase -i) before pushing";
+const fail = messages.flatMap((m) => {
+  const subject = m.body.split("\n")[0] ?? "";
+  return commitMessageProblems(m.body, {
     merge: m.merge,
     hook: m.hook === true,
     commentChar: comment,
     cleanup,
-  });
-  if (!problems.length) continue;
-  failed++;
-  // A fetched commit's subject is outside text: control characters must not rewrite the terminal.
-  const subject = [...(m.body.split("\n")[0] ?? "")]
-    .map((ch) => {
-      const n = ch.codePointAt(0) ?? 0;
-      return n < 0x20 || (n >= 0x7f && n <= 0x9f) ? "?" : ch;
-    })
-    .join("");
-  console.error(`${m.name}: ${subject}`);
-  for (const p of problems) console.error(`  - ${p}`);
-}
-if (failed) process.exit(1);
-console.log(`commit messages: ${messages.length} checked`);
+  }).map((p) =>
+    finding({
+      where: `${m.name} "${subject.slice(0, 80)}"`,
+      ...p,
+      fix: m.hook ? p.fix : `${p.fix}, then ${REWORD}`,
+    }),
+  );
+});
+if (!report("commit messages", fail)) console.log(`commit messages: ${messages.length} checked`);

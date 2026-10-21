@@ -32,7 +32,7 @@ export function trackedDistribution(root) {
     .map((file) => file.replace(/^plugin\//, ""));
 }
 
-/** Problems with the paths in the tarball (without `package/`). Empty means it passes. */
+/** Problems with the paths in the tarball (without `package/`), each with why and the fix. Empty means it passes. */
 export function tarballProblems(paths, tracked) {
   const problems = [];
   for (const required of new Set([
@@ -45,7 +45,12 @@ export function tarballProblems(paths, tracked) {
     "README.md",
     ...tracked,
   ]))
-    if (!paths.has(required)) problems.push(`tarball is missing ${required}`);
+    if (!paths.has(required))
+      problems.push({
+        what: `tarball is missing ${required}`,
+        why: "users install only what the tarball holds, so a missing file breaks the plugin for every one of them",
+        fix: `run \`bun run bundle\` before packing, and keep ${required} in "files" of plugin/package.json`,
+      });
   for (const file of paths)
     if (
       file.includes("node_modules/") ||
@@ -53,6 +58,10 @@ export function tarballProblems(paths, tracked) {
       file.endsWith("bun.lock") ||
       /(^|\/)src\/.+\.(?:ts|tsx)$/.test(file)
     )
-      problems.push(`tarball contains a file that must not ship: ${file}`);
+      problems.push({
+        what: `tarball contains a file that must not ship: ${file}`,
+        why: "the package ships the bundles alone: sources, lockfiles, node_modules, and .env files would leak or bloat it",
+        fix: `narrow "files" in plugin/package.json so ${file} is left out`,
+      });
   return problems;
 }

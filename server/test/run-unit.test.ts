@@ -71,7 +71,7 @@ test("a mode that is neither full nor tests-only is refused before any test runs
   for (const mode of ["", "tests_only", "off"]) {
     const r = run(t, mode);
     assert.equal(r.status, 1, r.out);
-    assert.match(r.out, /SPHICA_UNIT_MODE is .* must be one of full, tests-only/);
+    assert.match(r.out, /SPHICA_UNIT_MODE is .*\. Why: .*\. Fix: set it to one of full, tests-only/);
     assert.equal(r.seen, null, mode);
   }
 });

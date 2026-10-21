@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { finding, report } from "./lib/finding.mjs";
 import { markdownFiles } from "./lib/markdown-files.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,7 +25,19 @@ try {
     },
   );
 } catch (e) {
-  if (e.code === "ENOENT")
-    console.error("lychee is not on PATH. Run `mise install` (it pins lychee in mise.toml).");
-  process.exit(1);
+  report("links", [
+    e.code === "ENOENT"
+      ? finding({
+          where: "lychee",
+          what: "lychee is not on PATH",
+          why: "the links of the tracked Markdown cannot be checked without it, and a skipped check stays green (invariant no-silent-skip)",
+          fix: "run `mise install`, which installs the lychee version mise.toml pins",
+        })
+      : finding({
+          where: "the lychee output above",
+          what: "lychee found broken links, images, or heading anchors in the tracked Markdown",
+          why: "a broken link sends the reader nowhere, and npm shows README.md away from the repository, so its links must hold there too",
+          fix: "point each link lychee names at a file or heading that exists, or remove it",
+        }),
+  ]);
 }

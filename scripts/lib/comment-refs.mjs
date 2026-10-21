@@ -5,6 +5,12 @@
 
 import { commentLines } from "./english.mjs";
 
+/** Why a comment states the reason instead of pointing at one, and what to write: for a check's message */
+export const REFERENCE_RULE = {
+  why: "a reader of the code at HEAD has no issue, pull request, or plan at hand, and the link goes stale (invariant comment-refs)",
+  fix: "write the reason itself in the comment, and leave the reference to the commit message or the pull request",
+};
+
 /** What a comment must not point at. Each is a form of reference, not a word that happens to contain a number. */
 const REFERENCES = [
   { re: /\.claude\/plans\//, reason: "a plan path" },
@@ -20,7 +26,7 @@ const REFERENCES = [
 /**
  * @param {string} source
  * @param {"js" | "sql"} kind SQL is read line by line: only lines that start with `--` count, so a `--` inside a string is not a comment
- * @returns {{ line: number, text: string, reason: string }[]}
+ * @returns {{ line: number, text: string, reason: string }[]} reason names what the comment points at
  */
 export function referenceProblems(source, kind) {
   const lines =

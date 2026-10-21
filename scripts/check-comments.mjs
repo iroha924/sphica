@@ -9,7 +9,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { referenceProblems } from "./lib/comment-refs.mjs";
+import { REFERENCE_RULE, referenceProblems } from "./lib/comment-refs.mjs";
+import { finding, report } from "./lib/finding.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -23,19 +24,16 @@ const filesUnder = (dir, re) =>
 
 const sql = filesUnder("db", /\.sql$/);
 
-let count = 0;
-for (const file of sql) {
-  for (const p of referenceProblems(fs.readFileSync(path.join(root, file), "utf8"), "sql")) {
-    console.error(`${file}:${p.line}: ${p.reason}: ${p.text}`);
-    count++;
-  }
-}
-if (count) {
-  console.error(
-    `\n${count} problem(s). Write the reason in the comment instead of pointing at where it was discussed.`,
-  );
-  process.exit(1);
-}
-console.log(
-  `comments: ${sql.length} SQL files (JavaScript and TypeScript are checked by the lint rule sphica/comment-refs)`,
+const fail = sql.flatMap((file) =>
+  referenceProblems(fs.readFileSync(path.join(root, file), "utf8"), "sql").map((p) =>
+    finding({
+      where: `${file}:${p.line}`,
+      what: `the comment points at ${p.reason}: ${p.text}`,
+      ...REFERENCE_RULE,
+    }),
+  ),
 );
+if (!report("comments", fail))
+  console.log(
+    `comments: ${sql.length} SQL files (JavaScript and TypeScript are checked by the lint rule sphica/comment-refs)`,
+  );
