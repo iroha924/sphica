@@ -1,19 +1,20 @@
 ---
 name: codex-review
-description: Asks Codex (codex exec) to review or investigate a Sphica diff. Use before merging a PR, when checking a decision that primary sources cannot settle against another model, and when looking back at a change that landed. Covers receiving Codex's findings and fixing them. Not for launching Claude Code's reviewer (review-shipping).
+description: Asks Codex (codex exec) to review or investigate a Sphica diff. Use before merging a PR that CLAUDE.md "Review" sends to a local Codex review, when checking a decision that primary sources cannot settle against another model, and when looking back at a change that landed. Covers receiving Codex's findings and fixing them. Not for launching Claude Code's reviewer (review-shipping).
 ---
 
 # Ask Codex for reviews and investigations
 
 ## Triggers
 
-- Before merging a PR (an independent review of the diff)
+- Before merging a PR that touches a hard-to-undo area, package inputs, dependencies, version checks, or release machinery (an independent review of the diff; CLAUDE.md "Review")
 - When primary sources cannot settle a decision, or rules conflict
 - When looking back at a change that landed on main
 
 ## Does not trigger
 
 - Launching Claude Code's reviewer (`review-shipping`)
+- Other PRs: GitHub's Codex reviews every PR, and its result is the one the PR body records
 - Handing implementation to Codex
 
 ## How to ask

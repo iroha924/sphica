@@ -69,13 +69,15 @@ Claude runs every other command exactly as written in the steps below.
 |---|---|---|
 | 6 | Open the run from the link the run comments on the PR, read the PR (including its Release notes) and the OSV scan in the run summary, and approve `npm-release` with Review deployments | The owner is the only reviewer, and the release publishes, merges, and creates the GitHub Release without asking again |
 
-Do not merge Renovate's dependency PRs (1 a month) or lockfile maintenance PRs directly. Dependencies are package inputs, so a PR
-that does not bump the version fails CI's version gate. Pull them into a release PR, bump the version, ship it, and close the original PR after pulling it in
-(closed first, Renovate may ignore that update). Ship vulnerability fixes without waiting for the monthly one.
+Do not merge Renovate's dependency PRs (1 a month) or lockfile maintenance PRs directly; pull them into a PR of this repository and close the original
+after pulling it in (closed first, Renovate may ignore that update). A PR whose only package inputs are `server/package.json` and `server/bun.lock` needs no bump
+when CI's static part (Node 24.15) finds the packed tarball the same as the last release apart from the version and README (`scripts/release-verdict.mjs`,
+then `check-mcp-version.mjs --verdict`); pre-commit leaves that decision to CI (`--defer-deps`), and the push to main reuses the verdict of the pull request run same-tree reused (`scripts/main-version-check.mjs`). A tarball that differs, or a comparison that cannot run
+(the registry unreachable, the base version unpublished), asks for a bump as before. Ship vulnerability fixes without waiting for the monthly one.
 
 | Kind | Changes | Versions to move |
 |---|---|---|
-| `none` | Dev docs that do not ship, repository dev Skills, tests only, and a change to the root `README.md` alone (it goes into npm, but ships with the next release) | None |
+| `none` | Dev docs that do not ship, repository dev Skills, tests only, a change to the root `README.md` alone (it goes into npm, but ships with the next release), and a change to the server's dependency files whose packed tarball CI found the same as the last release | None |
 | `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules | The npm package and the 3 places of the plugin channel |
 
 The source of truth for the classification is `scripts/lib/release-scope.mjs`; the version gate and

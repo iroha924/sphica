@@ -10,10 +10,24 @@
 // so judging only by whether `mcp.ts` changed leaves a hole (one did open).
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { isPackageInput, withoutReleaseVersion } from "./lib/release-scope.mjs";
+import { DEPENDENCY_INPUTS, isPackageInput, withoutReleaseVersion } from "./lib/release-scope.mjs";
 
-const { base } = parseArgs({ options: { base: { type: "string" } } }).values;
+// A change whose only package inputs are server/package.json and server/bun.lock ships nothing new when the packed tarball matches the
+// last release. --defer-deps lets it through without a bump and leaves that to CI; --verdict takes the verdict
+// scripts/release-verdict.mjs wrote and lets it through only when it says same for this tree and base. Neither: today's rule.
+const {
+  base,
+  "defer-deps": deferDeps,
+  verdict: verdictFile,
+} = parseArgs({
+  options: {
+    base: { type: "string" },
+    "defer-deps": { type: "boolean", default: false },
+    verdict: { type: "string" },
+  },
+}).values;
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const at = (ref, file) => {
@@ -143,13 +157,38 @@ for (const [was, now] of [
 }
 if (changed.length === 0) process.exit(0);
 
-if (
+const bumped =
   (!oldPackageVersion || compare(packageVersion, oldPackageVersion) > 0) &&
   (!oldPluginVersion || compare(pluginVersion, oldPluginVersion) > 0) &&
-  packageVersion === pluginVersion
-) {
+  packageVersion === pluginVersion;
+// The exemption covers the bump only: npm and the plugin channel still have to agree
+const dependenciesOnly = changed.every((f) => DEPENDENCY_INPUTS.has(f)) && packageVersion === pluginVersion;
+// On main there is no pull request CI to leave the decision to, so a direct commit there gets today's rule
+const onMain = (() => {
+  try {
+    return git("symbolic-ref", "--quiet", "--short", "HEAD").trim() === "main";
+  } catch {
+    return false;
+  }
+})();
+if (!bumped && dependenciesOnly && deferDeps && !onMain) {
+  console.log(
+    `only ${changed.join(" and ")} changed: CI compares the packed tarball with the last release and asks for a bump if it differs`,
+  );
   process.exit(0);
 }
+if (!bumped && dependenciesOnly && verdictFile) {
+  const why = verdictProblem(verdictFile);
+  if (!why) {
+    console.log(
+      `only ${changed.join(" and ")} changed, and the packed tarball matches the last release: no bump needed`,
+    );
+    process.exit(0);
+  }
+  console.error(`the dependency change cannot skip the bump: ${why}`);
+}
+
+if (bumped) process.exit(0);
 
 console.error(
   [
@@ -163,3 +202,21 @@ console.error(
   ].join("\n"),
 );
 process.exit(1);
+
+/** Why the verdict file does not let this tree skip the bump, or null when it says same for this tree and base */
+function verdictProblem(file) {
+  let v;
+  try {
+    v = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return `the verdict ${file} cannot be read`;
+  }
+  if (v?.verdict !== "same") return `the verdict is ${v?.verdict ?? "missing"}: ${v?.reason ?? "no reason"}`;
+  // The index is what this check reads and what the commit will hold, so the verdict has to be for its tree
+  if (v.tree !== git("write-tree").trim()) return "the verdict is for another tree";
+  // The base's release is what the tarball was compared with; a push to main reuses its pull request's verdict, whose base commit differs
+  const released = sameName(ref) ? JSON.parse(at(ref, PACKAGE)).version : undefined;
+  if (v.npm?.version !== released)
+    return `the verdict compared with ${v.npm?.version ?? "no release"}, not the base's ${released ?? "release"}`;
+  return null;
+}

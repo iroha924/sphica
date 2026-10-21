@@ -51,16 +51,22 @@ jobs:
         env:
           RANGE: ${{ format('{0}..HEAD', github.event.before) }}
         run: node scripts/check-commit-msg.mjs --range "$RANGE"
-      - name: Is the plugin version bumped
-        env:
-          BASE: ${{ github.event.before }}
-        run: node scripts/check-mcp-version.mjs --base "$BASE"
       - name: Did the pull request already pass this tree
         id: decide
         env:
           BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/same-tree.mjs
+      # After the decision: a reused pull request run's release verdict decides a dependency-only change, since the jobs that would
+      # compare the tarball are skipped; otherwise those jobs run and decide (scripts/main-version-check.mjs)
+      - name: Is the plugin version bumped
+        env:
+          BASE: ${{ github.event.before }}
+          TESTED: ${{ steps.decide.outputs.tested }}
+          RUN: ${{ steps.decide.outputs.run }}
+          ATTEMPT: ${{ steps.decide.outputs.attempt }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/main-version-check.mjs
 
   # verify runs here split into parts that run at once: each part runs package.json's ci:<part>, and `bun run pairs` checks that the parts
   # add up to verify exactly (pre-push runs verify whole before a push to main). Every part runs on both the engines floor (24.15) and the next line (26).
@@ -108,7 +114,8 @@ jobs:
           # Whether a change reaches users depends on whether the version differs from the previous main, so the whole range is compared.
           # On a work branch, pre-commit compares against the fork point from main (scripts/check-mcp-version.mjs).
           BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
-        run: node scripts/check-mcp-version.mjs --base "$BASE"
+        # A change to the server's dependency files alone waits for the tarball comparison after the pack below
+        run: node scripts/check-mcp-version.mjs --base "$BASE" --defer-deps
 
       # Hooks can be skipped, so check what was actually committed: the PR's own commits, or the commits pushed to main.
       - name: commit message
@@ -152,9 +159,31 @@ jobs:
         if: matrix.part == 'static'
         run: |
           set -e
-          cd plugin
-          tgz="$(npm pack --silent)"
-          node ../scripts/check-tarball.mjs "$tgz"
+          mkdir -p "$RUNNER_TEMP/pack"
+          tgz="$(cd plugin && npm pack --silent --pack-destination "$RUNNER_TEMP/pack")"
+          node scripts/check-tarball.mjs "$RUNNER_TEMP/pack/$tgz"
+
+      # Whether the packed tarball ships the same files as the release the base names (scripts/release-verdict.mjs). One line writes it,
+      # so a run has one verdict, and the artifact lets the push to main and release:plan read it back
+      - name: Does the tarball differ from the last release
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: node scripts/release-verdict.mjs --packed "$(ls "$RUNNER_TEMP"/pack/*.tgz)" --base "$BASE" --out "$RUNNER_TEMP/release-verdict.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        with:
+          # One per attempt: a re-run's verdict must not be read as the earlier one's, or the other way round
+          name: release-verdict-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-verdict.json
+          if-no-files-found: error
+          retention-days: 30
+      # The version check again, now with the verdict: a dependency-only change passes without a bump only when the tarball matched
+      - name: Is the plugin version bumped, after the tarball comparison
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: node scripts/check-mcp-version.mjs --base "$BASE" --verdict "$RUNNER_TEMP/release-verdict.json"
 
   # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
   # skipped, so this runs always and fails unless every part (on both lines) and both macos jobs succeeded.

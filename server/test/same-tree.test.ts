@@ -43,9 +43,11 @@ const facts = (over: Partial<Parameters<typeof sameTree>[0]> = {}) => ({
   ...over,
 });
 
-test("a merge of an up-to-date head whose latest pull request run passed is tested", () => {
+test("a merge of an up-to-date head whose latest pull request run passed is tested, naming that run and attempt", () => {
   const d = sameTree(facts());
   assert.equal(d.tested, true, d.reason);
+  // The push's version check reads that run's release verdict
+  assert.deepEqual(d.run, { id: 1, attempt: 1 });
 });
 
 test("every way the evidence falls short keeps the heavy jobs running, with the reason", () => {

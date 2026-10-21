@@ -274,14 +274,7 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
     ),
     detector,
   );
-  fails(
-    edit(
-      "check",
-      /( {8}env:\n {10}BASE: \$\{\{ github\.event\.before \}\}\n {8}run: node scripts\/check-mcp-version\.mjs --base "\$BASE"\n)/,
-      "",
-    ),
-    detector,
-  );
+  fails(edit("check", / {8}run: node scripts\/main-version-check\.mjs\n/, "        run: true\n"), detector);
   fails(edit("check", /\n {2}same-tree:\n[\s\S]*?\n\n/, "\n"), /has no same-tree job/);
   for (const name of ["part", "macos", "windows", "git-2-34"]) {
     const at = new RegExp(
@@ -309,4 +302,37 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
   );
   // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
   fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
+});
+
+test("a version check that defers dependency changes without the tarball verdict and the check reading it after the pack fails", () => {
+  const final =
+    'node scripts/check-mcp-version.mjs --base "$BASE" --verdict "$RUNNER_TEMP/release-verdict.json"';
+  fails(edit("check", final, "true"), /no tarball verdict after the pack/);
+  fails(
+    edit("check", "run: node scripts/release-verdict.mjs", "run: true"),
+    /no tarball verdict after the pack/,
+  );
+  const only =
+    // oxlint-disable-next-line no-template-curly-in-string -- the workflow lines under edit hold an expression
+    "        if: matrix.part == 'static' && matrix.node == '24.15'\n        env:\n          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}\n        run: node scripts/release-verdict.mjs";
+  fails(
+    edit("check", only, only.replace("'24.15'", "'26'")),
+    /do not both run on the static part of Node 24\.15/,
+  );
+});
+
+test("the push's version check runs after same-tree's decision and takes its tested, run, and attempt", () => {
+  fails(
+    // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under edit holds an expression
+    edit("check", "          RUN: ${{ steps.decide.outputs.run }}\n", ""),
+    /after the decision with its tested, run, and attempt/,
+  );
+  fails(
+    edit(
+      "check",
+      "        run: node scripts/main-version-check.mjs",
+      "        run: node scripts/check-mcp-version.mjs",
+    ),
+    /check the push's messages and version/,
+  );
 });
