@@ -31,8 +31,17 @@ function childEnv(home: string): NodeJS.ProcessEnv {
 
 test("--compare refuses a ref outside this checkout's history, since the ref's code would run", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bench-home-"));
-  const env = childEnv(home);
-  // A commit object no ref points to: made without touching any branch
+  // A commit object no ref points to, written to an object directory of the test's own that also reads the checkout's objects, so
+  // the checkout's .git is never written
+  const objects = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-path", "objects"], {
+    encoding: "utf8",
+  }).trim();
+  fs.mkdirSync(path.join(home, "objects"));
+  const env = {
+    ...childEnv(home),
+    GIT_OBJECT_DIRECTORY: path.join(home, "objects"),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: objects,
+  };
   const loose = execFileSync("git", ["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "not in history"], {
     encoding: "utf8",
     env: {
