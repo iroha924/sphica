@@ -80,13 +80,14 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
   - コミット: `chore(format): format with Oxfmt (T06)`
   - 結果: `oxfmt 0.73.0` を追加（+3 パッケージ）。`node scripts/oxfmt.mjs` → 50 ファイル（整形 47 と設定・依存）+172 / −69 行、2 回目と `bun run fix` の後は差分 0。`bun run format:check` → 337 ファイルで exit 0。範囲外のファイルだけを渡した `node scripts/oxfmt.mjs plugin/hooks/hooks.json README.md server/src/db-types.ts` → 0 ファイルで exit 0。`sqlite.ts` の `biome-ignore format` は、理由の行と `// oxfmt-ignore` の 2 行にした（`// oxfmt-ignore: 理由` の形は効かないことを試して確かめた）。最初の `bun run verify` は knip の Unlisted（`oxfmt/package.json`）で exit 1、`knip.json` を直して `bun run verify` → exit 0（acceptance 151 件 pass）
 
-- [ ] T07: lint と format から Biome を抜き、説明を Oxc の道具に合わせる
+- [x] T07: lint と format から Biome を抜き、説明を Oxc の道具に合わせる
   - 種別: 削除
   - 計画: S6
   - 依存: T05（lint が Oxlint に移っている）, T06（format が Oxfmt に移っている）
-  - 変更: `biome.json`, `CLAUDE.md`, `AGENTS.md`, `.github/workflows/check.yml`
+  - 変更: `biome.json`, `CLAUDE.md`, `AGENTS.md`, `.github/workflows/check.yml`, `server/package.json`, `knip.json`, `.git-blame-ignore-revs`
   - 完了条件: `rg -n -i biome lefthook.yml package.json CLAUDE.md AGENTS.md .github` → 0 件。`bun run verify` → 0 で終わる
   - コミット: `chore(lint): drop Biome from linting and formatting (T07)`
+  - 結果: `biome.json` と server の `check` / `fix`（Biome）を消し、CLAUDE.md・AGENTS.md・check.yml の説明を直し、`.git-blame-ignore-revs` に T06 の 4024b4c6 を入れた。`rg -n -i biome lefthook.yml package.json CLAUDE.md AGENTS.md .github` → 0 件。最初の `bun run verify` は knip が `@biomejs/biome` を未使用と判定して exit 1（評価が `createRequire` で読むため見えない）、server の ignoreDependencies に足して `bun run verify` → exit 0（acceptance 151 件 pass）
 
 ## 記録
 
@@ -98,3 +99,4 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
 - 2026-10-21 / T02 / 結果欄の「直す 34 件（no-useless-spread 24）」は誤り。24 件はすべて意図したコードで、`--fix` は `record.ts:869` の `[...quote.slice()].at(-1)` を UTF-16 単位に変え、`text.ts` の `english-exempt` を消した / 修正は戻した。持ち主の判断で `no-useless-spread` も切り（6 個目）、plan の上限を 6 個にした。直すのは prefer-string-starts-ends-with 8 件と no-useless-fallback-in-spread 2 件の 10 件
 - 2026-10-21 / T05 / 変更欄に、違反を直したファイル、Biome の lint の抑止コメントを消したファイル（Biome の linter を T05 で切るため。T07 から前倒し）、`knip.json`、プラグインのテストを足した（前の値は上の 15 件）
 - 2026-10-21 / T06 / 変更欄を `.oxfmtrc.json`, `biome.json`, `lefthook.yml`, `package.json`, `server/package.json`, `.git-blame-ignore-revs` から上の値にした / Oxfmt の glob 引数はディレクトリ引数を絞るので範囲を `scripts/oxfmt.mjs` で決めた。`biome.json` は T07 で消す。`.git-blame-ignore-revs` は整形のコミットの SHA が要るので T07 に移す
+- 2026-10-21 / T07 / 変更欄に `server/package.json`, `knip.json`, `.git-blame-ignore-revs` を足した（前の値は `biome.json`, `CLAUDE.md`, `AGENTS.md`, `.github/workflows/check.yml`） / server の Biome のスクリプトが残っていた、knip の除外が要った、blame の除外を T06 から移した

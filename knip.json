@@ -38,6 +38,7 @@
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
       "ignoreDependencies": [
+        "@biomejs/biome",
         "js-tokens",
         "kysely-codegen",
         "lefthook",

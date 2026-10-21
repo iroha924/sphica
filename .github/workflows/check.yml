@@ -134,7 +134,7 @@ jobs:
       - name: Install dependencies
         run: bun run setup
 
-      # static: Biome, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
+      # static: Oxlint and Oxfmt, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
       # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database; on the floor line the tests
       # run without coverage, the part's largest cost there, and reach is counted on the other line. acceptance: the cases.
       # On Node 26 the tests run in a random order, from a seed printed in the log, so a test that leans on another's leftovers shows up.

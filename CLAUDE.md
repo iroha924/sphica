@@ -12,7 +12,7 @@ mise trust && mise install  # trust mise.toml and install Node, Bun, actionlint,
 bun run setup             # install dependencies and Lefthook from the pinned lockfile
 bun run verify            # lint, types, AI config, Markdown structure and links, boundaries, bundle, tests, SQL reach, CLI child processes, acceptance cases. CI runs the same; pre-push runs it before a push to main and `bun run check` before any other push
 bun run verify:ai         # static checks of CLAUDE.md, AGENTS.md, Skills, and Agents, and the links of tracked Markdown outside .claude/plans/ (lychee, offline)
-bun run fix               # format and apply safe lint fixes with the pinned Biome (`bunx biome` runs an unrelated npm package)
+bun run fix               # apply safe lint fixes and format with the Oxlint and Oxfmt server pins (`bunx oxlint` runs an unpinned version without the type-aware rules)
 bun run bundle            # build the MCP servers, CLI, and hook artifacts
 ```
 
