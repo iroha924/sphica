@@ -1,0 +1,13 @@
+{
+  "name": "sphica-mutation",
+  "private": true,
+  "type": "module",
+  "description": "StrykerJS for bun run mutation, apart from server/ so its tree never reaches the shipped notices or the SBOM",
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/tap-runner": "10.0.0"
+  },
+  "overrides": {
+    "qs": "6.16.0"
+  }
+}

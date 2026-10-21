@@ -26,3 +26,7 @@ plugin/THIRD_PARTY_NOTICES.md
 
 # Left by npm pack. What gets published is rebuilt from bundle.
 *.tgz
+
+# Left by bun run mutation (StrykerJS): its sandboxes and its report.
+.stryker-tmp/
+reports/

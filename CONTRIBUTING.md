@@ -28,6 +28,8 @@ bun run fix      # format and apply the safe lint fixes
 
 Tests run against a real SQLite database in a temporary directory and need no credentials or network access. A change that adds or changes behavior comes with tests in the same pull request.
 
+`bun run mutation` runs mutation testing (StrykerJS) on the modules where a weak test costs the most, listed in `tools/mutation/stryker.config.mjs`. It takes about ten minutes, so it stays out of `verify` and CI, and its report goes to `reports/mutation/`. A surviving mutant is sorted first (no test reaches it, an assertion too weak to see it, or a change that behaves the same), and the owner decides which become tests: a test written only to kill a mutant can pin a bug as the intended behavior.
+
 ## Commits
 
 The commit hook checks every message, and CI checks them again:
