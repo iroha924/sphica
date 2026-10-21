@@ -1,6 +1,6 @@
 ---
 name: eval-loop
-description: Runs one turn of Sphica's evaluation loop on real agents. Builds the four condition slots (none, search, inject, gold) with server/evals/cloud/build.ts, fires the cloud routines for Claude, replays Codex locally, collects branches and run logs with collect.ts, grades the final answers blind, and turns each failure into an acceptance case before fixing. Use when running or rerunning the cloud or Codex evaluation, adding an evaluation task or fixture, or when an eval run looks wrong (nothing delivered, a tool unavailable, every run stopping at a plan). Not for the acceptance cases alone (bun run verify runs them) or for shipping (plugin-release).
+description: Runs one turn of Sphica's evaluation loop on real agents, or the local claude plugin eval suite (bun run eval:plugin). Builds the four condition slots (none, search, inject, gold) with server/evals/cloud/build.ts, fires the cloud routines for Claude, replays Codex locally, collects branches and run logs with collect.ts, grades the final answers blind, and turns each failure into an acceptance case before fixing. Use when running or rerunning the cloud or Codex evaluation, adding an evaluation task or fixture, or when an eval run looks wrong (nothing delivered, a tool unavailable, every run stopping at a plan). Not for the acceptance cases alone (bun run verify runs them) or for shipping (plugin-release).
 ---
 
 # Run the evaluation loop
@@ -156,6 +156,26 @@ Local loop progress:
   `as_of` and reads that took `timeline`, over the runs whose calls could be told apart
 - Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
   delivers. No agent run is needed
+
+## The plugin eval suite
+
+A smaller check between the acceptance cases and the loop: `claude plugin eval` (Claude Code 2.1.269 or later) runs each case in
+`server/evals/plugin/cases/` 3 times with the plugin and 3 times without it, on Sonnet with a Sonnet judge, and prints each case's score and Δ.
+Run `bun run eval:plugin` from the repository root. It bundles first, because the hooks and MCP servers run from `plugin/dist`. Pass more
+flags after it: `--case <name>`, and `--runs 1 --ablation none` while writing a case. The 4 cases cost about $2 and take about 5 minutes.
+It needs the owner's login, so it stays out of `verify` and CI.
+
+- Each run gets its own temp HOME, with the workspace at `$HOME/cwd`. Hooks, the real MCP servers, and the case's scaffold all see that HOME.
+  The scaffold runs `server/evals/plugin/seed.ts`, which builds the tsundoku fixture (the loop's `fixture` steps, plus the case's
+  `steps.json`) at `$HOME/.sphica/sphica.db`, and writes the world's files as a git checkout whose origin is `eval/tsundoku`
+- The cases live outside `plugin/`, because every path under it counts as a package input for the release kind. A case's `plugins:` may
+  only name a plugin under the directory the command runs against, so the script runs against the repository root with `--eval-dir`
+- Runs are `claude -p` (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`): capture records nothing, and session start never asks to trace. Delivery before
+  a tool and the MCP tools work as in a person's session. Neither capture nor the automatic trace can be measured here
+- The suite tells you whether a Skill, delivery, or tool change made a fixed task better or worse on one model. To credit a change across
+  models, conditions (search, inject, gold), and hidden tests, run the loop. `trace-quotes` cannot pass without the plugin, so its Δ is only
+  its score
+- Codex has no counterpart of this command (unverified)
 
 ## Traps seen in earlier loops
 
