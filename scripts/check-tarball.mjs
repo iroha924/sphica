@@ -120,19 +120,20 @@ function main() {
       ],
       { cwd: pkg, encoding: "utf8" },
     );
-    // markdownlint-cli2 exits 1 when it linted and found errors, and 2 when it could not lint
+    // markdownlint-cli2 exits 1 when it linted and found errors, and 2 when it could not lint. Node also exits 1 when the tool cannot
+    // start (a missing module), so only its closing summary shows that linting ran
+    const found =
+      linted.status === 1 && /^Summary: [1-9]\d* issues? in /m.test(`${linted.stdout}${linted.stderr}`);
     if (linted.status !== 0)
       fail({
         where: `${where} (markdownlint-cli2)`,
-        what:
-          linted.status === 1
-            ? "markdownlint found packed Markdown that renders or links wrong"
-            : `markdownlint-cli2 could not lint the packed Markdown (${linted.error?.message ?? `exit ${linted.status}`})`,
+        what: found
+          ? "markdownlint found packed Markdown that renders or links wrong"
+          : `markdownlint-cli2 could not lint the packed Markdown (${linted.error?.message ?? `exit ${linted.status}`})`,
         why: "npm and the hosts show the packed Markdown away from the repository",
-        fix:
-          linted.status === 1
-            ? `fix each line below in ${PACKED_FROM}, then bundle and pack again`
-            : "run `bun run setup` to install it, and fix what its output below names",
+        fix: found
+          ? `fix each line below in ${PACKED_FROM}, then bundle and pack again`
+          : "run `bun run setup` to install it, and fix what its output below names",
         detail: `${linted.stdout ?? ""}${linted.stderr ?? ""}`,
       });
     // --verbose (which the containment check needs) also lists every excluded URL on stderr, so it is shown only on failure

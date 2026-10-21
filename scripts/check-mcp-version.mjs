@@ -32,7 +32,25 @@ const {
   },
 }).values;
 
-const git = (...a) => execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+// git's own words go into the finding's detail, not straight to the terminal; the callers that expect a miss (a file absent at a ref,
+// no commit yet) catch the stop as before
+const git = (...a) => {
+  try {
+    return execFileSync("git", a, {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    return fail({
+      where: `git ${a.join(" ")}`,
+      what: `git ${a[0]} failed (${error.status === undefined ? error.message : `exit ${error.status}`})`,
+      why: "the version check compares what is staged with a base commit git must be able to read",
+      fix: "pass a --base this clone holds (fetch it first in a shallow clone), and check the repository with git status",
+      detail: String(error.stderr ?? ""),
+    });
+  }
+};
 const at = (ref, file) => {
   try {
     return git("show", `${ref}:${file}`);

@@ -24,8 +24,10 @@ const r = spawnSync(
   { cwd: root, encoding: "utf8" },
 );
 const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-// markdownlint-cli2 exits 1 when it linted and found errors, and 2 when it could not lint
-if (r.status === 1)
+const LINTED = /^Summary: [1-9]\d* issues? in /m;
+// markdownlint-cli2 exits 1 when it linted and found errors, and 2 when it could not lint. Node also exits 1 when the tool cannot start
+// (a missing module), so only its closing summary shows that linting ran
+if (r.status === 1 && LINTED.test(output))
   report("Markdown", [
     finding({
       where: "markdownlint-cli2 (each file:line below)",

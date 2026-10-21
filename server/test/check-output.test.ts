@@ -137,6 +137,22 @@ test("the static checks print each failure as a finding", () => {
   );
 });
 
+test("a markdownlint that cannot start is reported as such, not as Markdown to fix", () => {
+  const root = copy(() => {});
+  // A node_modules of the copy's own whose markdownlint entry crashes on load, as a missing module does: node exits 1 then too
+  const modules = path.join(root, "server", "node_modules");
+  fs.unlinkSync(modules);
+  write(
+    root,
+    "server/node_modules/markdownlint-cli2/markdownlint-cli2-bin.mjs",
+    'throw new Error("broken install");\n',
+  );
+  const out = fails(root, "check-markdown.mjs", { args: ["README.md"] });
+  assert.match(out, /^markdownlint-cli2: markdownlint-cli2 could not lint \(exit 1\)\. /m);
+  assert.match(out, /^ {4}.*broken install/m);
+  assert.doesNotMatch(out, /renders or links wrong/);
+});
+
 test("a manifest that does not parse is named in the AI config check's finding", () => {
   const root = copy((r) => append(r, "plugin/hooks/codex.json", "}"));
   assert.match(
@@ -165,6 +181,15 @@ test("the checks that take a file, a message, or the CI context print each failu
   assert.match(
     fails(root, "check-mcp-version.mjs", { args: ["--base"] }),
     /^version: the check crashed: Option '--base <value>' argument missing/m,
+  );
+  // A base the clone does not hold: git's own words are the detail, not lines of their own
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "copy"], {
+    cwd: root,
+    env: cleanEnv(),
+  });
+  assert.match(
+    fails(root, "check-mcp-version.mjs", { args: ["--base", "no-such-ref"] }),
+    /^git diff --cached --name-only no-such-ref: git diff failed \(exit 128\)\. .+\n {4}fatal: /,
   );
   const message = path.join(root, "..", "msg.txt");
   fs.writeFileSync(message, `feat: ${JAPANESE}\n\nbody\n`);
