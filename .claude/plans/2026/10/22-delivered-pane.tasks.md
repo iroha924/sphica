@@ -57,13 +57,15 @@ base: main
 
 固定した Claude Code CLI で、Linux と Windows の CI が `pane/` を validate と test にかけ、許可した hook と呼び出しの外に出たら落ちる
 
-- [ ] T03: claude CLI の版を選んで固定し、入れ方を実測で決め、CI の Linux と Windows のジョブで `pane/` の validate と test を流す
+- [x] T03: claude CLI の版を選んで固定し、入れ方を実測で決め、CI の Linux と Windows のジョブで `pane/` の validate と test を流す
   - 種別: 追加
   - 計画: S1
   - 依存: T02（CI で流す mod とテストが要る）
-  - 変更: `scripts/lib/claude-cli.mjs`, `.github/workflows/check.yml`, `package.json`
-  - 完了条件: `node -e 'import("./scripts/lib/claude-cli.mjs").then(m => console.log(m.CLAUDE_CLI_VERSION))'` → npm の公開時刻から 604800 秒以上たった版。`gh run view <run> --log` → Linux と Windows のジョブで、その版の `claude --version` と `claude plugin validate --strict pane`、`claude plugin test pane` が通っている。Windows で通らなければ、ここで止めて持ち主に戻す
+  - 変更: `tools/claude-cli/package.json`, `tools/claude-cli/bunfig.toml`, `tools/claude-cli/bun.lock`, `scripts/claude-cli.mjs`, `.github/workflows/check.yml`
+  - 完了条件: `node scripts/claude-cli.mjs --version` → npm の公開時刻から 604800 秒以上たった版。同じ launcher の `plugin validate --strict pane` と `plugin test pane` が手元で通り、check.yml の Linux の static と Windows のジョブに同じ 3 つの手順がある（actionlint が通る）。CI での実行は PR の CI（plan の A2）で確かめ、Windows で通らなければそこで止めて持ち主に戻す
   - コミット: `ci: pin the Claude Code CLI and validate and test the pane mod on Linux and Windows (T03)`
+  - 結果: `node scripts/claude-cli.mjs --version` → 2.1.300（npm の公開 2026-10-14T14:27:26Z、確かめた時刻 2026-10-21T17:15Z で 7 日を超えた最新。2.1.301 は 6 日）
+  - 結果: `node scripts/claude-cli.mjs plugin validate --strict pane` → Validation passed。`node scripts/claude-cli.mjs plugin test pane` → 4 件 pass。`actionlint .github/workflows/check.yml` → 0 で終わった。`bun run check` → 0 で終わった
 - [ ] T04: `scripts/check-pane.mjs` を足す（`git archive` で取り出した `pane/` に validate --strict --json と plugin test を流し、hook・calls・state を許可リストと突き合わせる）。`bun run pane:check` を check・ci:static・Windows のジョブに入れる
   - 種別: 追加
   - 計画: S4
@@ -98,3 +100,6 @@ base: main
 - 2026-10-22 / T02 / keep が失敗したときに結果をそのまま返すことはテストで確かめられなかった。テストキットは下流の結果の形を先に検査し、state.set の stub は mod の書き込みに届かない。テストを書くと常に通るので外した / 実装は try 相当の .catch(() => {}) と、hook の .catch（Caught の replay で下流を再実行しない）で守る。未検証として PR 本文に書く
 - 2026-10-22 / T02 / Registration の .catch の引数名 next が oxlint の promise(no-callback-in-promise) に Promise の catch と誤って当たった / 引数名を replay にした
 - 2026-10-22 / T07 / T01 の Codex レビュー（b87808f7）の F1（省略記号で 1 件が 1501 文字になる、再現済み）と F2（RAN・AUTO_TRACE・review の出力がテストに無い）を受理 / 修正タスク T07 を足した
+- 2026-10-22 / T03 / CLI の入れ方を実測で決めた。server の devDependency はパッケージの入力でバージョンを上げることになり、mise の npm バックエンドはこのリポジトリで持ち主の `claude` を固定版の shim で隠す。`tools/sandbox` と同じく `tools/claude-cli` に独自の package.json と 7 日の bunfig を置き、`--ignore-scripts` で入れてプラットフォームのパッケージの本体を直接起動する形にした。版は package.json の 1 か所 / 変更欄を `scripts/lib/claude-cli.mjs`・check.yml・package.json から tools/claude-cli の 3 ファイル・scripts/claude-cli.mjs・check.yml に変えた
+- 2026-10-22 / T03 / check.yml は main 向けの PR でしか走らず、途中で PR を作ると GitHub の Codex が作りかけをレビューする / 完了条件の CI の観測を PR の CI（A2）に移した。前の値は「gh run view で Linux と Windows のジョブが通っている」、新しい値は「手元で通り、check.yml に手順がある。CI は A2」
+- 2026-10-22 / T03 / 2.1.300 の validate は「組織が管理する Claude Code では、利用者が入れたプラグインの classic hook は動かない」と注記した / README（T06）に書く

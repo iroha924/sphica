@@ -1,0 +1,9 @@
+{
+  "name": "sphica-claude-cli",
+  "private": true,
+  "type": "module",
+  "description": "The Claude Code CLI that checks the sphica-pane mod (claude plugin validate and test), pinned apart from server/ and from the owner's own claude",
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.300"
+  }
+}
