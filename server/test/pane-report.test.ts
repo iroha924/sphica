@@ -12,7 +12,7 @@ const allowedNotes = () => Object.entries(ALLOWED).map(([label, items]) => note(
 
 test("the reviewed mod's notes match, a matcher's commas stay inside it", () => {
   const got = reported(validated(allowedNotes()));
-  assert.deepEqual(got.hooks?.at(-1), "ui.render{component=Pane, requestId=sphica-delivered}");
+  assert.deepEqual(got.register.hooks?.at(-1), "ui.render{component=Pane, requestId=sphica-delivered}");
   assert.deepEqual(differences(got), []);
 });
 
@@ -31,5 +31,17 @@ test("an extra call, a missing hook, a hook without .catch, and notes in another
     "calls: validate reported none",
     "state writes: validate reported none",
     "state reads: validate reported none",
+  ]);
+});
+
+test("notes from any module other than register.tsx fail, whatever they say", () => {
+  const notes = [
+    ...allowedNotes(),
+    "./extra.tsx calls: $.fs.read",
+    "./extra.tsx gating hook without .catch: classic.Stop",
+  ];
+  assert.deepEqual(differences(reported(validated(notes))), [
+    "./extra.tsx: a module the pane does not ship (calls: $.fs.read)",
+    "./extra.tsx: a module the pane does not ship (gating hook without .catch: classic.Stop)",
   ]);
 });

@@ -77,6 +77,18 @@ base: main
   - 結果: `bun run pane:check` → register.tsx に `$.fs.read` を一時的に足すと「calls: not allowed $.fs.read」と test の失敗を名指しして 1 で終わった（戻してある）
   - 結果: `cd server && node --test test/pane-report.test.ts` → 2 件 pass（書式の変わった注記は「validate reported none」で落ちる）。`bun run check` → 0 で終わった
 
+- [x] T08: register.tsx 以外のモジュールの注記も失敗にし、コピー中に失敗しても一時ディレクトリを消す（T04 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す check-pane.mjs と pane-report.mjs が要る）
+  - 変更: `scripts/lib/pane-report.mjs`, `scripts/lib/pane-report.d.mts`, `scripts/check-pane.mjs`, `server/test/pane-report.test.ts`
+  - red: `cd server && node --test --test-name-pattern="any module" test/pane-report.test.ts` → `./extra.tsx calls: $.fs.read` を含む注記で differences が空を返して落ちる
+  - 完了条件: `cd server && node --test test/pane-report.test.ts` → 3 件 pass。追跡ファイルを作業ツリーから一時的に消して `node scripts/check-pane.mjs` → 1 で終わり、一時ディレクトリが増えない
+  - コミット: `fix(scripts): fail the pane check on any other module and clean up after a failed copy (T08)`
+  - 結果: `cd server && node --test --test-name-pattern="any module" test/pane-report.test.ts` → 直す前は actual: [] で落ちた
+  - 結果: `node scripts/check-pane.mjs` → pane/LICENSE を一時的に動かすと、直す前は一時ディレクトリが 0 から 1 に増え、直した後は 1 のまま（1 で終わった）。戻して流すと 0 で終わった
+  - 結果: `cd server && node --test test/pane-report.test.ts` → 3 件 pass。`bun run typecheck` → 0 で終わった
+
 ## P3: リリースに載せる
 
 `pane/` の変更がリリースの判定・バージョンの検査・タグのゲート・到着の確認に掛かり、マーケットプレイスから入れられる

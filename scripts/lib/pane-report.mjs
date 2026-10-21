@@ -20,24 +20,32 @@ export const ALLOWED = {
   "state reads": ["sphica-pane.delivered"],
 };
 
-/** The `./register.tsx <label>: a, b` notes of a validate --json report, as lists by label */
+/**
+ * The `./<module> <label>: a, b` notes of a validate --json report: register.tsx's as lists by label, and every other module's whole,
+ * since the pane ships no other module and one added to hooks.json would otherwise go unchecked
+ */
 export function reported(report) {
   const notes = (report.contents ?? []).flatMap((c) => c.notes ?? []);
-  const out = {};
+  const register = {};
+  const others = [];
   for (const note of notes) {
-    const m = /^\.\/register\.tsx ([a-z .]+): (.+)$/.exec(note);
+    const m = /^(\.\/\S+) ([a-z .]+): (.+)$/.exec(note);
     if (!m) continue;
+    if (m[1] !== "./register.tsx") {
+      others.push(`${m[1]}: a module the pane does not ship (${m[2]}: ${m[3]})`);
+      continue;
+    }
     // A matcher holds commas inside braces, so split only on commas outside them
-    out[m[1]] = m[2].split(/, (?![^{]*\})/).map((s) => s.trim());
+    register[m[2]] = m[3].split(/, (?![^{]*\})/).map((s) => s.trim());
   }
-  return out;
+  return { register, others };
 }
 
 /** The differences between what validate reported and ALLOWED, one line each */
-export function differences(got) {
+export function differences({ register, others }) {
   const lines = [];
   for (const [label, allowed] of Object.entries(ALLOWED)) {
-    const seen = got[label];
+    const seen = register[label];
     if (!seen) {
       lines.push(`${label}: validate reported none`);
       continue;
@@ -47,7 +55,7 @@ export function differences(got) {
     if (extra.length) lines.push(`${label}: not allowed ${extra.join(", ")}`);
     if (missing.length) lines.push(`${label}: missing ${missing.join(", ")}`);
   }
-  for (const [label, seen] of Object.entries(got))
+  for (const [label, seen] of Object.entries(register))
     if (label.startsWith("gating hook without")) lines.push(`${label}: ${seen.join(", ")}`);
-  return lines;
+  return [...lines, ...others];
 }

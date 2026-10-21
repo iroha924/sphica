@@ -23,7 +23,8 @@ const WHY = "the pane mod runs with Claude Code's permissions, so it may do only
 const SHIPS =
   "users install pane/ as it is at the release tag, so a mod that fails here breaks in their Claude Code";
 
-function shipped() {
+/** Copies the files git tracks under pane/ into dir, as the marketplace's git-subdir source fetches them */
+function copyShipped(dir) {
   const files = execFileSync("git", ["ls-files", "-z", "--", "pane"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter(Boolean);
@@ -34,18 +35,17 @@ function shipped() {
       why: WHY,
       fix: "add the mod's files to git",
     });
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-pane-"));
   for (const file of files) {
     const to = path.join(dir, path.relative("pane", file));
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.copyFileSync(path.join(root, file), to);
   }
-  return dir;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const dir = shipped();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-pane-"));
   try {
+    copyShipped(dir);
     const validate = runClaude(["plugin", "validate", "--strict", "--json", dir]);
     let parsed;
     try {
