@@ -162,7 +162,7 @@ Local loop progress:
 A smaller check between the acceptance cases and the loop: `claude plugin eval` (Claude Code 2.1.269 or later) runs each case in
 `server/evals/plugin/cases/` 3 times with the plugin and 3 times without it, on Sonnet with a Sonnet judge, and prints each case's score and Δ.
 Run `bun run eval:plugin` from the repository root. It bundles first, because the hooks and MCP servers run from `plugin/dist`. Pass more
-flags after it: `--case <name>`, and `--runs 1 --ablation none` while writing a case. The 4 cases cost about $2 and take about 5 minutes.
+flags after it: `--case <name>`, and `--runs 1 --ablation none` while writing a case. The 4 cases cost about $3 and take about 5 minutes.
 It needs the owner's login, so it stays out of `verify` and CI.
 
 - Each run gets its own temp HOME, with the workspace at `$HOME/cwd`. Hooks, the real MCP servers, and the case's scaffold all see that HOME.
