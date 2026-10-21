@@ -825,6 +825,9 @@ test("the forget connection keeps secure_delete on and changes only the unit and
   for (const write of [
     "pragma secure_delete = off",
     "pragma secure_delete = 0",
+    "pragma ignore_check_constraints = on",
+    "pragma recursive_triggers = 1",
+    "attach database ':memory:' as other",
     "update unit set no_code_surface = 'changed' where id = -1",
     "update unit set text = 'changed' where id = -1",
     "update unit_state set reason = 'changed' where id = -1",
@@ -1183,6 +1186,10 @@ test("revision: ingest and forget refuse writes outside a checked transaction, a
       raw.prepare("commit").run();
       refused("autocommit after a commit", () => {});
       refused("begin through exec after a commit", () => raw.exec("begin"));
+      raw.prepare("begin immediate").run();
+      raw.prepare(write()).run();
+      raw.prepare("commit").run();
+      refused("an outermost savepoint right after a commit", () => raw.prepare("savepoint s").run());
       // SQLite rolls the transaction back itself on this conflict, with no rollback statement
       raw.prepare("begin immediate").run();
       refused("autocommit after SQLite rolled back", () => {
