@@ -141,6 +141,16 @@ jobs:
       - name: Install dependencies
         run: bun run setup
 
+      # The part below runs in the sandbox runtime (scripts/sandboxed.mjs), which needs bubblewrap, socat, and ripgrep on Linux. Ubuntu
+      # 24.04 strips the capabilities bubblewrap needs from unprivileged user namespaces until the AppArmor restriction is turned off
+      - name: Install the sandbox
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bun install --cwd tools/sandbox --frozen-lockfile --ignore-scripts
+
       # static: Oxlint and Oxfmt, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
       # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database; on the floor line the tests
       # run without coverage, the part's largest cost there, and reach is counted on the other line. acceptance: the cases.
@@ -151,7 +161,7 @@ jobs:
           PART: ${{ matrix.part }}
           SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}
           TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
-        run: bun run "ci:$PART"
+        run: node scripts/sandboxed.mjs bun run "ci:$PART"
 
       # **Check what ships as a tarball.** dist and db are untracked, so `git diff` shows nothing.
       # The same script as release checks the file list, starting outside the repository, and creating a database.

@@ -9,7 +9,8 @@ import { limitsPullRequestsToMain } from "./same-tree.mjs";
 // Builds whose output later checks read (tests run plugin/dist). Each part runs on its own runner, so a part that runs a check verify runs
 // after a build runs that build first; builds alone may run in several parts.
 const BUILDS = ["bundle"];
-const CI_RUN = '        run: bun run "ci:$PART"';
+// The part runs in the sandbox runtime, so a test that writes outside the checkout and the temp directory fails CI
+const CI_RUN = '        run: node scripts/sandboxed.mjs bun run "ci:$PART"';
 const TARBALL_RUN = /node (\.\.\/)?scripts\/check-tarball\.mjs/;
 // Jobs a push to main skips when its pull request already passed the same tree; each must run on anything else
 const HEAVY = ["part", "macos", "windows", "git-2-34"];
