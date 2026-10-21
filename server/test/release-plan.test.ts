@@ -264,3 +264,13 @@ test("after a re-run, the verdict is read from the artifact of the run's latest 
   });
   assert.match(out.stdout, /^release kind: none/m, out.stdout);
 });
+
+test("after re-running only failed jobs, the verdict of the attempt that last ran the comparison is read", () => {
+  // Attempt 2 reused the static job, so the run holds only release-verdict-1
+  const out = dependencyPlan({
+    run: { run_attempt: 2 },
+    verdict: { run: { id: "7", attempt: "1" } },
+    env: { FAKE_ATTEMPT: "1" },
+  });
+  assert.match(out.stdout, /^release kind: none/m, out.stdout);
+});

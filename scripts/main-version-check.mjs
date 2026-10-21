@@ -18,6 +18,7 @@ const gh = (args) =>
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "main-version-"));
 let apiRun = null;
 let verdict = null;
+let verdictAttempt;
 if (
   env.TESTED === "true" &&
   /^\d+$/.test(env.RUN ?? "") &&
@@ -29,11 +30,15 @@ if (
   } catch {
     apiRun = "the API request failed";
   }
-  try {
-    gh(["run", "download", env.RUN ?? "", "--repo", repo, "-n", `release-verdict-${env.ATTEMPT}`, "-D", dir]);
-    verdict = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
-  } catch {
-    verdict = null;
+  // The latest attempt that ran the comparison wrote the artifact named for it; an attempt that reused the job wrote none
+  for (let k = Number(env.ATTEMPT); k >= 1 && verdict === null; k--) {
+    try {
+      gh(["run", "download", env.RUN ?? "", "--repo", repo, "-n", `release-verdict-${k}`, "-D", dir]);
+      verdict = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
+      verdictAttempt = String(k);
+    } catch {
+      verdict = null;
+    }
   }
 }
 const file = path.join(dir, "release-verdict.json");
@@ -44,6 +49,7 @@ const { args, reason } = mainCheckArgs({
   repo,
   apiRun,
   verdict,
+  verdictAttempt,
   file,
 });
 console.log(`version check: ${reason}`);

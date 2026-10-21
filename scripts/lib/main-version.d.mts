@@ -11,5 +11,6 @@ export function mainCheckArgs(o: {
     | string
     | null;
   verdict: { run?: { id?: unknown; attempt?: unknown } } | null;
+  verdictAttempt?: string;
   file: string;
 }): { args: string[]; reason: string };

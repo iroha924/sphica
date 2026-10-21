@@ -163,7 +163,15 @@ const bumped =
   packageVersion === pluginVersion;
 // The exemption covers the bump only: npm and the plugin channel still have to agree
 const dependenciesOnly = changed.every((f) => DEPENDENCY_INPUTS.has(f)) && packageVersion === pluginVersion;
-if (!bumped && dependenciesOnly && deferDeps) {
+// On main there is no pull request CI to leave the decision to, so a direct commit there gets today's rule
+const onMain = (() => {
+  try {
+    return git("symbolic-ref", "--quiet", "--short", "HEAD").trim() === "main";
+  } catch {
+    return false;
+  }
+})();
+if (!bumped && dependenciesOnly && deferDeps && !onMain) {
   console.log(
     `only ${changed.join(" and ")} changed: CI compares the packed tarball with the last release and asks for a bump if it differs`,
   );

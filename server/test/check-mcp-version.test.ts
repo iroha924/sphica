@@ -381,6 +381,8 @@ test("a dependency-only change still needs a bump by default, and --defer-deps l
   const r = repo();
   try {
     const base = dependencyChange(r);
+    // A work branch: on main nothing is deferred
+    r.git("checkout", "-qb", "work");
     const plain = check(r.dir, "--base", base);
     assert.equal(plain.status, 1, plain.stdout);
     assert.match(plain.stderr, /server\/(package\.json|bun\.lock)/);
@@ -470,6 +472,22 @@ test("neither --defer-deps nor a same verdict lets npm and the plugin channel ve
       const res = check(r.dir, "--base", base, ...flag);
       assert.equal(res.status, 1, `${flag[0]}: ${res.stdout}`);
     }
+  } finally {
+    r.done();
+  }
+});
+
+test("on main, --defer-deps does not defer: a direct commit there has no pull request CI to decide", () => {
+  const r = repo();
+  try {
+    r.git("checkout", "-qB", "main");
+    const base = dependencyChange(r);
+    write(r.dir, "server/bun.lock", "{ a 1.0.2 }");
+    r.git("add", "server/bun.lock");
+    const res = check(r.dir, "--defer-deps");
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /were not bumped together/);
+    assert.ok(base);
   } finally {
     r.done();
   }

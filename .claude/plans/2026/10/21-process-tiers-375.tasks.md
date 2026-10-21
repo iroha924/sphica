@@ -123,6 +123,16 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `fix(release): name the verdict artifact per attempt and read that one (T10)`
   - 結果: red は上のとおり 2 件 fail を実測。artifact を `release-verdict-<attempt>` にし、release:plan は run の `run_attempt`、push の検査は same-tree の attempt でその名前を取る。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 7 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
 
+- [x] T11: review-shipping の指摘を直す（失敗したジョブだけの再実行で判定が読めない、main への直接のコミットで判定を CI に任せてしまう、古いコメント）
+  - 種別: 修正
+  - 計画: S4, S6, S7
+  - 依存: T10（直す対象の artifact の名前）
+  - 変更: `scripts/check-mcp-version.mjs`, `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts`, `scripts/release-plan.mjs`, `scripts/lib/main-version.mjs`, `scripts/lib/main-version.d.mts`, `scripts/main-version-check.mjs`, `lefthook.yml`, `server/test/check-mcp-version.test.ts`, `server/test/release-plan.test.ts`, `server/test/main-version.test.ts`
+  - red: テストだけを足した `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="on main, --defer-deps|re-running only failed|earlier attempt of the reused" test/check-mcp-version.test.ts test/release-plan.test.ts test/main-version.test.ts` → 3 件 fail（main でも --defer-deps が通す、attempt 2 の run に release-verdict-1 しか無いと none にならない、push の検査が前の attempt の判定を受けない）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts test/release-plan.test.ts test/main-version.test.ts` → 全件 pass。`bun run verify` → 0 で終わる
+  - コミット: `fix(release): read the latest attempt that holds a verdict, and decide on main at commit time (T11)`
+  - 結果: red は上のとおり 3 件 fail を実測。main の上では --defer-deps を効かせない。release:plan と push の検査は run の最新の attempt から 1 まで下って最初に見つかった `release-verdict-<k>` を読み、判定の attempt が k で run の最新以下であることを確かめる。lefthook のコメントを直した。`cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts test/release-plan.test.ts test/main-version.test.ts` → 16 件・8 件・4 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
@@ -136,3 +146,5 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T07 / 変更欄を足した（前の値は same-tree の 2 ファイルとテスト、check.yml、verify-pairs とテスト） / push の判定の読み取りを `scripts/main-version-check.mjs` と `scripts/lib/main-version.mjs` に分け、--verdict の base の照合をリリースのバージョンに替え、plugin-release に一文足したため
 - 2026-10-21 / T07 / Codex のタスクレビュー（high）: 指摘 0 件 / 対応なし
 - 2026-10-21 / 全体 / Codex の全差分のレビュー（high）: 1 件（P2）。gh run download は同名の artifact の先頭を取るので、再実行の後に古い attempt の判定を読み、正しい免除を断って main を赤くする / 採り、修正タスク T10 を足した。artifact の名前は plan の `release-verdict` から `release-verdict-<attempt>` に変えた
+- 2026-10-21 / T10 / Codex の再レビュー（medium）: 直っていて新しい欠陥なし / 対応なし
+- 2026-10-21 / 全体 / review-shipping: 3 件（失敗したジョブだけの再実行で static が再利用され release-verdict-<最新の attempt> が無く main が赤くなる、main への管理者の直接 push で依存だけの変更が pre-commit を通る、lefthook の古いコメント） / 3 件とも採り、修正タスク T11 を足した

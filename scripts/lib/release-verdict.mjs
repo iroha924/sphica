@@ -69,11 +69,18 @@ export function latestRun(runs, { repo, head }) {
   return latest;
 }
 
-/** Why the verdict cannot stand for this run, tree, and release version, or null when it can */
-export function verdictMismatch(v, { run, tree, version }) {
+/**
+ * Why the verdict cannot stand for this run, tree, and release version, or null when it can. attempt is the attempt whose artifact it
+ * came from: re-running only failed jobs reuses an earlier attempt's comparison, so any attempt up to the run's latest can hold it.
+ */
+export function verdictMismatch(v, { run, attempt, tree, version }) {
   if (v?.verdict !== "same") return `the verdict is ${v?.verdict ?? "missing"}: ${v?.reason ?? "no reason"}`;
-  if (String(v.run?.id) !== String(run.id) || String(v.run?.attempt) !== String(run.run_attempt))
-    return `the verdict is not from run ${run.id} attempt ${run.run_attempt}`;
+  if (
+    String(v.run?.id) !== String(run.id) ||
+    String(v.run?.attempt) !== String(attempt) ||
+    !(Number(attempt) >= 1 && Number(attempt) <= Number(run.run_attempt))
+  )
+    return `the verdict is not from run ${run.id} attempt ${attempt}`;
   if (v.tree !== tree) return "the verdict is for another tree";
   if (v.npm?.version !== version)
     return `the verdict compared with ${v.npm?.version ?? "no release"}, not ${version}`;

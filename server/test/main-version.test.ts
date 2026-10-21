@@ -14,6 +14,7 @@ const reused = {
   repo: "o/r",
   apiRun: { id: 7, run_attempt: 2, head_repository: { full_name: "o/r" } },
   verdict: { run: { id: "7", attempt: "2" } },
+  verdictAttempt: "2",
   file: "/tmp/v.json",
 };
 
@@ -36,10 +37,31 @@ test("a reused run passes its verdict on only when the run, its attempt, its rep
       /not from o\/r's own branches/,
     ],
     [{ verdict: null }, /left no release verdict/],
-    [{ verdict: { run: { id: "7", attempt: "1" } } }, /not from run 7 attempt 2/],
+    [{ verdict: { run: { id: "7", attempt: "1" } } }, /not from run 7 attempt 2, up to attempt 2/],
   ] as const) {
     const out = mainCheckArgs({ ...reused, ...change });
     assert.deepEqual(out.args, [], JSON.stringify(change));
     assert.match(out.reason, why);
   }
+});
+
+test("a verdict written by an earlier attempt of the reused run stands, one from a later attempt does not", () => {
+  const earlier = mainCheckArgs({
+    ...reused,
+    verdict: { run: { id: "7", attempt: "1" } },
+    verdictAttempt: "1",
+  });
+  assert.deepEqual(earlier.args, ["--verdict", "/tmp/v.json"], earlier.reason);
+  const later = mainCheckArgs({
+    ...reused,
+    verdict: { run: { id: "7", attempt: "3" } },
+    verdictAttempt: "3",
+  });
+  assert.deepEqual(later.args, []);
+  const mislabeled = mainCheckArgs({
+    ...reused,
+    verdict: { run: { id: "7", attempt: "2" } },
+    verdictAttempt: "1",
+  });
+  assert.deepEqual(mislabeled.args, []);
 });

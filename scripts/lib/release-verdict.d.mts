@@ -32,5 +32,5 @@ export interface Run {
 export function latestRun(runs: Run[], o: { repo: string; head: string }): Run | string;
 export function verdictMismatch(
   v: unknown,
-  o: { run: Pick<Run, "id" | "run_attempt">; tree: string; version: string },
+  o: { run: Pick<Run, "id" | "run_attempt">; attempt: number | string; tree: string; version: string },
 ): string | null;

@@ -138,20 +138,28 @@ function readVerdict() {
   if (typeof run === "string") return no(run);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-plan-verdict-"));
   try {
-    gh([
-      "run",
-      "download",
-      String(run.id),
-      "--repo",
-      repo,
-      "-n",
-      `release-verdict-${run.run_attempt}`,
-      "-D",
-      dir,
-    ]);
+    // The latest attempt that ran the comparison wrote the artifact named for it; an attempt that reused the job wrote none
+    let attempt = run.run_attempt;
+    for (; attempt >= 1; attempt--) {
+      try {
+        gh([
+          "run",
+          "download",
+          String(run.id),
+          "--repo",
+          repo,
+          "-n",
+          `release-verdict-${attempt}`,
+          "-D",
+          dir,
+        ]);
+        break;
+      } catch {}
+    }
+    if (attempt < 1) return no(`run ${run.id} left no release verdict`);
     const read = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
     const version = JSON.parse(at(ref, "plugin/package.json") ?? "{}").version;
-    const why = verdictMismatch(read, { run, tree: git("write-tree"), version });
+    const why = verdictMismatch(read, { run, attempt, tree: git("write-tree"), version });
     return why
       ? no(why)
       : { same: true, reason: `run ${run.id} found the packed tarball the same as ${version}` };
