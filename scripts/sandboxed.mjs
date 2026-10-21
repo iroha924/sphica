@@ -32,6 +32,11 @@ const WHY =
 const home = os.homedir();
 // srt leaves these writable when they exist, as a convenience for npm and Claude Code
 const HOME_DEFAULTS = [path.join(home, ".claude", "debug"), path.join(home, ".npm", "_logs")];
+// What the owner keeps for Sphica, Codex, and Claude Code is not even read, and the variables that point at it are dropped
+const OWNER_HOMES = [".sphica", ".codex", ".claude"].map((name) => path.join(home, name));
+const OWNER_VARIABLES = ["SPHICA_DB", "SPHICA_HOME", "CODEX_HOME"];
+// CI runs these after the sandbox exits, outside it, so nothing inside may change them
+const RUN_AFTER = [path.join(root, "scripts"), path.join(root, "plugin", "package.json")];
 const CLOSED = "sandbox canary: every way out was refused";
 
 // Tries each way out and prints the ones that worked, or CLOSED when none did: a runtime that runs nothing prints neither
@@ -113,7 +118,7 @@ async function main(command) {
   try {
     const settings = path.join(dir, "srt-settings.json");
     const start = path.join(dir, "start");
-    // srt points TMPDIR inside the sandbox here, or at /tmp/claude, which need not exist
+    // The only temp directory the sandbox may write; srt points TMPDIR inside it here, or at /tmp/claude, which need not exist
     const tmp = path.join(dir, "tmp");
     fs.mkdirSync(start);
     fs.mkdirSync(tmp);
@@ -122,9 +127,9 @@ async function main(command) {
       JSON.stringify({
         network: { allowedDomains: [], deniedDomains: [] },
         filesystem: {
-          denyRead: [],
-          allowWrite: [root, fs.realpathSync(os.tmpdir())],
-          denyWrite: [path.join(root, ".git"), ...HOME_DEFAULTS],
+          denyRead: OWNER_HOMES,
+          allowWrite: [root, tmp],
+          denyWrite: [path.join(root, ".git"), ...HOME_DEFAULTS, ...RUN_AFTER],
         },
       }),
     );
@@ -134,16 +139,35 @@ async function main(command) {
         [cli, "--settings", settings, "--", process.execPath, "-e", IN_ROOT, root, ...args],
         {
           cwd: start,
-          env: { ...process.env, CLAUDE_CODE_TMPDIR: tmp, CLAUDE_TMPDIR: tmp },
+          env: {
+            ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !OWNER_VARIABLES.includes(k))),
+            CLAUDE_CODE_TMPDIR: tmp,
+            CLAUDE_TMPDIR: tmp,
+            TMP: tmp,
+            TEMP: tmp,
+          },
           ...opts,
         },
       );
     const { server, port } = await listener();
     let canary;
     try {
-      canary = await srt([process.execPath, "-e", CANARY, root, String(port), home, ...HOME_DEFAULTS], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      canary = await srt(
+        [
+          process.execPath,
+          "-e",
+          CANARY,
+          root,
+          String(port),
+          home,
+          os.tmpdir(),
+          ...HOME_DEFAULTS,
+          ...RUN_AFTER.slice(0, 1),
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
     } finally {
       server.close();
     }
