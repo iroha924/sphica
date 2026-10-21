@@ -1,10 +1,9 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Seeds one run of the claude plugin eval suite (server/evals/plugin/cases/): the tsundoku fixture database under HOME, where the plugin's hooks and MCP
-// servers look for it, and the project's files as a git checkout in the working directory, whose origin names the fixture's project.
-// The case scaffolds run it with the run's HOME and workspace: node server/evals/plugin/seed.ts [steps.json]
-// steps.json holds acceptance steps a case adds after the fixture's own, such as a session to trace.
+// Seeds one run of the claude plugin eval suite from a case's scaffold: the tsundoku fixture database under HOME, where the hooks and MCP
+// servers look, and the files as a git checkout whose origin names the fixture's project. Usage: node seed.ts [steps.json], where
+// steps.json holds acceptance steps the case adds after the fixture's own (the eval-loop Skill describes the suite).
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
