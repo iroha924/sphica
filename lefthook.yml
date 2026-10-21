@@ -14,12 +14,12 @@ pre-commit:
       run: node scripts/check-json-keys.mjs
     # scripts/oxfmt.mjs keeps only the files in its scope
     - name: oxfmt
-      glob: "*.{ts,mts,mjs,json}"
+      glob: "*.{ts,tsx,mts,mjs,json}"
       run: node scripts/oxfmt.mjs {staged_files}
       stage_fixed: true
     - name: oxlint
       # `**/` needs a directory between, so each place is listed at its top level too
-      glob: "{server/src/*.ts,server/src/**/*.ts,server/test/*.ts,server/test/**/*.ts,server/evals/*.ts,server/evals/**/*.ts,scripts/*.mjs,scripts/**/*.mjs,scripts/*.mts,scripts/**/*.mts}"
+      glob: "{server/src/*.ts,server/src/**/*.ts,server/test/*.ts,server/test/**/*.ts,server/evals/*.ts,server/evals/**/*.ts,scripts/*.mjs,scripts/**/*.mjs,scripts/*.mts,scripts/**/*.mts,pane/**/*.ts,pane/**/*.tsx}"
       run: node scripts/oxlint.mjs {staged_files}
     - name: typecheck-server
       root: server/
@@ -41,7 +41,7 @@ pre-commit:
     - name: bundle
       # Matches the package inputs in release-scope.mjs (stops here a commit that changes inputs without bumping the version; a change to the
       # server's dependency files alone waits for the pull request's tarball comparison, except on main)
-      glob: "{server/src/**,db/**,scripts/bundle.mjs,scripts/third-party-notices.mjs,scripts/licenses/**,server/package.json,server/bun.lock,server/tsconfig.json,plugin/**,.claude-plugin/**}"
+      glob: "{server/src/**,db/**,scripts/bundle.mjs,scripts/third-party-notices.mjs,scripts/licenses/**,server/package.json,server/bun.lock,server/tsconfig.json,plugin/**,pane/**,.claude-plugin/**}"
       # Without set -e, the later check's 0 would cancel a failed bundle.
       run: |
         set -e

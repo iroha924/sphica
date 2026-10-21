@@ -46,7 +46,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 
 ### Package
 
-- A change that goes into the package bumps npm and the 3 plugin manifests to the same version, in the same branch (PR). A change to `README.md` alone needs no bump and ships with the next release <!-- invariant: version-sync -->
+- A change that goes into the package bumps npm, the 3 plugin manifests, and the sphica-pane manifest with its marketplace ref to the same version, in the same branch (PR) (`VERSION_SOURCES` in `scripts/lib/release-scope.mjs` lists them). A change to `README.md` alone needs no bump and ships with the next release <!-- invariant: version-sync -->
 - Before editing the version, look at the kind `bun run release:plan -- --base <previous release commit>` reports <!-- invariant: release-plan -->
 - Before each release step, reopen the `plugin-release` Skill and run its commands exactly as written. The owner approves the `npm-release` environment, the only gate before npm; do not do it in the owner's place, on the page or through the API <!-- invariant: release-owner-steps -->
 - `plugin/dist` and `plugin/db` are untracked, so they do not show in `git diff`. Run `npm pack` and unpack it outside the repository to look <!-- invariant: pack-and-inspect -->

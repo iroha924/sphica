@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { gateProblems, reviewProblems } from "./lib/release-gate.mjs";
+import { releaseVersions } from "./lib/release-scope.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const { tag, commit } = parseArgs({
@@ -57,13 +58,7 @@ const { problems, pull } = gateProblems({
   tag,
   commit,
   repo,
-  versions: {
-    package: read("plugin/package.json").version,
-    claude: read("plugin/.claude-plugin/plugin.json").version,
-    codex: read("plugin/.codex-plugin/plugin.json").version,
-    marketplace: read(".claude-plugin/marketplace.json").plugins.find((entry) => entry.name === "sphica")
-      ?.source?.version,
-  },
+  versions: releaseVersions(read),
   mainIsAncestor,
   tagCommit,
   published,

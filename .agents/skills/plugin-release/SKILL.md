@@ -78,7 +78,7 @@ then `check-mcp-version.mjs --verdict`); pre-commit leaves that decision to CI (
 | Kind | Changes | Versions to move |
 |---|---|---|
 | `none` | Dev docs that do not ship, repository dev Skills, tests only, a change to the root `README.md` alone (it goes into npm, but ships with the next release), and a change to the server's dependency files whose packed tarball CI found the same as the last release | None |
-| `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules | The npm package and the 3 places of the plugin channel |
+| `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules, the sphica-pane mod (`pane/`) | Every place `VERSION_SOURCES` in `scripts/lib/release-scope.mjs` lists: the npm package, the 3 places of the plugin channel, and the sphica-pane manifest with its marketplace ref (`v<version>`) |
 
 The source of truth for the classification is `scripts/lib/release-scope.mjs`; the version gate and
 the release command read the same file.

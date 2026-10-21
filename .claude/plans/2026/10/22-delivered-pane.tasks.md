@@ -81,19 +81,22 @@ base: main
 
 `pane/` の変更がリリースの判定・バージョンの検査・タグのゲート・到着の確認に掛かり、マーケットプレイスから入れられる
 
-- [ ] T05: release-scope・check-mcp-version・release-plan・release-gate・release-status に pane のマニフェストと marketplace の ref を足し、version-sync の文書と plugin-release の Skill を直す
+- [x] T05: release-scope・check-mcp-version・release-plan・release-gate・release-status に pane のマニフェストと marketplace の ref を足し、version-sync の文書と plugin-release の Skill を直す
   - 種別: 変更
   - 計画: S5
   - 依存: T01（pane のマニフェストが要る）
-  - 変更: `scripts/lib/release-scope.mjs`, `scripts/check-mcp-version.mjs`, `scripts/release-plan.mjs`, `scripts/release-gate.mjs`, `scripts/release-status.mjs`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/verification.md`, `.claude/skills/plugin-release/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`, `server/test/release-scope.test.ts`
-  - 完了条件: `node -e 'import("./scripts/lib/release-scope.mjs").then(m => console.log(m.releaseKind(["pane/hooks/register.tsx"])))'` → `plugin`。`cd server && node --test test/release-scope.test.ts` → pass。`bun run verify:ai` → 0 で終わる
+  - 変更: `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `scripts/check-mcp-version.mjs`, `scripts/release-plan.mjs`, `scripts/release-gate.mjs`, `scripts/release-status.mjs`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/verification.md`, `.agents/skills/plugin-release/SKILL.md`, `lefthook.yml`, `server/test/release-scope.test.ts`, `server/test/check-mcp-version.test.ts`, `server/test/release-plan.test.ts`, `.claude-plugin/marketplace.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `pane/.claude-plugin/plugin.json`
+  - 完了条件: `node -e 'import("./scripts/lib/release-scope.mjs").then(m => console.log(m.releaseKind(["pane/hooks/register.tsx"])))'` → `plugin`。`cd server && node --test test/release-scope.test.ts test/check-mcp-version.test.ts test/release-plan.test.ts test/release-gate.test.ts` → pass（pane のマニフェストか marketplace の ref だけが取り残されると落ちる）。`bun run release:plan -- --base v0.6.65` → `plugin`。`bun run verify:ai` と `bun run check` → 0 で終わる
   - コミット: `chore(release): treat the pane plugin as a package input and gate its version and ref (T05)`
-- [ ] T06: marketplace に `sphica-pane` のエントリを足してバージョンを上げ、`check-pane.mjs` にエントリの照合を足し、README に入れ方・確かめた版・Codex には入れないこと・外し方を書く
+  - 結果: `node -e '...releaseKind(["pane/hooks/register.tsx"])...'` → plugin
+  - 結果: `cd server && node --test test/release-scope.test.ts test/check-mcp-version.test.ts test/release-plan.test.ts test/release-gate.test.ts test/release-gate-cli.test.ts test/release-finish.test.ts` → 55 件 pass（pane のマニフェストが 1.0.0 のまま、または marketplace の ref が v1.0.0 のままのとき、どちらも名指しで落ちる）
+  - 結果: `bun run release:plan -- --base v0.6.65` → release kind: plugin（版を上げる前に流した）。`bun run verify:ai` → 0 で終わった
+- [ ] T06: `check-pane.mjs` に marketplace のエントリの照合を足し、README に入れ方・確かめた版・Codex には入れないこと・外し方を書き、plugin-release の Skill に出荷後の確認を足す
   - 種別: 追加
   - 計画: S6
-  - 依存: T04（エントリの照合を足す先の検査が要る）, T05（marketplace の ref を version として読む検査が要る）
-  - 変更: `.claude-plugin/marketplace.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `pane/.claude-plugin/plugin.json`, `scripts/check-pane.mjs`, `README.md`
-  - 完了条件: `bun run pane:check` → エントリの照合を含めて 0 で終わる。`ref` を `v0.0.0` に書き換えて `bun run pane:check` → ref の違いを名指しして 1 で終わる（戻してからコミット）。`bun run release:plan -- --base v0.6.65` → `plugin`。`bun run verify` → 0 で終わる
+  - 依存: T04（エントリの照合を足す先の検査が要る）, T05（エントリとバージョンが要る）
+  - 変更: `scripts/check-pane.mjs`, `README.md`, `.agents/skills/plugin-release/SKILL.md`
+  - 完了条件: `bun run pane:check` → エントリの照合を含めて 0 で終わる。`path` を `panes` に書き換えて `bun run pane:check` → path の違いを名指しして 1 で終わる（戻してからコミット）。`bun run verify` → 0 で終わる
   - コミット: `feat(pane): list sphica-pane in the marketplace and document it (T06)`
 
 ## 記録
@@ -110,3 +113,8 @@ base: main
 - 2026-10-22 / T04 / CI の Linux では `bun run check` が pane:check を流すので、T03 で足した個別の validate と test の手順を CLI の --version だけにし、CLI は `bun run setup` で入れる形にした / Windows のジョブは `bun run pane:check` を流す
 - 2026-10-22 / T02・T07 / Codex のレビュー（167446c9、bdacdbb0） → 指摘なし。keep の失敗・.catch の発火・時間切れは実機で未検証と返った（T02 の記録と同じ）
 - 2026-10-22 / T03 / Codex のレビュー（3985515a） → 指摘なし。CLI が ~/.claude を読まないことは未実測と返った / T04 で launcher の HOME と USERPROFILE も一時ディレクトリに向け、変更欄に scripts/claude-cli.mjs と型宣言の pane-report.d.mts を足した（前の値は 5 ファイル、新しい値は 7 ファイル）
+- 2026-10-22 / T05・T06 / pane/ をパッケージの入力にすると、T01〜T04 の pane の変更にもバージョンアップが要り、T05 のコミットを pre-commit が止める。marketplace の ref を読む検査はエントリが無いと落ちる / バージョンアップとエントリを T06 から T05 に移した。T05 の変更欄は 11 から 19 ファイル（版の 5 ファイル、release-scope の型、lefthook.yml、テスト 2 本を足し、symlink の .claude/skills 側を外した）、完了条件に版の検査のテストと release:plan を足した。T06 の変更欄は check-pane.mjs・README.md・plugin-release の Skill に、完了条件は ref から path の書き換えに変えた
+- 2026-10-22 / T05 / 版を読む場所が 4 本のスクリプトに別々に書かれていた / scripts/lib/release-scope.mjs の VERSION_SOURCES 1 か所にまとめ、check-mcp-version・release-plan・release-gate・release-status がそこから読む形にした（rg-pairs の対を型の代わりに 1 か所にした）。git-subdir の ref は withoutReleaseVersion で版と一緒に外す
+- 2026-10-22 / T05 / pre-commit の bundle の glob（パッケージの入力）と oxlint・oxfmt の glob に pane/ が無かった。release-scope のテストが bundle の glob の抜けを落とした / lefthook.yml に足した
+- 2026-10-22 / T04 / Codex のレビュー（731a2474）の F1（register.tsx 以外のモジュールの注記を読み飛ばす、再現済み）と F2（コピー中の失敗で一時ディレクトリが残る、再現済み）を受理 / 修正タスク T08 を足す
+- 2026-10-22 / T05 / review-shipping → コミットを止める指摘なし。tarball は 0.6.65 と版以外同じ、既存利用者の更新は Claude Code 2.1.139・2.1.306・Codex 0.163.0 で通った。指摘: 2.1.139 では sphica-pane が読み込みに失敗する（受理、T06 の README に最低版を書く）、Codex に sphica-pane を入れると毎セッション hooks.json の modules で警告が出る（plan のリスクどおり PR の段階で持ち主に聞く）、release の prepare が CLI も取得する（棄却: 取得元は他の依存と同じ npm で、OSV の扱いは tools/sandbox と同じ）

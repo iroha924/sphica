@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { releaseVersions } from "./lib/release-scope.mjs";
 import { observe, settingsState } from "./lib/repo-settings.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -43,11 +44,11 @@ const dirs = (where) => {
   }
 };
 
-const packageVersion = read("plugin/package.json").version;
-const claudeManifest = read("plugin/.claude-plugin/plugin.json").version;
-const codexManifest = read("plugin/.codex-plugin/plugin.json").version;
-const marketplace = read(".claude-plugin/marketplace.json").plugins.find((entry) => entry.name === "sphica")
-  ?.source?.version;
+const versions = releaseVersions(read);
+const packageVersion = versions.package;
+const claudeManifest = versions.claude;
+const codexManifest = versions.codex;
+const marketplace = versions.marketplace;
 const tagsText = attempt("npm", ["view", "sphica", "dist-tags", "--json"]);
 let tags = null;
 try {
@@ -62,12 +63,16 @@ const globalPackage = globalRoot
   : { status: "unknown", version: null };
 const claudeText = attempt("claude", ["plugin", "list", "--json"]);
 let claudeCache = null;
+// The pane plugin is optional, so a session without it is not an issue; one with it should be at the release
+let paneCache = null;
 let claudeObserved = false;
 try {
   const plugins = claudeText ? JSON.parse(claudeText) : [];
   claudeObserved = claudeText !== null;
-  claudeCache =
-    plugins.find((entry) => entry.id?.startsWith("sphica@") && entry.scope === "user")?.version ?? null;
+  const cached = (prefix) =>
+    plugins.find((entry) => entry.id?.startsWith(prefix) && entry.scope === "user")?.version ?? null;
+  claudeCache = cached("sphica@");
+  paneCache = cached("sphica-pane@");
 } catch {
   claudeCache = null;
 }
@@ -117,6 +122,8 @@ console.log("plugin channel");
 console.log(`  marketplace: ${marketplace ?? "unknown"}`);
 console.log(`  Claude manifest: ${claudeManifest}`);
 console.log(`  Codex manifest: ${codexManifest}`);
+console.log(`  pane manifest: ${versions.pane} (marketplace ref v${versions.paneRef})`);
+console.log(`  pane cache: ${claudeObserved ? (paneCache ?? "not installed") : "unknown"}`);
 console.log(`  Claude cache: ${claudeObserved ? (claudeCache ?? "not found") : "unknown"}`);
 console.log(
   `  Codex cache: ${
@@ -161,8 +168,12 @@ if (tags?.latest && globalPackage.status !== "unknown" && globalPackage.version 
 if (remoteTags !== null && !remoteTags.includes(`refs/tags/v${tags?.latest ?? packageVersion}`)) {
   issues.push("no remote tag for npm latest");
 }
-if (claudeManifest !== codexManifest || claudeManifest !== marketplace) {
+const channel = Object.entries(versions).filter(([name]) => name !== "package");
+if (new Set(channel.map(([, version]) => version)).size !== 1) {
   issues.push("plugin channel manifests and marketplace differ");
+}
+if (marketplace && paneCache && paneCache !== marketplace) {
+  issues.push("Claude's sphica-pane cache differs from marketplace");
 }
 if (marketplace && claudeObserved && claudeCache !== marketplace) {
   issues.push("Claude cache differs from marketplace");

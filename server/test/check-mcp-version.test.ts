@@ -43,11 +43,15 @@ function bump(dir: string, version: string) {
     dir,
     ".claude-plugin/marketplace.json",
     JSON.stringify({
-      plugins: [{ name: "sphica", source: { source: "npm", package: "sphica", version } }],
+      plugins: [
+        { name: "sphica", source: { source: "npm", package: "sphica", version } },
+        { name: "sphica-pane", source: { source: "git-subdir", url: "u", path: "pane", ref: `v${version}` } },
+      ],
     }),
   );
   write(dir, "plugin/.claude-plugin/plugin.json", JSON.stringify({ version }));
   write(dir, "plugin/.codex-plugin/plugin.json", JSON.stringify({ version }));
+  write(dir, "pane/.claude-plugin/plugin.json", JSON.stringify({ version }));
 }
 
 function bumpPackage(dir: string, version: string) {
@@ -491,6 +495,44 @@ test("on main, --defer-deps does not defer: a direct commit there has no pull re
     assert.equal(res.status, 1, res.stdout);
     assert.match(res.stderr, /were not bumped together/);
     assert.ok(base);
+  } finally {
+    r.done();
+  }
+});
+
+test("a pane manifest or a marketplace ref left behind by a bump fails", () => {
+  const r = repo();
+  try {
+    bump(r.dir, "1.0.0");
+    write(r.dir, "pane/hooks/register.tsx", "a");
+    r.git("add", "-A");
+    r.git("commit", "-qm", "base");
+
+    write(r.dir, "pane/hooks/register.tsx", "b");
+    r.git("add", "-A");
+    const missed = check(r.dir);
+    assert.equal(missed.status, 1, "a pane change is a package input that needs a bump");
+
+    bump(r.dir, "1.0.1");
+    write(r.dir, "pane/.claude-plugin/plugin.json", JSON.stringify({ version: "1.0.0" }));
+    r.git("add", "-A");
+    const pane = check(r.dir);
+    assert.equal(pane.status, 1);
+    assert.match(pane.stderr, /1\.0\.0 in pane\/\.claude-plugin\/plugin\.json \(pane\)/);
+
+    bump(r.dir, "1.0.1");
+    const market = JSON.parse(fs.readFileSync(path.join(r.dir, ".claude-plugin/marketplace.json"), "utf8"));
+    market.plugins[1].source.ref = "v1.0.0";
+    write(r.dir, ".claude-plugin/marketplace.json", JSON.stringify(market));
+    r.git("add", "-A");
+    const ref = check(r.dir);
+    assert.equal(ref.status, 1);
+    assert.match(ref.stderr, /1\.0\.0 in \.claude-plugin\/marketplace\.json \(paneRef\)/);
+
+    bump(r.dir, "1.0.1");
+    r.git("add", "-A");
+    const bumped = check(r.dir);
+    assert.equal(bumped.status, 0, bumped.stderr);
   } finally {
     r.done();
   }

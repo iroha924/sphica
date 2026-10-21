@@ -13,7 +13,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
 import { fail, finding, guard, report } from "./lib/finding.mjs";
-import { DEPENDENCY_INPUTS, isPackageInput, withoutReleaseVersion } from "./lib/release-scope.mjs";
+import {
+  DEPENDENCY_INPUTS,
+  isPackageInput,
+  VERSION_SOURCES,
+  withoutReleaseVersion,
+} from "./lib/release-scope.mjs";
 
 guard("version");
 
@@ -70,18 +75,13 @@ function main() {
     return;
   }
 
-  // The plugin channel version lives in 3 places. Bumping only some of them does not deliver, so check all of them.
+  // The plugin channel version lives in several places (VERSION_SOURCES). Bumping only some of them does not deliver, so check all of them.
   // Measured (2026-09-09): while the Claude side was bumped 13 times, **the Codex side stayed at its initial 0.1.0
   // and was never bumped.** This gate only checked the Claude side, so the promise to stop a forgotten bump
-  // held for one side only. The npm package and the 3 plugin channel manifests move to the same version whenever shipped files change.
-  const PACKAGE = "plugin/package.json";
-  const PLUGIN_MANIFESTS = {
-    // **The version lives in source.** Putting it directly in the entry too makes Claude Code use plugin.json without warning
-    // and silently ignore the marketplace value (official plugin-marketplaces docs). Keep it in one place.
-    ".claude-plugin/marketplace.json": (j) => j.plugins?.find((x) => x.name === "sphica")?.source?.version,
-    "plugin/.claude-plugin/plugin.json": (j) => j.version,
-    "plugin/.codex-plugin/plugin.json": (j) => j.version,
-  };
+  // held for one side only. The npm package and every manifest move to the same version whenever shipped files change.
+  const PACKAGE = VERSION_SOURCES.package.file;
+  const MANIFESTS = Object.entries(VERSION_SOURCES).filter(([name]) => name !== "package");
+  const MANIFEST_FILES = new Set(MANIFESTS.map(([, v]) => v.file));
 
   // Read versions from the index too. A version bumped only in the working tree does not go into the commit.
   const read = (f) => JSON.parse(git("show", `:${f}`));
@@ -94,14 +94,14 @@ function main() {
     const text = at(ref, PACKAGE);
     return text !== null && JSON.parse(text).name === packageName;
   };
-  const versions = Object.entries(PLUGIN_MANIFESTS).map(([f, pick]) => [f, pick(read(f))]);
+  const versions = MANIFESTS.map(([name, v]) => [`${v.file} (${name})`, v.pick(read(v.file))]);
   const distinct = [...new Set(versions.map(([, v]) => v))];
   if (distinct.length !== 1)
     fail({
-      where: Object.keys(PLUGIN_MANIFESTS).join(", "),
+      where: [...MANIFEST_FILES].join(", "),
       what: `the plugin channel versions differ: ${versions.map(([f, v]) => `${v} in ${f}`).join(", ")}`,
       why: "each host installs from its own manifest, so bumping only some keeps old content reaching the others (invariant version-sync)",
-      fix: `set all 3 manifests to the same version as ${PACKAGE}`,
+      fix: `set every manifest to the same version as ${PACKAGE}`,
     });
   const pluginVersion = distinct[0];
   if (pluginVersion.localeCompare(packageVersion, undefined, { numeric: true }) > 0)
@@ -109,7 +109,7 @@ function main() {
       where: PACKAGE,
       what: `the plugin channel is at ${pluginVersion}, ahead of the npm package at ${packageVersion}`,
       why: "the marketplace installs the npm version its manifest names, so a channel ahead of npm points at a release that does not exist",
-      fix: `set ${PACKAGE} to ${pluginVersion}, or bring the 3 manifests back to ${packageVersion}`,
+      fix: `set ${PACKAGE} to ${pluginVersion}, or bring the manifests back to ${packageVersion}`,
     });
 
   // **Changed files are also read from the index (what the commit will contain).** Reading the working tree could read before bundle
@@ -133,7 +133,7 @@ function main() {
     .filter(isPackageInput)
     .filter(
       (f) =>
-        (f !== PACKAGE && !(f in PLUGIN_MANIFESTS)) ||
+        (f !== PACKAGE && !MANIFEST_FILES.has(f)) ||
         withoutReleaseVersion(at(ref, f)) !== withoutReleaseVersion(staged(f)),
     );
   /** Compares major.minor.patch numerically (as strings, 1.10.0 would be less than 1.9.0). */
@@ -175,7 +175,7 @@ function main() {
         where: PACKAGE,
         what: `the version goes down from ${was} to ${now}`,
         why: "hosts move a plugin's cache only to newer versions, so a lower one never reaches anyone",
-        fix: `set ${PACKAGE} and the 3 plugin manifests to one version above ${was}`,
+        fix: `set ${PACKAGE} and the plugin manifests to one version above ${was}`,
       });
   }
   if (changed.length === 0) return;
@@ -225,9 +225,9 @@ function main() {
       : []),
     finding({
       where: changed[0],
-      what: `${changed.length} package input(s) changed, but the npm package and the 3 plugin manifests were not bumped together (${changed.join(", ")})`,
+      what: `${changed.length} package input(s) changed, but the npm package and the plugin manifests were not bumped together (${changed.join(", ")})`,
       why: "Claude Code and Codex run a marketplace plugin from a copy cached per version, so without a bump the change never reaches a session (invariant version-sync)",
-      fix: `bump ${PACKAGE} and the 3 plugin manifests to one new version above ${oldPackageVersion ?? packageVersion}, after \`bun run release:plan\` reports the release kind`,
+      fix: `bump ${PACKAGE} and the plugin manifests to one new version above ${oldPackageVersion ?? packageVersion}, after \`bun run release:plan\` reports the release kind`,
     }),
   ]);
 
