@@ -440,3 +440,33 @@ test("a bumped dependency change passes with a verdict that is not same", () => 
     r.done();
   }
 });
+
+test("a same verdict for HEAD does not cover a dependency change staged after it", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r);
+    const verdict = verdictFile(r, base);
+    write(r.dir, "server/bun.lock", "{ a 1.0.2, b 1.0.0 }");
+    r.git("add", "server/bun.lock");
+    const res = check(r.dir, "--base", base, "--verdict", verdict);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /another tree/);
+  } finally {
+    r.done();
+  }
+});
+
+test("neither --defer-deps nor a same verdict lets npm and the plugin channel versions part", () => {
+  const r = repo();
+  try {
+    const base = dependencyChange(r);
+    bumpPackage(r.dir, "1.0.1");
+    r.git("commit", "-qam", "bump npm alone");
+    for (const flag of [["--defer-deps"], ["--verdict", verdictFile(r, base)]]) {
+      const res = check(r.dir, "--base", base, ...flag);
+      assert.equal(res.status, 1, `${flag[0]}: ${res.stdout}`);
+    }
+  } finally {
+    r.done();
+  }
+});

@@ -161,7 +161,8 @@ const bumped =
   (!oldPackageVersion || compare(packageVersion, oldPackageVersion) > 0) &&
   (!oldPluginVersion || compare(pluginVersion, oldPluginVersion) > 0) &&
   packageVersion === pluginVersion;
-const dependenciesOnly = changed.every((f) => DEPENDENCY_INPUTS.has(f));
+// The exemption covers the bump only: npm and the plugin channel still have to agree
+const dependenciesOnly = changed.every((f) => DEPENDENCY_INPUTS.has(f)) && packageVersion === pluginVersion;
 if (!bumped && dependenciesOnly && deferDeps) {
   console.log(
     `only ${changed.join(" and ")} changed: CI compares the packed tarball with the last release and asks for a bump if it differs`,
@@ -203,7 +204,8 @@ function verdictProblem(file) {
     return `the verdict ${file} cannot be read`;
   }
   if (v?.verdict !== "same") return `the verdict is ${v?.verdict ?? "missing"}: ${v?.reason ?? "no reason"}`;
-  if (v.tree !== git("rev-parse", "HEAD^{tree}").trim()) return "the verdict is for another tree";
+  // The index is what this check reads and what the commit will hold, so the verdict has to be for its tree
+  if (v.tree !== git("write-tree").trim()) return "the verdict is for another tree";
   if (v.base !== git("rev-parse", `${ref}^{commit}`).trim())
     return "the verdict compared against another base";
   return null;

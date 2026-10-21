@@ -92,6 +92,16 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/same-tree.test.ts test/verify-pairs.test.ts` → 判定の tree・baseline・run が合うときだけ渡し、合わない・読めないときは渡さない。`bun run verify` → 0 で終わる
   - コミット: `feat(release): carry the tarball verdict to the push to main (T07)`
 
+- [x] T08: T05 のレビューの指摘を直す（判定の tree を index と比べる、バージョンがずれたまま免除しない）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象の検査）
+  - 変更: `scripts/check-mcp-version.mjs`, `server/test/check-mcp-version.test.ts`
+  - red: テストだけを足した `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="staged after it|versions part" test/check-mcp-version.test.ts` → 2 件 fail（HEAD の same が後から stage した依存の変更を通す、npm だけ上げても --defer-deps と same の --verdict が通る）
+  - 完了条件: 同じコマンド → 2 件 pass。`bun run verify` → 0 で終わる
+  - コミット: `fix(release): hold the verdict to the staged tree and keep the versions together (T08)`
+  - 結果: red は上のとおり 2 件 fail を実測。判定の tree は `git write-tree`（index）と比べ、免除は npm と plugin のバージョンが一致するときだけにした → `test/check-mcp-version.test.ts` 15 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
@@ -100,3 +110,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T05 / 変更欄に `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `server/test/verify-pairs.test.ts` を足した / 免除の対象の集合を release-scope に置き、verify-pairs のテストを足したため
 - 2026-10-21 / T04 / Codex のタスクレビュー（high）: 指摘 0 件。指定のテストは Codex の sandbox で mkdtemp が EPERM になり走らせられなかった（手元では pass） / 対応なし
 - 2026-10-21 / T06 / 変更欄を `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts` から `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts` に替えた / DEPENDENCY_INPUTS は T05 で入れ、実行と判定の照合は T07 と共有するため release-verdict に置いた
+- 2026-10-21 / T05 / Codex のタスクレビュー（high）: 2 件（P2）、どちらも Codex が再現 / 2 件とも採り、修正タスク T08 を足した
