@@ -113,6 +113,16 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `fix(release): read the verdict only from origin's repository and a complete run list (T09)`
   - 結果: red は上のとおり fail を実測。gh の答えを `git remote get-url origin` の owner/name と照合し、一覧は same-tree の `runsFrom`（total_count と欄を検査）を通してから選ぶ。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 6 件 pass。実物の origin は `iroha924/sphica` と読めた
 
+- [x] T10: 全差分のレビューの指摘を直す（再実行の後に古い attempt の判定を読む）
+  - 種別: 修正
+  - 計画: S6, S7
+  - 依存: T07（直す対象の push の検査）, T09（直す対象の release:plan）
+  - 変更: `.github/workflows/check.yml`, `scripts/release-plan.mjs`, `scripts/main-version-check.mjs`, `server/test/release-plan.test.ts`
+  - red: attempt ごとの名前の artifact だけを返す偽の gh を足した `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 2 件 fail（`-n release-verdict` では何も取れない）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 全件 pass。`bun run verify` → 0 で終わる
+  - コミット: `fix(release): name the verdict artifact per attempt and read that one (T10)`
+  - 結果: red は上のとおり 2 件 fail を実測。artifact を `release-verdict-<attempt>` にし、release:plan は run の `run_attempt`、push の検査は same-tree の attempt でその名前を取る。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 7 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
@@ -124,3 +134,5 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T05 / Codex のタスクレビュー（high）: 2 件（P2）、どちらも Codex が再現 / 2 件とも採り、修正タスク T08 を足した
 - 2026-10-21 / T06 / Codex のタスクレビュー（high）: 2 件（P1 1、P2 1）、どちらも Codex がモックで再現 / 2 件とも採り、修正タスク T09 を足した
 - 2026-10-21 / T07 / 変更欄を足した（前の値は same-tree の 2 ファイルとテスト、check.yml、verify-pairs とテスト） / push の判定の読み取りを `scripts/main-version-check.mjs` と `scripts/lib/main-version.mjs` に分け、--verdict の base の照合をリリースのバージョンに替え、plugin-release に一文足したため
+- 2026-10-21 / T07 / Codex のタスクレビュー（high）: 指摘 0 件 / 対応なし
+- 2026-10-21 / 全体 / Codex の全差分のレビュー（high）: 1 件（P2）。gh run download は同名の artifact の先頭を取るので、再実行の後に古い attempt の判定を読み、正しい免除を断って main を赤くする / 採り、修正タスク T10 を足した。artifact の名前は plan の `release-verdict` から `release-verdict-<attempt>` に変えた

@@ -72,6 +72,8 @@ function fakeGh(): string {
       "else if (a.startsWith('api repos/o/r/actions/workflows/check.yml/runs?') && process.env.FAKE_RUNS !== undefined) process.stdout.write(process.env.FAKE_RUNS);",
       "else if (a.startsWith('run download ') && process.env.FAKE_VERDICT !== undefined) {",
       "  const argv = process.argv.slice(2);",
+      // A run keeps one artifact per attempt, named for it: asking for another name finds nothing
+      "  if (argv[argv.indexOf('-n') + 1] !== 'release-verdict-' + (process.env.FAKE_ATTEMPT ?? '1')) process.exit(1);",
       "  require('node:fs').writeFileSync(require('node:path').join(argv[argv.indexOf('-D') + 1], 'release-verdict.json'), process.env.FAKE_VERDICT);",
       "}",
       "else process.exit(1);",
@@ -252,4 +254,13 @@ test("a verdict is not read from another repository gh was pointed at, or from a
   const partial = dependencyPlan({ total: 2 });
   assert.match(partial.stdout, /^release kind: plugin$/m);
   assert.match(partial.stdout, /lists 1 of 2 runs/);
+});
+
+test("after a re-run, the verdict is read from the artifact of the run's latest attempt", () => {
+  const out = dependencyPlan({
+    run: { run_attempt: 2 },
+    verdict: { run: { id: "7", attempt: "2" } },
+    env: { FAKE_ATTEMPT: "2" },
+  });
+  assert.match(out.stdout, /^release kind: none/m, out.stdout);
 });

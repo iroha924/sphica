@@ -18,14 +18,19 @@ const gh = (args) =>
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "main-version-"));
 let apiRun = null;
 let verdict = null;
-if (env.TESTED === "true" && /^\d+$/.test(env.RUN ?? "") && /^[\w.-]+\/[\w.-]+$/.test(repo)) {
+if (
+  env.TESTED === "true" &&
+  /^\d+$/.test(env.RUN ?? "") &&
+  /^\d+$/.test(env.ATTEMPT ?? "") &&
+  /^[\w.-]+\/[\w.-]+$/.test(repo)
+) {
   try {
     apiRun = JSON.parse(gh(["api", `repos/${repo}/actions/runs/${env.RUN}`]));
   } catch {
     apiRun = "the API request failed";
   }
   try {
-    gh(["run", "download", env.RUN ?? "", "--repo", repo, "-n", "release-verdict", "-D", dir]);
+    gh(["run", "download", env.RUN ?? "", "--repo", repo, "-n", `release-verdict-${env.ATTEMPT}`, "-D", dir]);
     verdict = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
   } catch {
     verdict = null;

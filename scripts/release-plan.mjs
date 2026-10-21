@@ -138,7 +138,17 @@ function readVerdict() {
   if (typeof run === "string") return no(run);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-plan-verdict-"));
   try {
-    gh(["run", "download", String(run.id), "--repo", repo, "-n", "release-verdict", "-D", dir]);
+    gh([
+      "run",
+      "download",
+      String(run.id),
+      "--repo",
+      repo,
+      "-n",
+      `release-verdict-${run.run_attempt}`,
+      "-D",
+      dir,
+    ]);
     const read = JSON.parse(fs.readFileSync(path.join(dir, "release-verdict.json"), "utf8"));
     const version = JSON.parse(at(ref, "plugin/package.json") ?? "{}").version;
     const why = verdictMismatch(read, { run, tree: git("write-tree"), version });
