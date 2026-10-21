@@ -6,8 +6,8 @@
 import { type Selectable, type SqlBool, sql } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
-import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { refusalText, renamesSince } from "./git.ts";
 import { inline, plain, STRING_SEQUENCE } from "./panel.ts";
@@ -521,7 +521,7 @@ function boundary(all: Buffer, at: number): number {
 }
 
 /** Control sequences (ESC [ or CSI, parameters, intermediates, final byte), which plain also drops whole however long */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matches the terminal control sequences plain drops
+// oxlint-disable-next-line no-control-regex -- matches the terminal control sequences plain drops
 const CONTROL_SEQUENCE = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/;
 const HIDDEN = new RegExp(`${STRING_SEQUENCE.source}|${CONTROL_SEQUENCE.source}`, "g");
 

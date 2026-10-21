@@ -7,9 +7,9 @@
 
 import { type Kysely, sql } from "kysely";
 import { backupDir, backups } from "./backups.ts";
-import { inTransaction, iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
+import { inTransaction, iso } from "./db.ts";
 import { reconcile } from "./reconcile.ts";
 import { fitCount, keyShown, preview, READ_BUDGET } from "./reply-budget.ts";
 import { plural } from "./text.ts";

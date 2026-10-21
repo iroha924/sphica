@@ -1,0 +1,2 @@
+# Every text file is checked out with LF, Windows included, so the format check sees what is committed
+* text=auto eol=lf

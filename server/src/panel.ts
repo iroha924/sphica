@@ -52,7 +52,7 @@ export const panel = (head: string, lines: string[], end: string): string =>
  * the │ at the line start, and control characters cannot disrupt the terminal. Line breaks (CR, VT, FF, NEL, line separators) become LF, control characters
  * are dropped, and visible drops invisible characters (so agents reading this output never see text people on the terminal cannot).
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: drops terminal string sequences (OSC, DCS, APC, PM, SOS) through their terminator
+// oxlint-disable-next-line no-control-regex -- drops terminal string sequences (OSC, DCS, APC, PM, SOS) through their terminator
 export const STRING_SEQUENCE = /\u001b[\]P_^X][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g;
 
 export const plain = (s: string): string =>

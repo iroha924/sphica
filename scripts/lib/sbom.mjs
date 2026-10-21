@@ -9,7 +9,7 @@ function noticed(text) {
   const out = new Set();
   const broken = [];
   for (const line of text.split("\n")) {
-    if (!line.startsWith("|") || /^\| package \|/.test(line) || /^\|[-| ]+\|$/.test(line)) continue;
+    if (!line.startsWith("|") || line.startsWith("| package |") || /^\|[-| ]+\|$/.test(line)) continue;
     const m = /^\| (\S+) \| (\S+) \| [^|]+ \|$/.exec(line);
     if (m) out.add(`${m[1]} ${m[2]}`);
     else broken.push(line);

@@ -2,7 +2,8 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Keeps issue numbers, pull request numbers, and plan paths out of comments: a comment states the reason itself.
+// Keeps issue numbers, pull request numbers, and plan paths out of SQL comments: a comment states the reason itself.
+// JavaScript and TypeScript are checked by the lint rule sphica/comment-refs, with the same table.
 // server/test/fixtures/*.sql are frozen copies of old schemas that the migration tests compare against, so they are left as they are.
 
 import fs from "node:fs";
@@ -20,21 +21,13 @@ const filesUnder = (dir, re) =>
     .filter((f) => re.test(f) && !f.includes("/node_modules/"))
     .sort();
 
-const js = ["server/src", "server/test", "server/evals", "scripts"].flatMap((d) =>
-  filesUnder(d, /\.(?:ts|mjs)$/),
-);
 const sql = filesUnder("db", /\.sql$/);
 
 let count = 0;
-for (const [files, kind] of [
-  [js, "js"],
-  [sql, "sql"],
-]) {
-  for (const file of files) {
-    for (const p of referenceProblems(fs.readFileSync(path.join(root, file), "utf8"), kind)) {
-      console.error(`${file}:${p.line}: ${p.reason}: ${p.text}`);
-      count++;
-    }
+for (const file of sql) {
+  for (const p of referenceProblems(fs.readFileSync(path.join(root, file), "utf8"), "sql")) {
+    console.error(`${file}:${p.line}: ${p.reason}: ${p.text}`);
+    count++;
   }
 }
 if (count) {
@@ -43,4 +36,6 @@ if (count) {
   );
   process.exit(1);
 }
-console.log(`comments: ${js.length} JavaScript and TypeScript files, ${sql.length} SQL files`);
+console.log(
+  `comments: ${sql.length} SQL files (JavaScript and TypeScript are checked by the lint rule sphica/comment-refs)`,
+);

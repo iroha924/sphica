@@ -4,8 +4,8 @@
 // What trace reads: sessions not traced yet (the owner's messages for an explicit trace, every speaker's for an automatic one), the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import type { Caller } from "./caller.ts";
-import { inTransaction, iso, type Reads } from "./db.ts";
 import type { DB, Session } from "./db-types.ts";
+import { inTransaction, iso, type Reads } from "./db.ts";
 import type { BeginOrigin } from "./knowledge.ts";
 
 /** Days after its last owner message that an untraced session stops counting as waiting. Its messages stay and are still found. */
@@ -29,7 +29,9 @@ const untraced = (eb: InSession, auto: boolean) => {
   return (auto ? q : q.where("m.author_kind", "=", "owner")).where(({ not, exists, selectFrom }) =>
     not(
       exists(
-        selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
+        selectFrom("source_processing as p")
+          .whereRef("p.source_id", "=", "m.id")
+          .select(sql`1`.as("x")),
       ),
     ),
   );
@@ -210,7 +212,10 @@ export async function sessionSources(db: Reads, sessionId: string) {
       "m.truncated",
       eb
         .exists(
-          eb.selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
+          eb
+            .selectFrom("source_processing as p")
+            .whereRef("p.source_id", "=", "m.id")
+            .select(sql`1`.as("x")),
         )
         .as("looked"),
     ])

@@ -3,9 +3,9 @@
   "includeEntryExports": true,
   "workspaces": {
     ".": {
-      "entry": ["scripts/pre-push.mjs"],
+      "entry": ["scripts/pre-push.mjs", "scripts/lint-plugin.mjs"],
       "project": ["scripts/**/*.{js,mjs,cjs,ts}"],
-      "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens"],
+      "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens", "oxlint", "oxfmt"],
       "ignoreBinaries": ["lefthook", "lychee"]
     },
     "server": {
@@ -37,7 +37,14 @@
         "evals/trace/auto-trace.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
-      "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook", "markdownlint-cli2"],
+      "ignoreDependencies": [
+        "@biomejs/biome",
+        "js-tokens",
+        "kysely-codegen",
+        "lefthook",
+        "markdownlint-cli2",
+        "oxlint-tsgolint"
+      ],
       "ignoreBinaries": ["codex", "mkfifo"]
     }
   },

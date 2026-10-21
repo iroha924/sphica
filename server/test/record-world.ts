@@ -87,7 +87,7 @@ export async function recordWorld(
   const context = async (run: string, auto = false) => {
     const pages: string[] = [];
     const cursors: string[] = [];
-    for (let after: string | undefined; ; ) {
+    for (let after: string | undefined; ;) {
       const page = await reply("record_context", {
         run,
         ...(after ? { after } : {}),

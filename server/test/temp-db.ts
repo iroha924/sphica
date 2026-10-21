@@ -10,9 +10,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
-import { openReader } from "../src/db.ts";
 import type { DB } from "../src/db-types.ts";
 import { connectWriter, openWriter } from "../src/db-write.ts";
+import { openReader } from "../src/db.ts";
 
 const SCHEMA = fs.readFileSync(path.join(import.meta.dirname, "..", "..", "db", "schema.sql"), "utf8");
 

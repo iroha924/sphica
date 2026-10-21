@@ -5,8 +5,8 @@
 // (server/src/judge.ts), writes only the difference, and judges again to prove nothing is left over, or throws so the save rolls back.
 
 import { type Kysely, sql } from "kysely";
-import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { iso, type Reads } from "./db.ts";
 import { difference, type Judged, judge, type Lifecycle, type Plan, type Snapshot } from "./judge.ts";
 
 /** What made this change: a record server run, or the owner forgetting sources */
@@ -231,7 +231,7 @@ export async function firstState(
 /** Every record linked to the seeds by intents to replace, either way: what one of them does can change the others */
 async function closure(db: Reads, seeds: number[]): Promise<number[]> {
   const seen = new Set(seeds);
-  for (let frontier = [...seen]; frontier.length; ) {
+  for (let frontier = [...seen]; frontier.length;) {
     const links = await db
       .selectFrom("unit_link")
       .select(["from_unit", "to_unit"])
@@ -263,7 +263,12 @@ async function rowsOf(db: Reads, ids: number[]): Promise<Rows> {
       "u.unsourced",
       "s.missing",
       eb
-        .exists(eb.selectFrom("unit_state as t").whereRef("t.unit_id", "=", "u.id").select(sql`1`.as("x")))
+        .exists(
+          eb
+            .selectFrom("unit_state as t")
+            .whereRef("t.unit_id", "=", "u.id")
+            .select(sql`1`.as("x")),
+        )
         .as("stated"),
       eb
         .exists(

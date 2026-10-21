@@ -98,7 +98,7 @@ const charAt = (line: string, at: number): string =>
 
 /** Whether the text before index `end` ends in a Latin word or a number. Combining marks belong to the letter before them, so they are stepped over. */
 function endsWord(line: string, end: number): boolean {
-  for (let i = end; i > 0; ) {
+  for (let i = end; i > 0;) {
     const low = line.charCodeAt(i - 1);
     const from = low >= 0xdc00 && low <= 0xdfff && i > 1 ? i - 2 : i - 1;
     const c = charAt(line, from);
@@ -117,7 +117,7 @@ function inlineRanges(line: string): Range[] {
   // Where each run of backticks closes: the next run of its own length, found for every run in one pass from the end of the line
   const closing = new Map<number, number>();
   const last = new Map<number, number>();
-  for (let end = line.length; end > 0; ) {
+  for (let end = line.length; end > 0;) {
     if (line[end - 1] !== "`") {
       end--;
       continue;
@@ -132,7 +132,7 @@ function inlineRanges(line: string): Range[] {
   // A mark that found no partner from where it stood finds none from further on either: it is not looked for again, so a long line of
   // marks that never pair is read once, not once per mark
   const unpaired = new Set<string>();
-  for (let i = 0; i < line.length; ) {
+  for (let i = 0; i < line.length;) {
     const c = line[i] as string;
     let close = -1;
     let width = 1;
@@ -193,7 +193,7 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
   let quoting = false;
   let before = "";
   let after = "";
-  for (let at = 0; at <= bytes.length; ) {
+  for (let at = 0; at <= bytes.length;) {
     const nl = bytes.indexOf(0x0a, at);
     const stop = nl < 0 ? bytes.length : nl;
     // A CRLF message keeps its carriage return at the end of each line; it is part of the break, not of the line

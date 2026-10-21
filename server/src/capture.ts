@@ -28,9 +28,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Kysely } from "kysely";
 import { childThread, codexThread, ownThread } from "./codex-log.ts";
-import { dbFile, inTransaction, iso, sqliteCode } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
+import { dbFile, inTransaction, iso, sqliteCode } from "./db.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { markOnce } from "./once.ts";
 import { panel, plain } from "./panel.ts";
@@ -447,7 +447,7 @@ export async function closeTurn(dir: string, turn: string, root: string): Promis
     )
       return [];
     // A failed snapshot keeps the start, so a Stop that follows in the same turn still compares from it
-    writeStart(dir, { ...own, ...(now ?? {}), running: false });
+    writeStart(dir, { ...own, ...now, running: false });
     return now ? changed(root, before, now) : [];
   };
 }

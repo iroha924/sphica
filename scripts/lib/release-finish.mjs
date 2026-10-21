@@ -7,7 +7,7 @@
 export function releaseNotes(body) {
   // Remove comments until none is left, so nested markers cannot leave an opening `<!--` behind
   let text = String(body ?? "").replace(/\r/g, "");
-  for (let previous = ""; previous !== text; ) {
+  for (let previous = ""; previous !== text;) {
     previous = text;
     text = text.replace(/<!--[\s\S]*?-->/g, "");
   }
@@ -33,7 +33,7 @@ export function releaseNotes(body) {
   });
   const start = heading.findIndex((line) => line !== null && /^## Release notes\s*$/.test(line));
   if (start === -1) return null;
-  const end = heading.findIndex((line, index) => index > start && line !== null && /^## /.test(line));
+  const end = heading.findIndex((line, index) => index > start && line !== null && line.startsWith("## "));
   const notes = lines
     .slice(start + 1, end === -1 ? undefined : end)
     .join("\n")

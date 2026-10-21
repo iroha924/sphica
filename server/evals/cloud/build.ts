@@ -12,8 +12,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
+import { openReader } from "../../src/db.ts";
 import { CONFIRM_GOLD, leadFor, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
@@ -177,7 +177,7 @@ function files(dir: string): void {
   if (args.project === "tsundoku") {
     const { world } = loadAcceptance();
     // The slot holds the code as it is now: a project's current files replace the world's, so a record's anchor can be gone
-    for (const [rel, text] of Object.entries({ ...world.files, ...(project?.current ?? {}) }))
+    for (const [rel, text] of Object.entries({ ...world.files, ...project?.current }))
       if (text !== "BINARY" && text !== "OVERSIZED") write(dir, rel, text);
     write(
       dir,

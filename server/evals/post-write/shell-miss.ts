@@ -8,8 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { ReadonlyKysely } from "kysely/readonly";
-import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
+import { openReader } from "../../src/db.ts";
 import { deliverableIds } from "../../src/deliver.ts";
 import { shuffled } from "./replay.ts";
 import {

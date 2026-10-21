@@ -32,7 +32,7 @@ function capture(draw: (output: Writable) => void): string {
   return text.replace(/\n$/, "");
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: splits out color sequences (SGR) so they survive cleaning
+// oxlint-disable-next-line no-control-regex -- splits out color sequences (SGR) so they survive cleaning
 const SGR = /(\u001b\[[0-9;]*m)/;
 
 /**
@@ -61,7 +61,7 @@ const plainLine = (text: string): string =>
 const GUIDE = 3;
 
 /** A line starting with a mark (panel.ts mark; a color sequence may precede it). Has columns such as label, version, value */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: skips the color sequence before the mark
+// oxlint-disable-next-line no-control-regex -- skips the color sequence before the mark
 const MARKED = /^(?:\u001b\[[0-9;]*m)*[✓△✗○](?:\u001b\[[0-9;]*m)* /;
 
 /**

@@ -347,7 +347,7 @@ test("a cleared issue body, comment, review, and review comment become empty cur
       (cleared: boolean): Get =>
       async (q) =>
         (
-          ({
+          {
             "pulls/7": {
               number: 7,
               title: "t",
@@ -368,7 +368,7 @@ test("a cleared issue body, comment, review, and review comment become empty cur
             "pulls/7/commits": [],
             "issues/14": { ...said(cleared ? null : "Notes leak", 14), number: 14 },
             "issues/14/comments": [said(cleared ? "" : "Confirmed", 76)],
-          }) as Record<string, unknown>
+          } as Record<string, unknown>
         )[q.split("?")[0] ?? ""];
     await store(db, p, (await readPull(pull(false), 7, "o/r")).items);
     await inTransaction(db.ingest, (trx) => linkIssues(trx, p, 7, [14]));

@@ -9,10 +9,18 @@ pre-commit:
     - name: actionlint
       glob: ".github/workflows/*.yml"
       run: mise exec -- actionlint {staged_files}
-    - name: biome
-      glob: "*.{ts,mts,tsx,js,mjs,cjs,json,jsonc}"
-      run: server/node_modules/.bin/biome check --write --no-errors-on-unmatched {staged_files}
+    - name: json-keys
+      glob: "*.json"
+      run: node scripts/check-json-keys.mjs
+    # scripts/oxfmt.mjs keeps only the files in its scope
+    - name: oxfmt
+      glob: "*.{ts,mts,mjs,json}"
+      run: node scripts/oxfmt.mjs {staged_files}
       stage_fixed: true
+    - name: oxlint
+      # `**/` needs a directory between, so each place is listed at its top level too
+      glob: "{server/src/*.ts,server/src/**/*.ts,server/test/*.ts,server/test/**/*.ts,server/evals/*.ts,server/evals/**/*.ts,scripts/*.mjs,scripts/**/*.mjs,scripts/*.mts,scripts/**/*.mts}"
+      run: node scripts/oxlint.mjs {staged_files}
     - name: typecheck-server
       root: server/
       glob: "*.ts"
@@ -41,7 +49,7 @@ pre-commit:
     # This checks only how SQL is written. Whether SQL ran against a real SQLite database (sql:reach) and the child process lane (sql:live)
     # rerun the tests, so CI checks them, and pre-push verify before a push to main.
     - name: sql
-      glob: "{server/src/**/*.ts,server/test/**/*.ts,db/schema.sql,scripts/check-sql.mjs}"
+      glob: "{db/schema.sql,scripts/check-sql.mjs,scripts/lib/sql-style.mjs}"
       run: bun run sql
     - name: architecture
       glob: "{server/src/**/*.ts,scripts/check-architecture.mjs}"
