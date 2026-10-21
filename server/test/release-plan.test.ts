@@ -30,6 +30,7 @@ function repo() {
     "lib/repo-settings.mjs",
     "lib/release-verdict.mjs",
     "lib/tarball-diff.mjs",
+    "lib/same-tree.mjs",
   ]) {
     fs.mkdirSync(path.dirname(path.join(dir, "scripts", file)), { recursive: true });
     fs.copyFileSync(path.join(SCRIPTS, file), path.join(dir, "scripts", file));
@@ -64,7 +65,7 @@ function fakeGh(): string {
     [
       `#!${process.execPath}`,
       "const a = process.argv.slice(2).join(' ');",
-      "if (a.startsWith('repo view')) process.stdout.write('o/r\\n');",
+      "if (a.startsWith('repo view')) process.stdout.write((process.env.FAKE_REPO ?? 'o/r') + '\\n');",
       "else if (a === 'api repos/o/r/immutable-releases') process.stdout.write('{\"enabled\":true}');",
       "else if (a === 'api repos/o/r/actions/permissions') process.stdout.write('{\"sha_pinning_required\":true}');",
       // The pull request runs and the verdict artifact come from the environment the test sets, as GitHub would hand them over
@@ -168,8 +169,16 @@ test("release:plan escapes Unicode line separators in a shown path too, which Ja
 });
 
 /** A staged change to the server's dependency files alone, with a passed pull request run on HEAD and its same verdict, then the plan */
-function dependencyPlan(change: { run?: Record<string, unknown>; verdict?: Record<string, unknown> } = {}) {
+function dependencyPlan(
+  change: {
+    run?: Record<string, unknown>;
+    verdict?: Record<string, unknown>;
+    env?: Record<string, string>;
+    total?: number;
+  } = {},
+) {
   const r = repo();
+  r.git("remote", "add", "origin", "https://github.com/o/r.git");
   write(r.dir, "server/package.json", JSON.stringify({ devDependencies: { a: "1.0.1" } }));
   write(r.dir, "server/bun.lock", "{ a 1.0.1 }");
   r.git("add", "server");
@@ -194,8 +203,9 @@ function dependencyPlan(change: { run?: Record<string, unknown>; verdict?: Recor
     ...change.verdict,
   };
   return planWith(r, {
-    FAKE_RUNS: JSON.stringify({ workflow_runs: [run] }),
+    FAKE_RUNS: JSON.stringify({ total_count: change.total ?? 1, workflow_runs: [run] }),
     FAKE_VERDICT: JSON.stringify(verdict),
+    ...change.env,
   });
 }
 
@@ -230,4 +240,16 @@ test("a change to another package input is plugin without looking for a verdict"
   const out = planWith(r, { FAKE_RUNS: "not json" });
   assert.match(out.stdout, /^release kind: plugin$/m);
   assert.doesNotMatch(out.stdout, /release verdict/);
+});
+
+test("a verdict is not read from another repository gh was pointed at, or from a run list that leaves runs out", () => {
+  const elsewhere = dependencyPlan({
+    env: { FAKE_REPO: "fork/r" },
+    run: { head_repository: { full_name: "fork/r" } },
+  });
+  assert.match(elsewhere.stdout, /^release kind: plugin$/m);
+  assert.match(elsewhere.stdout, /gh answers fork\/r, but origin is o\/r/);
+  const partial = dependencyPlan({ total: 2 });
+  assert.match(partial.stdout, /^release kind: plugin$/m);
+  assert.match(partial.stdout, /lists 1 of 2 runs/);
 });

@@ -15,6 +15,7 @@ import {
 } from "./lib/release-scope.mjs";
 import { latestRun, verdictMismatch } from "./lib/release-verdict.mjs";
 import { observe, settingsState } from "./lib/repo-settings.mjs";
+import { runsFrom } from "./lib/same-tree.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const { base, json } = parseArgs({
@@ -97,22 +98,42 @@ let verdict = null;
 if (kind === "plugin" && files.every((file) => DEPENDENCY_INPUTS.has(file))) verdict = readVerdict();
 if (verdict?.same) kind = "none";
 
+/** owner/name of the origin remote on GitHub, or null */
+function originRepo() {
+  let url;
+  try {
+    url = git("remote", "get-url", "origin");
+  } catch {
+    return null;
+  }
+  return (
+    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(
+      url,
+    )?.[1] ?? null
+  );
+}
+
 function readVerdict() {
   const no = (reason) => ({ same: false, reason });
   if (!repo) return no("the repository name could not be read with gh");
+  // gh can be pointed at another repository (GH_REPO), so the checkout's own origin has to name the same one
+  const origin = originRepo();
+  if (repo !== origin) return no(`gh answers ${repo}, but origin is ${origin ?? "not a GitHub repository"}`);
   const head = git("rev-parse", "HEAD");
   let runs;
   try {
-    runs = JSON.parse(
-      gh([
-        "api",
-        `repos/${repo}/actions/workflows/check.yml/runs?event=pull_request&head_sha=${head}&per_page=100`,
-      ]),
-    ).workflow_runs;
+    runs = runsFrom(
+      JSON.parse(
+        gh([
+          "api",
+          `repos/${repo}/actions/workflows/check.yml/runs?event=pull_request&head_sha=${head}&per_page=100`,
+        ]),
+      ),
+    );
   } catch {
     return no("the pull request runs could not be read with gh");
   }
-  if (!Array.isArray(runs)) return no("the reply lists no runs");
+  if (typeof runs === "string") return no(runs);
   const run = latestRun(runs, { repo, head });
   if (typeof run === "string") return no(run);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-plan-verdict-"));

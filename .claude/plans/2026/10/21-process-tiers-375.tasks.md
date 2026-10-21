@@ -102,6 +102,16 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `fix(release): hold the verdict to the staged tree and keep the versions together (T08)`
   - 結果: red は上のとおり 2 件 fail を実測。判定の tree は `git write-tree`（index）と比べ、免除は npm と plugin のバージョンが一致するときだけにした → `test/check-mcp-version.test.ts` 15 件 pass。`bun run verify` → exit 0（acceptance 151 件 pass）
 
+- [x] T09: T06 のレビューの指摘を直す（gh の向き先を origin と照合する、run の一覧が欠けていれば使わない）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す対象の release:plan）
+  - 変更: `scripts/release-plan.mjs`, `server/test/release-plan.test.ts`
+  - red: テストだけを足した `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 新しい 1 件が fail（gh が fork/r を答え fork/r の run と artifact があると none、total_count 2 で 1 件しか返らない一覧でも none）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 全件 pass
+  - コミット: `fix(release): read the verdict only from origin's repository and a complete run list (T09)`
+  - 結果: red は上のとおり fail を実測。gh の答えを `git remote get-url origin` の owner/name と照合し、一覧は same-tree の `runsFrom`（total_count と欄を検査）を通してから選ぶ。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts` → 6 件 pass。実物の origin は `iroha924/sphica` と読めた
+
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
@@ -111,3 +121,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T04 / Codex のタスクレビュー（high）: 指摘 0 件。指定のテストは Codex の sandbox で mkdtemp が EPERM になり走らせられなかった（手元では pass） / 対応なし
 - 2026-10-21 / T06 / 変更欄を `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts` から `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts` に替えた / DEPENDENCY_INPUTS は T05 で入れ、実行と判定の照合は T07 と共有するため release-verdict に置いた
 - 2026-10-21 / T05 / Codex のタスクレビュー（high）: 2 件（P2）、どちらも Codex が再現 / 2 件とも採り、修正タスク T08 を足した
+- 2026-10-21 / T06 / Codex のタスクレビュー（high）: 2 件（P1 1、P2 1）、どちらも Codex がモックで再現 / 2 件とも採り、修正タスク T09 を足した
