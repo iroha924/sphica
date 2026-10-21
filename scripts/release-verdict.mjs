@@ -8,7 +8,7 @@
 
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { writeVerdict } from "./lib/release-verdict.mjs";
+import { verdictLine, writeVerdict } from "./lib/release-verdict.mjs";
 
 const { packed, base, out } = parseArgs({
   options: { packed: { type: "string" }, base: { type: "string" }, out: { type: "string" } },
@@ -18,6 +18,6 @@ if (!packed || !base || !out) {
   process.exit(2);
 }
 const v = await writeVerdict({ packed, base, out, cwd: process.cwd() });
-const line = `release verdict: ${v.verdict} against ${v.npm?.name ?? "the base release"}: ${v.reason}${v.paths.length ? ` (${v.paths.join(", ")})` : ""}`;
+const line = verdictLine(v);
 console.log(line);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);

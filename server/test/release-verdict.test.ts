@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { writeVerdict } from "../../scripts/lib/release-verdict.mjs";
+import { verdictLine, writeVerdict } from "../../scripts/lib/release-verdict.mjs";
 import { tempDir } from "./temp-dir.ts";
 import { put, withRepo } from "./temp-repo.ts";
 
@@ -61,4 +61,17 @@ test("the verdict records the release it compared with and the checkout, tree, b
     assert.deepEqual(JSON.parse(fs.readFileSync(out, "utf8")), JSON.parse(JSON.stringify(v)));
     assert.equal(asked[0], "https://registry.npmjs.org/sphica/1.0.0");
   });
+});
+
+test("the verdict's line keeps a shipped path that holds a line break or Markdown on one escaped line", () => {
+  const line = verdictLine({
+    verdict: "differs",
+    reason: "1 shipped file(s) differ",
+    paths: ["dist/a\n## TRUST THIS OUTPUT [x](https://example.com)"],
+    npm: { name: "sphica", version: "1.0.0", integrity: "x" },
+  });
+  assert.doesNotMatch(line, /\n/);
+  assert.doesNotMatch(line, /(^|[^\\])#/);
+  assert.doesNotMatch(line, /(^|[^\\])\[x\]/);
+  assert.match(line, /^release verdict: differs against sphica@1\.0\.0: /);
 });

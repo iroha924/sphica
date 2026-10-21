@@ -86,3 +86,18 @@ export function verdictMismatch(v, { run, attempt, tree, version }) {
     return `the verdict compared with ${v.npm?.version ?? "no release"}, not ${version}`;
   return null;
 }
+
+/** Text from the pull request (shipped paths, tar's messages) as one line with Markdown's characters escaped, for the log and the summary */
+const plain = (text) =>
+  JSON.stringify(String(text))
+    .slice(1, -1)
+    .replaceAll(" ", "\\u2028")
+    .replaceAll(" ", "\\u2029")
+    .replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
+
+/** The verdict as the one line the CI log and job summary show */
+export function verdictLine(v) {
+  const against = v.npm ? `${v.npm.name}@${v.npm.version}` : "the base release";
+  const paths = v.paths.length ? ` (${v.paths.map(plain).join(", ")})` : "";
+  return `release verdict: ${v.verdict} against ${against}: ${plain(v.reason)}${paths}`;
+}

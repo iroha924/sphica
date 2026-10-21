@@ -34,3 +34,4 @@ export function verdictMismatch(
   v: unknown,
   o: { run: Pick<Run, "id" | "run_attempt">; attempt: number | string; tree: string; version: string },
 ): string | null;
+export function verdictLine(v: Verdict): string;
