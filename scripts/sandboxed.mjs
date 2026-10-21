@@ -31,7 +31,12 @@ const WHY =
   "tests must not reach the owner's ~/.sphica, Codex home, or repository, and only the OS can stop one that gets it wrong";
 const home = os.homedir();
 // srt leaves these writable when they exist, as a convenience for npm and Claude Code
-const HOME_DEFAULTS = [path.join(home, ".claude", "debug"), path.join(home, ".npm", "_logs")];
+const RUNTIME_DEFAULTS = [
+  path.join(home, ".claude", "debug"),
+  path.join(home, ".npm", "_logs"),
+  "/tmp/claude",
+  "/private/tmp/claude",
+];
 // What the owner keeps for Sphica, Codex, and Claude Code is not even read, and the variables that point at it are dropped
 const OWNER_HOMES = [".sphica", ".codex", ".claude"].map((name) => path.join(home, name));
 const OWNER_VARIABLES = ["SPHICA_DB", "SPHICA_HOME", "CODEX_HOME"];
@@ -129,7 +134,7 @@ async function main(command) {
         filesystem: {
           denyRead: OWNER_HOMES,
           allowWrite: [root, tmp],
-          denyWrite: [path.join(root, ".git"), ...HOME_DEFAULTS, ...RUN_AFTER],
+          denyWrite: [path.join(root, ".git"), ...RUNTIME_DEFAULTS, ...RUN_AFTER],
         },
       }),
     );
@@ -161,7 +166,7 @@ async function main(command) {
           String(port),
           home,
           os.tmpdir(),
-          ...HOME_DEFAULTS,
+          ...RUNTIME_DEFAULTS,
           ...RUN_AFTER.slice(0, 1),
         ],
         {
