@@ -38,7 +38,7 @@ base: main
   - 変更: `pane/hooks/hooks.json`, `pane/hooks/register.tsx`, `pane/hooks/register.test.tsx`, `pane/hooks/sift.ts`, `pane/types/index.d.ts`
   - 完了条件: `claude plugin validate --strict pane` → 0 で終わる。`claude plugin test pane` → pass（5 つのイベントで、返り値が下流の結果と同じ、下流は 1 回、入力は変わらない、state の中身、同時の 2 配信が両方残る、`keep` が失敗しても結果を返す）
   - コミット: `feat(pane): register the classic hooks and draw the delivered pane (T02)`
-  - 結果: `claude plugin validate --strict pane`（2.1.306） → Validation passed。hooks は 5 つの classic・session.start・command.run・ui.render、calls は $.command.register・$.state.get・$.state.set・$.ui.open・$.ui.resolve、5 つの classic すべて with .catch
+  - 結果: `claude plugin validate --strict pane` → （2.1.306）Validation passed。hooks は 5 つの classic・session.start・command.run・ui.render、calls は $.command.register・$.state.get・$.state.set・$.ui.open・$.ui.resolve、5 つの classic すべて with .catch
   - 結果: `claude plugin test pane` → 4 件 pass（4 つの classic で返り値が下流と同じ・下流 1 回・入力の source が残る、PreToolUse の context と stop、updatedInput が下の tool.call に届き deny は呼び出しを止める、同時の 2 件が両方残り 122 件のうち新しい 100 件、/sphica-pane と新しい順の描画）。hook の返り値を書き換える壊し方では 1 件目が落ちた
   - 結果: エンジンの型（2.1.306 の claude-code.d.ts）を置いた scratch の写しで `tsc -p` → 0 で終わった。`bun run lint`・`bun run typecheck`・`bun run english`・`bun run headers`・`node --test test/pane-sift.test.ts` → 0 で終わった
 
