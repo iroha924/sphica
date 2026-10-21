@@ -31,13 +31,16 @@ base: main
   - コミット: `feat(pane): add the sphica-pane plugin skeleton and the sift of Sphica's hook text (T01)`
   - 結果: `cd server && node --test test/pane-sift.test.ts` → 2 件 pass（SessionStart・SubagentStart・編集の前・読む前・プロンプト・#218 の停止・unavailable の実際の出力を 1 件ずつ拾い、停止は stop として拾った。他のプラグインの文面・空・undefined は拾わなかった。layout の上限ちょうどと 1 文字超えを確かめた）
   - 結果: `bun run check` → 0 で終わった（typecheck・lint・english・headers・comments を含む）
-- [ ] T02: `register.tsx`（5 つの classic hook、`/sphica-pane`、ペインの描画）と `register.test.tsx` を足す
+- [x] T02: `register.tsx`（5 つの classic hook、`/sphica-pane`、ペインの描画）と `register.test.tsx` を足す
   - 種別: 追加
   - 計画: S3
   - 依存: T01（`sift` と `layout`、state の型が要る）
-  - 変更: `pane/hooks/hooks.json`, `pane/hooks/register.tsx`, `pane/hooks/register.test.tsx`
+  - 変更: `pane/hooks/hooks.json`, `pane/hooks/register.tsx`, `pane/hooks/register.test.tsx`, `pane/hooks/sift.ts`, `pane/types/index.d.ts`
   - 完了条件: `claude plugin validate --strict pane` → 0 で終わる。`claude plugin test pane` → pass（5 つのイベントで、返り値が下流の結果と同じ、下流は 1 回、入力は変わらない、state の中身、同時の 2 配信が両方残る、`keep` が失敗しても結果を返す）
   - コミット: `feat(pane): register the classic hooks and draw the delivered pane (T02)`
+  - 結果: `claude plugin validate --strict pane`（2.1.306） → Validation passed。hooks は 5 つの classic・session.start・command.run・ui.render、calls は $.command.register・$.state.get・$.state.set・$.ui.open・$.ui.resolve、5 つの classic すべて with .catch
+  - 結果: `claude plugin test pane` → 4 件 pass（4 つの classic で返り値が下流と同じ・下流 1 回・入力の source が残る、PreToolUse の context と stop、updatedInput が下の tool.call に届き deny は呼び出しを止める、同時の 2 件が両方残り 122 件のうち新しい 100 件、/sphica-pane と新しい順の描画）。hook の返り値を書き換える壊し方では 1 件目が落ちた
+  - 結果: エンジンの型（2.1.306 の claude-code.d.ts）を置いた scratch の写しで `tsc -p` → 0 で終わった。`bun run lint`・`bun run typecheck`・`bun run english`・`bun run headers`・`node --test test/pane-sift.test.ts` → 0 で終わった
 
 ## P2: CI で配る実物を検査する
 
@@ -80,3 +83,6 @@ base: main
 ## 記録
 
 - 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル
+- 2026-10-22 / T02 / types の契約は自己完結でなければ validate が落とす（import 禁止）ため、Delivered の型を types/index.d.ts に置き、sift.ts がそこから import する形に直した / 変更欄に sift.ts と types/index.d.ts を足した（前の値は 3 ファイル、新しい値は 5 ファイル）
+- 2026-10-22 / T02 / keep が失敗したときに結果をそのまま返すことはテストで確かめられなかった。テストキットは下流の結果の形を先に検査し、state.set の stub は mod の書き込みに届かない。テストを書くと常に通るので外した / 実装は try 相当の .catch(() => {}) と、hook の .catch（Caught の replay で下流を再実行しない）で守る。未検証として PR 本文に書く
+- 2026-10-22 / T02 / Registration の .catch の引数名 next が oxlint の promise(no-callback-in-promise) に Promise の catch と誤って当たった / 引数名を replay にした

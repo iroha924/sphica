@@ -4,8 +4,9 @@
 // Picks Sphica's own text out of a classic hook result and fits it to the pane. Hook results carry no mark of which hook wrote what,
 // so a match on Sphica's fixed wording is a guess for display only; server/test/pane-sift.test.ts holds it to deliver.ts's real output.
 
-/** One piece of Sphica's text a hook handed the agent, as the pane keeps it. */
-export type Delivered = { at: string; event: string; kind: "context" | "stop"; text: string };
+import type { Delivered } from "../types/index.d.ts";
+
+export type { Delivered };
 
 /** What the mod reads from a classic result: its contexts, and a PreToolUse refusal. */
 export type Result = { readonly additionalContext?: readonly string[]; readonly deny?: string } | undefined;
