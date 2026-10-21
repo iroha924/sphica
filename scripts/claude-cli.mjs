@@ -4,7 +4,7 @@
 
 // Runs the Claude Code CLI that tools/claude-cli pins, for the checks of the sphica-pane mod (plugin validate and plugin test).
 // Installed with --ignore-scripts, the package's own launcher is a stub, so the platform package's native binary is started by path.
-// Its settings go to a temporary CLAUDE_CONFIG_DIR, so a check never reads or writes the owner's ~/.claude.
+// Its settings and home go to a temporary directory (CLAUDE_CONFIG_DIR, HOME, USERPROFILE), so a check never reads or writes the owner's ~/.claude.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -35,7 +35,7 @@ export function runClaude(args, { cwd = root } = {}) {
     const r = spawnSync(claudeBinary(), args, {
       cwd,
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+      env: { ...process.env, CLAUDE_CONFIG_DIR: config, HOME: config, USERPROFILE: config },
       maxBuffer: 64 * 1024 * 1024,
     });
     if (r.error) throw r.error;

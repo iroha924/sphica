@@ -66,13 +66,16 @@ base: main
   - コミット: `ci: pin the Claude Code CLI and validate and test the pane mod on Linux and Windows (T03)`
   - 結果: `node scripts/claude-cli.mjs --version` → 2.1.300（npm の公開 2026-10-14T14:27:26Z、確かめた時刻 2026-10-21T17:15Z で 7 日を超えた最新。2.1.301 は 6 日）
   - 結果: `node scripts/claude-cli.mjs plugin validate --strict pane` → Validation passed。`node scripts/claude-cli.mjs plugin test pane` → 4 件 pass。`actionlint .github/workflows/check.yml` → 0 で終わった。`bun run check` → 0 で終わった
-- [ ] T04: `scripts/check-pane.mjs` を足す（`git archive` で取り出した `pane/` に validate --strict --json と plugin test を流し、hook・calls・state を許可リストと突き合わせる）。`bun run pane:check` を check・ci:static・Windows のジョブに入れる
+- [x] T04: `scripts/check-pane.mjs` を足す（`git archive` で取り出した `pane/` に validate --strict --json と plugin test を流し、hook・calls・state を許可リストと突き合わせる）。`bun run pane:check` を check・ci:static・Windows のジョブに入れる
   - 種別: 追加
   - 計画: S4
   - 依存: T03（固定した CLI の版と入れ方が要る）
-  - 変更: `scripts/check-pane.mjs`, `package.json`, `.github/workflows/check.yml`
+  - 変更: `scripts/check-pane.mjs`, `scripts/lib/pane-report.mjs`, `scripts/lib/pane-report.d.mts`, `server/test/pane-report.test.ts`, `scripts/claude-cli.mjs`, `package.json`, `.github/workflows/check.yml`
   - 完了条件: `bun run pane:check` → 0 で終わる。`register.tsx` に許可していない `$.fs.read` を一時的に足して `bun run pane:check` → calls の違いを名指しして 1 で終わる（戻してからコミット）
   - コミット: `chore(scripts): check the archived pane mod against its allowed hooks and calls (T04)`
+  - 結果: `bun run pane:check` → 0 で終わった（git が追跡する pane/ のファイルを一時ディレクトリに写し、2.1.300 の validate --strict --json と plugin test を流し、hooks・calls・state が許可リストと一致）
+  - 結果: `bun run pane:check` → register.tsx に `$.fs.read` を一時的に足すと「calls: not allowed $.fs.read」と test の失敗を名指しして 1 で終わった（戻してある）
+  - 結果: `cd server && node --test test/pane-report.test.ts` → 2 件 pass（書式の変わった注記は「validate reported none」で落ちる）。`bun run check` → 0 で終わった
 
 ## P3: リリースに載せる
 
@@ -103,3 +106,7 @@ base: main
 - 2026-10-22 / T03 / CLI の入れ方を実測で決めた。server の devDependency はパッケージの入力でバージョンを上げることになり、mise の npm バックエンドはこのリポジトリで持ち主の `claude` を固定版の shim で隠す。`tools/sandbox` と同じく `tools/claude-cli` に独自の package.json と 7 日の bunfig を置き、`--ignore-scripts` で入れてプラットフォームのパッケージの本体を直接起動する形にした。版は package.json の 1 か所 / 変更欄を `scripts/lib/claude-cli.mjs`・check.yml・package.json から tools/claude-cli の 3 ファイル・scripts/claude-cli.mjs・check.yml に変えた
 - 2026-10-22 / T03 / check.yml は main 向けの PR でしか走らず、途中で PR を作ると GitHub の Codex が作りかけをレビューする / 完了条件の CI の観測を PR の CI（A2）に移した。前の値は「gh run view で Linux と Windows のジョブが通っている」、新しい値は「手元で通り、check.yml に手順がある。CI は A2」
 - 2026-10-22 / T03 / 2.1.300 の validate は「組織が管理する Claude Code では、利用者が入れたプラグインの classic hook は動かない」と注記した / README（T06）に書く
+- 2026-10-22 / T04 / plan は `git archive HEAD pane` と書いていたが、手元の check がコミット前の変更を見ないので、`git ls-files` で追跡しているファイルを作業ツリーから写す形にした（配る対象はタグの時点の追跡ファイルで、CI では HEAD と同じ） / 許可リストと注記の読み取りは単体テストのため scripts/lib/pane-report.mjs に分け、変更欄に足した（前の値は 3 ファイル、新しい値は 5 ファイル）。テストが「gating hook without .catch」の取りこぼしを見つけて直した
+- 2026-10-22 / T04 / CI の Linux では `bun run check` が pane:check を流すので、T03 で足した個別の validate と test の手順を CLI の --version だけにし、CLI は `bun run setup` で入れる形にした / Windows のジョブは `bun run pane:check` を流す
+- 2026-10-22 / T02・T07 / Codex のレビュー（167446c9、bdacdbb0） → 指摘なし。keep の失敗・.catch の発火・時間切れは実機で未検証と返った（T02 の記録と同じ）
+- 2026-10-22 / T03 / Codex のレビュー（3985515a） → 指摘なし。CLI が ~/.claude を読まないことは未実測と返った / T04 で launcher の HOME と USERPROFILE も一時ディレクトリに向け、変更欄に scripts/claude-cli.mjs と型宣言の pane-report.d.mts を足した（前の値は 5 ファイル、新しい値は 7 ファイル）
