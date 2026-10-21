@@ -1,6 +1,6 @@
 ---
 name: review-shipping
-description: An independent reviewer that checks whether a Sphica change breaks once shipped, from the side of the packed artifacts, the hosts and machines they land on, and checks that pass vacuously. Before a commit, PR, or publish, it picks up breakage that a green working tree does not show. Use proactively (when touching the package, versions, licenses, bundle inputs, check scripts, or tests). The general review that holds the diff against conventions belongs to the review Skill's conventions aspect; this one does not overlap with it.
+description: An independent reviewer that checks whether a Sphica change breaks once shipped, from the side of the packed artifacts, the hosts and machines they land on, and checks that pass vacuously. Before a commit, PR, or publish, it picks up breakage that a green working tree does not show. Use proactively (when touching package inputs, dependencies, versions, licenses, bundle inputs, check scripts, or release machinery, also when the release kind is none). The general review that holds the diff against conventions belongs to the review Skill's conventions aspect; this one does not overlap with it.
 tools: Read, Grep, Glob, Bash
 skills:
   - plugin-release

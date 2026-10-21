@@ -31,13 +31,14 @@ plan ファイルと grill-codex を戻しにくい変更に絞り、ローカ�
   - コミット: `docs(claude): require plans and local reviews only for hard-to-undo changes (T01)`
   - 結果: 「Before implementing」は plan と grill-codex を戻しにくい変更の一覧に限り、ほかは PR 本文に判断・棄却した案・検証を書く、verify・red・最終判断は省かないとした。「Review」は review-shipping を package の入力・依存・バージョン・検査・リリースの仕組みの変更（種別が none でも）、codex-review を戻しにくい領域とそれらに触れる PR に限った。`bun run verify:ai` → 0。`rg -n "grill-codex" CLAUDE.md` → 62 行目の 1 か所
 
-- [ ] T02: 関連の Skill・Agent・テンプレート・rule を合わせる
+- [x] T02: 関連の Skill・Agent・テンプレート・rule を合わせる
   - 種別: 変更
   - 計画: S2
   - 依存: T01（CLAUDE.md の新しい言い回しに合わせる）
-  - 変更: `.claude/skills/codex-review/SKILL.md`, `.github/pull_request_template.md`, `.claude/agents/review-shipping.md`, `.agents/skills/plugin-release/SKILL.md`, `.claude/rules/verification.md`
+  - 変更: `.claude/skills/codex-review/SKILL.md`, `.github/pull_request_template.md`, `.claude/agents/review-shipping.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる。`bun run rule-scopes` → 0 で終わる
   - コミット: `docs(review): match the review and release docs to the new rules (T02)`
+  - 結果: codex-review の description と起動条件を CLAUDE.md「Review」の範囲に絞り、ほかの PR は GitHub の Codex に任せると書いた。PR テンプレートは GitHub の Codex を全 PR、ローカルは求められたときと分けた。review-shipping の description を依存・リリースの仕組み・種別 none を含む形に直した。`bun run verify:ai` → 0、`bun run rule-scopes` → 0
 
 ## P2: tarball の比較
 
@@ -67,7 +68,7 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - 種別: 変更
   - 計画: S4, S5
   - 依存: T04（判定の JSON の形が要る）
-  - 変更: `scripts/check-mcp-version.mjs`, `server/test/check-mcp-version.test.ts`, `.github/workflows/check.yml`, `lefthook.yml`, `scripts/lib/verify-pairs.mjs`
+  - 変更: `scripts/check-mcp-version.mjs`, `server/test/check-mcp-version.test.ts`, `.github/workflows/check.yml`, `lefthook.yml`, `scripts/lib/verify-pairs.mjs`, `.agents/skills/plugin-release/SKILL.md`, `.claude/rules/verification.md`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/check-mcp-version.test.ts` → 引数なしは今の規則、`--defer-deps` は依存の 2 ファイルだけを保留、`--verdict` は same のときだけ免除、ほかのパスと unknown と tree の不一致は bump を求める。`bun run verify` → 0 で終わる
   - コミット: `feat(release): let a dependency-only change skip the bump when CI found the tarball unchanged (T05)`
 
@@ -90,3 +91,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 ## 記録
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
+- 2026-10-21 / T02 / plugin-release の Shipping と依存 PR の節、verification.md の Release は依存の免除（3B）の説明なので、免除を入れる T05 に移した / T02 の変更欄から 2 件を外し、T05 に足した
