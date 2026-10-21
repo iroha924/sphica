@@ -62,13 +62,14 @@ base: main
 
 P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・scripts から呼び、置き換えた Biome の部分を抜く。T05 以降の変更欄は P1 の結果で決め、記録節に書いてから着手する。
 
-- [ ] T05: lint を Oxlint と tsgolint に移し、カスタムルール 2 つを JS プラグインへ移す
+- [x] T05: lint を Oxlint と tsgolint に移し、カスタムルール 2 つを JS プラグインへ移す
   - 種別: 変更
   - 計画: S5
   - 依存: T02（Oxlint の設定と切るルール）, T04（移すカスタムルール）
-  - 変更: `server/package.json`, `server/bun.lock`, `.oxlintrc.json`, `scripts/oxlint.mjs`, `scripts/lint-plugin.mjs`, `scripts/lib/sql-style.mjs`, `scripts/check-comments.mjs`, `scripts/check-sql.mjs`, `biome.json`, `lefthook.yml`, `package.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/package.json`, `server/bun.lock`, `.oxlintrc.json`, `scripts/oxlint.mjs`, `scripts/lint-plugin.mjs`, `scripts/lib/sql-style.mjs`, `scripts/check-comments.mjs`, `scripts/check-sql.mjs`, `biome.json`, `lefthook.yml`, `package.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `knip.json`, `server/test/lint-plugin.test.ts`, `scripts/codegen.mjs`, `scripts/check-pairs.mjs`, `scripts/lib/english.mjs`, `scripts/lib/license-header.mjs`, `scripts/lib/release-finish.mjs`, `scripts/lib/sbom.mjs`, `scripts/lib/verify-pairs.mjs`, `server/evals/cloud/build.ts`, `server/src/capture.ts`, `server/src/cli/view.ts`, `server/src/panel.ts`, `server/src/read.ts`, `server/test/architecture.test.ts`, `server/test/capture.test.ts`, `server/test/extract.test.ts`, `server/test/migrate.test.ts`, `server/test/verify-pairs.test.ts`
   - 完了条件: `bun run lint` → 0 で終わる。`server/src` にわざと promise を待たない 1 行を置いた `bun run lint` → `no-floating-promises` で落ちる。`bun run verify` → 0 で終わる
   - コミット: `chore(lint): lint with Oxlint and its type-aware rules, and move two custom checks into rules (T05)`
+  - 結果: `node scripts/oxlint.mjs` → 違反 0 件で exit 0（6 ルールを切り、prefer-string-starts-ends-with 8 件と no-useless-fallback-in-spread 2 件を直し、no-control-regex の 4 か所を Oxlint の抑止に書き換え）。`server/src/zz-float.ts` に待たない呼び出しを置いて `node scripts/oxlint.mjs` → `no-floating-promises` で exit 1、消すと exit 0。`node --test test/lint-plugin.test.ts` → 3 件 pass。`bun run knip` → 0 件。`bun run release:plan -- --base v0.6.63` → `plugin`（バージョンを上げる前）、4 か所を 0.6.64 に。`bun run verify` → exit 0（acceptance 151 件 pass）
 
 - [ ] T06: format を Oxfmt に移し、一括で reformat する
   - 種別: 変更
@@ -93,3 +94,5 @@ P1 で採ると決めたものを作業ブランチに入れ、lefthook・CI・s
 - 2026-10-21 / T05 / 1 つだった採用のタスクを T05（lint）・T06（format）・T07（Biome を抜く）に分けた / 変更欄が P1 の結果で決まったため。T05 の変更欄は `server/package.json` ほか 6 件から上の 15 件に、計画は S5, S6 から S5 に
 - 2026-10-21 / T07 / `server/evals/review`（M1 と M2）は Biome そのものを評価の対象として使い、`server/test/review-eval.test.ts` が verify で流れる / `@biomejs/biome` は devDependencies に残し、lint と format からだけ抜く。plan の S6 は「置き換えた Biome の部分」なのでこの範囲に収まる
 - 2026-10-21 / T05 / `server/package.json` は package の入力 / devDependencies を変える最初のコミット（T05）でバージョンを上げる
+- 2026-10-21 / T02 / 結果欄の「直す 34 件（no-useless-spread 24）」は誤り。24 件はすべて意図したコードで、`--fix` は `record.ts:869` の `[...quote.slice()].at(-1)` を UTF-16 単位に変え、`text.ts` の `english-exempt` を消した / 修正は戻した。持ち主の判断で `no-useless-spread` も切り（6 個目）、plan の上限を 6 個にした。直すのは prefer-string-starts-ends-with 8 件と no-useless-fallback-in-spread 2 件の 10 件
+- 2026-10-21 / T05 / 変更欄に、違反を直したファイル、Biome の lint の抑止コメントを消したファイル（Biome の linter を T05 で切るため。T07 から前倒し）、`knip.json`、プラグインのテストを足した（前の値は上の 15 件）

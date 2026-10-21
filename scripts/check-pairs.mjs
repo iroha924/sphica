@@ -611,7 +611,7 @@ if (TRAILER !== null) {
   if (declared.length === 0) fail.push(`cannot extract any userConfig keys from ${MANIFEST}`);
   const sources = fs
     .readdirSync("server/src", { recursive: true })
-    .filter((f) => /\.ts$/.test(f))
+    .filter((f) => f.endsWith(".ts"))
     .map((f) => read(`server/src/${f}`));
   const used = [
     ...new Set(sources.flatMap((t) => [...t.matchAll(/CLAUDE_PLUGIN_OPTION_[A-Z0-9_]+/g)].map((m) => m[0]))),

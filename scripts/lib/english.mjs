@@ -12,7 +12,6 @@ import { JAPANESE } from "./japanese.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // js-tokens is a devDependency of server. Resolve it from there instead of adding a root dependency.
 const require = createRequire(path.join(root, "server/package.json"));
-// biome-ignore lint/correctness/noUndeclaredDependencies: resolved from server/package.json devDependencies
 const jsTokens = require("js-tokens");
 
 export { JAPANESE };

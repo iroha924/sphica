@@ -12,7 +12,7 @@ const LICENSE_ID = "SPDX-License-Identifier: MIT";
 /** The comment marker of a source file by its path, or null when the file is not one the header goes in. */
 export function commentMarker(file) {
   if (/\.(?:[cm]?[jt]s|[jt]sx)$/.test(file)) return "//";
-  if (/\.sql$/.test(file)) return "--";
+  if (file.endsWith(".sql")) return "--";
   return null;
 }
 

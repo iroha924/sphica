@@ -1,0 +1,38 @@
+{
+  "$schema": "./server/node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "node", "promise"],
+  "jsPlugins": ["./scripts/lint-plugin.mjs"],
+  "categories": { "correctness": "error" },
+  "ignorePatterns": ["server/src/db-types.ts"],
+  "rules": {
+    "typescript/no-floating-promises": [
+      "error",
+      {
+        "allowForKnownSafeCalls": [
+          {
+            "from": "package",
+            "package": "node:test",
+            "name": ["test", "describe", "it", "suite", "before", "after", "beforeEach", "afterEach"]
+          }
+        ]
+      }
+    ],
+    "typescript/no-misused-promises": "error",
+    "eslint/no-unused-vars": ["error", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_" }],
+    "typescript/unbound-method": "off",
+    "typescript/no-misused-spread": "off",
+    "typescript/no-base-to-string": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/require-array-sort-compare": "off",
+    "unicorn/no-useless-spread": "off",
+    "sphica/comment-refs": "error",
+    "sphica/sql-style": "error"
+  },
+  "overrides": [
+    {
+      "files": ["server/test/**"],
+      "plugins": ["typescript", "unicorn", "oxc", "import", "node", "promise", "jest"],
+      "rules": { "jest/no-disabled-tests": "error" }
+    }
+  ]
+}

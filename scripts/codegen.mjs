@@ -18,9 +18,7 @@ import { withHeader } from "./lib/license-header.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // kysely and kysely-codegen are server dependencies. Resolve them from there instead of adding root dependencies for a check.
 const require = createRequire(path.join(root, "server/package.json"));
-// biome-ignore lint/correctness/noUndeclaredDependencies: resolved from server/package.json dependencies
 const { Kysely, SqliteDialect } = require("kysely");
-// biome-ignore lint/correctness/noUndeclaredDependencies: resolved from server/package.json devDependencies
 const { generate, RawExpressionNode, SqliteDialect: GenSqlite } = require("kysely-codegen");
 const { adapt } = await import(path.join(root, "server/src/kysely-node-sqlite.ts"));
 

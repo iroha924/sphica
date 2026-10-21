@@ -1460,7 +1460,7 @@ test("migrating revision 7 stops, changing nothing of revision 8, when two proje
         e.message,
       ) &&
       /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message) &&
-      /^Revision 8 was not applied: 2 projects with records/.test(e.message) &&
+      e.message.startsWith("Revision 8 was not applied: 2 projects with records") &&
       /cannot merge them/.test(e.message) &&
       /capture keeps recording a session whose remote is written as one of the listed keys; a session whose remote is written otherwise is held, and held records are dropped after 30 days or past 1000/.test(
         e.message,

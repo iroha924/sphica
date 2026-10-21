@@ -447,7 +447,7 @@ export async function closeTurn(dir: string, turn: string, root: string): Promis
     )
       return [];
     // A failed snapshot keeps the start, so a Stop that follows in the same turn still compares from it
-    writeStart(dir, { ...own, ...(now ?? {}), running: false });
+    writeStart(dir, { ...own, ...now, running: false });
     return now ? changed(root, before, now) : [];
   };
 }

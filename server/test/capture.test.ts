@@ -230,7 +230,6 @@ const KEEPS = [
   "const token = await getToken();",
   "apiKey: process.env.API_KEY",
   "PASSWORD=$DB_PASSWORD",
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: tests a template reference pasted as text
   'token: "${process.env.TOKEN}"',
   "MONKEY=banana TURKEY=roast COMPASS=north",
   "http://localhost:5173/@vite/client",

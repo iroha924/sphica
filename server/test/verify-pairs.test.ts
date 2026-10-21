@@ -165,7 +165,6 @@ test("a setup-bun step without no-cache fails, in either workflow", () => {
 });
 
 test("a verify step cut off from matrix.part, or skipped by an if written as its first key, fails", () => {
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under edit holds an expression
   fails(edit("check", "PART: ${{ matrix.part }}", "PART: static"), /does not take PART from matrix.part/);
   fails(
     edit(
@@ -214,7 +213,6 @@ test("a part that runs a check verify runs after the bundle, without bundling fi
 });
 
 test("a unit mode that skips reach on another line, on every line, or on none fails", () => {
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
   const line = "          SPHICA_UNIT_MODE: ${{ matrix.node == '24.15' && 'tests-only' || 'full' }}\n";
   const want = /does not set SPHICA_UNIT_MODE to tests-only on the first Node line \(24\.15\) alone/;
   fails(edit("check", line, ""), want);
@@ -249,7 +247,6 @@ test("a part matrix entry that is not a plain version, which could hide a repeat
 
 test("a push to main that could skip the heavy jobs without same-tree's evidence, or a pull request that could skip them, fails", () => {
   const skipIf =
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
     "    if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}\n";
   const trigger = /does not run on pushes to main and on pull requests into main only/;
   fails(edit("check", "  pull_request:\n    branches: [main]\n", "  pull_request:\n"), trigger);
@@ -307,6 +304,5 @@ test("a push to main that could skip the heavy jobs without same-tree's evidence
     ),
     gate,
   );
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the workflow line under check holds an expression
   fails(edit("check", "          EVENT: ${{ github.event_name }}\n", ""), gate);
 });

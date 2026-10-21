@@ -2027,7 +2027,7 @@ test("a save marks its run saved with one update: trace, glean with changes only
     // Counts the updates of a run each save asks the database for, whatever they set; saves go in the order of their runs
     const updates: number[] = [];
     const counted = async (save: () => Promise<unknown>) =>
-      updates.push((await statements(save)).filter((s) => /^update "extraction_run"/.test(s)).length);
+      updates.push((await statements(save)).filter((s) => s.startsWith('update "extraction_run"')).length);
     const runs = () =>
       db.owner
         .prepare("select origin, status, finished_at is not null as finished from extraction_run order by id")
@@ -2779,7 +2779,7 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
           const asked = await statements(async () => {
             text = await saveText(db.ingest, run, p, null, record(`s${body.id}`));
           });
-          updates.push(asked.filter((s) => /^update "extraction_run"/.test(s)).length);
+          updates.push(asked.filter((s) => s.startsWith('update "extraction_run"')).length);
           return text;
         })(),
       };
@@ -3238,8 +3238,8 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
       // Turned down while writing, after part of it was written: the refusal is the reply, and the transaction took all of it back
       (e: unknown) =>
         e instanceof RecordRefused &&
-        /^✗ 1 error; nothing was saved\. Fix the record, check it, and save again\n✗ glean:duck: another record in this save already supersedes trace:ext-s1\/storage/.test(
-          e.message,
+        e.message.startsWith(
+          "✗ 1 error; nothing was saved. Fix the record, check it, and save again\n✗ glean:duck: another record in this save already supersedes trace:ext-s1/storage",
         ),
     );
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);

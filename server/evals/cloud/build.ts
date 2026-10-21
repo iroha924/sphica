@@ -177,7 +177,7 @@ function files(dir: string): void {
   if (args.project === "tsundoku") {
     const { world } = loadAcceptance();
     // The slot holds the code as it is now: a project's current files replace the world's, so a record's anchor can be gone
-    for (const [rel, text] of Object.entries({ ...world.files, ...(project?.current ?? {}) }))
+    for (const [rel, text] of Object.entries({ ...world.files, ...project?.current }))
       if (text !== "BINARY" && text !== "OVERSIZED") write(dir, rel, text);
     write(
       dir,
