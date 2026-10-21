@@ -5,3 +5,5 @@ export const ALLOWED: Readonly<Record<"hooks" | "calls" | "state writes" | "stat
 export type Reported = { register: Record<string, string[]>; others: string[] };
 export function reported(report: { contents?: readonly { notes?: readonly string[] }[] }): Reported;
 export function differences(got: Reported): string[];
+export const PANE_SOURCE: Readonly<{ source: "git-subdir"; url: string; path: "pane" }>;
+export function entryProblems(marketplace: unknown, version: string): string[];

@@ -188,6 +188,14 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    For `codex exec`, `SPHICA_DB` is not enough: Codex starts MCP servers without it, so `read` and `search` hit the owner's `~/.sphica` (measured 2026-09-27).
    Put the database at `<tmp>/.sphica/sphica.db` and run with `HOME=<tmp>`, `CODEX_HOME=$HOME/.codex` (the installed plugin and its trust), and the real
    Node directory first on `PATH` (mise shims look under `HOME`)
+7. The sphica-pane plugin installs from this repository's `pane/` at the release tag, not from npm, so the npm checks above do not reach it.
+   In a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, run `claude plugin marketplace add iroha924/sphica` and
+   `claude plugin install sphica-pane@sphica`, then `claude plugin list --json` must show `sphica-pane@sphica` at the release version and
+   enabled. Open a session there with a temporary `SPHICA_DB` (no `--plugin-dir`), run `/sphica-pane`, read a file with an anchored record,
+   and check the pane lists that delivery. From the second release with the pane on, install the previous release first and check
+   `claude plugin update sphica-pane@sphica` moves it to the new version. If the owner uses the pane, also update it on their machine
+   (`claude plugin update sphica-pane@sphica`). A broken pane is fixed by the next release, never by removing its marketplace entry:
+   a removed entry leaves installed copies in place with nothing to update them from
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.

@@ -103,13 +103,15 @@ base: main
   - 結果: `node -e '...releaseKind(["pane/hooks/register.tsx"])...'` → plugin
   - 結果: `cd server && node --test test/release-scope.test.ts test/check-mcp-version.test.ts test/release-plan.test.ts test/release-gate.test.ts test/release-gate-cli.test.ts test/release-finish.test.ts` → 55 件 pass（pane のマニフェストが 1.0.0 のまま、または marketplace の ref が v1.0.0 のままのとき、どちらも名指しで落ちる）
   - 結果: `bun run release:plan -- --base v0.6.65` → release kind: plugin（版を上げる前に流した）。`bun run verify:ai` → 0 で終わった
-- [ ] T06: `check-pane.mjs` に marketplace のエントリの照合を足し、README に入れ方・確かめた版・Codex には入れないこと・外し方を書き、plugin-release の Skill に出荷後の確認を足す
+- [x] T06: `check-pane.mjs` に marketplace のエントリの照合を足し、README に入れ方・確かめた版・Codex には入れないこと・外し方を書き、plugin-release の Skill に出荷後の確認を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T04（エントリの照合を足す先の検査が要る）, T05（エントリとバージョンが要る）
-  - 変更: `scripts/check-pane.mjs`, `README.md`, `.agents/skills/plugin-release/SKILL.md`
+  - 変更: `scripts/check-pane.mjs`, `scripts/lib/pane-report.mjs`, `scripts/lib/pane-report.d.mts`, `server/test/pane-report.test.ts`, `README.md`, `pane/README.md`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run pane:check` → エントリの照合を含めて 0 で終わる。`path` を `panes` に書き換えて `bun run pane:check` → path の違いを名指しして 1 で終わる（戻してからコミット）。`bun run verify` → 0 で終わる
   - コミット: `feat(pane): list sphica-pane in the marketplace and document it (T06)`
+  - 結果: `bun run pane:check` → 0 で終わった（エントリの照合を含む）。path を panes に書き換えると「sphica-pane: source.path is "panes", not "pane"」で 1 件の指摘になった（戻してある）。`cd server && node --test test/pane-report.test.ts` → 4 件 pass
+  - 結果: `bun run verify` → acceptance の前の段階（check・bundle・unit・sql:live・hooks:live・codex-trust:live）は通り、acceptance は 8 件が時間切れなどで落ちた。pmset の記録で 02:53:30 から 928 秒の熱によるスリープ（Dark Wake Thermal Emergency）があり、時間切れの所要時間と一致した。`bun run acceptance` → 流し直して 151 件 pass
 
 ## 記録
 
@@ -130,3 +132,4 @@ base: main
 - 2026-10-22 / T05 / pre-commit の bundle の glob（パッケージの入力）と oxlint・oxfmt の glob に pane/ が無かった。release-scope のテストが bundle の glob の抜けを落とした / lefthook.yml に足した
 - 2026-10-22 / T04 / Codex のレビュー（731a2474）の F1（register.tsx 以外のモジュールの注記を読み飛ばす、再現済み）と F2（コピー中の失敗で一時ディレクトリが残る、再現済み）を受理 / 修正タスク T08 を足す
 - 2026-10-22 / T05 / review-shipping → コミットを止める指摘なし。tarball は 0.6.65 と版以外同じ、既存利用者の更新は Claude Code 2.1.139・2.1.306・Codex 0.163.0 で通った。指摘: 2.1.139 では sphica-pane が読み込みに失敗する（受理、T06 の README に最低版を書く）、Codex に sphica-pane を入れると毎セッション hooks.json の modules で警告が出る（plan のリスクどおり PR の段階で持ち主に聞く）、release の prepare が CLI も取得する（棄却: 取得元は他の依存と同じ npm で、OSV の扱いは tools/sandbox と同じ）
+- 2026-10-22 / T06 / エントリの照合は単体テストのため pane-report.mjs に entryProblems として置き、2.1.139 で読み込みに失敗する件（review-shipping の指摘）に合わせて pane の README にも最低版を書いた / 変更欄に pane-report.mjs・型宣言・テスト・pane/README.md を足した（前の値は 3 ファイル、新しい値は 7 ファイル）

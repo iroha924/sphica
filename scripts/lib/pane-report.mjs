@@ -59,3 +59,29 @@ export function differences({ register, others }) {
     if (label.startsWith("gating hook without")) lines.push(`${label}: ${seen.join(", ")}`);
   return [...lines, ...others];
 }
+
+export const PANE_SOURCE = {
+  source: "git-subdir",
+  url: "https://github.com/iroha924/sphica.git",
+  path: "pane",
+};
+
+/** What is wrong with the marketplace's sphica-pane entry for a release of `version`, one line each */
+export function entryProblems(marketplace, version) {
+  const entry = Array.isArray(marketplace?.plugins)
+    ? marketplace.plugins.find((p) => p?.name === "sphica-pane")
+    : undefined;
+  if (!entry) return ["no sphica-pane entry"];
+  const source = entry.source ?? {};
+  const lines = [];
+  for (const [key, want] of Object.entries(PANE_SOURCE))
+    if (source[key] !== want)
+      lines.push(`source.${key} is ${JSON.stringify(source[key])}, not ${JSON.stringify(want)}`);
+  if (source.ref !== `v${version}`)
+    lines.push(`source.ref is ${JSON.stringify(source.ref)}, not "v${version}"`);
+  // A sha would pin a commit the tag may not point to, and the release cannot write its own commit's sha
+  if ("sha" in source) lines.push("source.sha is set");
+  if ("version" in entry)
+    lines.push("the entry sets a version, which Claude Code would prefer over the pane's plugin.json");
+  return lines;
+}

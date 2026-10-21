@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaude } from "./claude-cli.mjs";
 import { fail, finding, guard, report } from "./lib/finding.mjs";
-import { differences, reported } from "./lib/pane-report.mjs";
+import { differences, entryProblems, reported } from "./lib/pane-report.mjs";
 
 guard("pane", () => findings);
 const findings = [];
@@ -92,6 +92,19 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
+  for (const line of entryProblems(
+    read(".claude-plugin/marketplace.json"),
+    read("plugin/package.json").version,
+  ))
+    findings.push(
+      finding({
+        where: ".claude-plugin/marketplace.json",
+        what: `sphica-pane: ${line}`,
+        why: "users install the pane from this repository's pane/ at the release tag, so any other source installs something unchecked",
+        fix: "set the entry's source to git-subdir, this repository's url, path pane, and ref v<version>",
+      }),
+    );
   if (!report("pane", findings))
     console.log(
       `pane: validate and test pass on the tracked pane/ files, and the mod does only what ALLOWED lists`,

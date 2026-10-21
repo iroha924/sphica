@@ -4,7 +4,13 @@
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ALLOWED, differences, reported } from "../../scripts/lib/pane-report.mjs";
+import {
+  ALLOWED,
+  differences,
+  entryProblems,
+  PANE_SOURCE,
+  reported,
+} from "../../scripts/lib/pane-report.mjs";
 
 const note = (label: string, items: readonly string[]) => `./register.tsx ${label}: ${items.join(", ")}`;
 const validated = (notes: string[]) => ({ contents: [{ notes }] });
@@ -44,4 +50,23 @@ test("notes from any module other than register.tsx fail, whatever they say", ()
     "./extra.tsx: a module the pane does not ship (calls: $.fs.read)",
     "./extra.tsx: a module the pane does not ship (gating hook without .catch: classic.Stop)",
   ]);
+});
+
+test("the marketplace entry must install pane/ from this repository at the release tag", () => {
+  const market = (source: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    plugins: [
+      { name: "sphica" },
+      { name: "sphica-pane", source: { ...PANE_SOURCE, ref: "v1.2.3", ...source }, ...extra },
+    ],
+  });
+  assert.deepEqual(entryProblems(market({}), "1.2.3"), []);
+  assert.deepEqual(entryProblems(market({ path: "panes" }), "1.2.3"), ['source.path is "panes", not "pane"']);
+  assert.deepEqual(entryProblems(market({ ref: "v1.2.2" }), "1.2.3"), [
+    'source.ref is "v1.2.2", not "v1.2.3"',
+  ]);
+  assert.deepEqual(entryProblems(market({ sha: "abc" }, { version: "1.2.3" }), "1.2.3"), [
+    "source.sha is set",
+    "the entry sets a version, which Claude Code would prefer over the pane's plugin.json",
+  ]);
+  assert.deepEqual(entryProblems({ plugins: [{ name: "sphica" }] }, "1.2.3"), ["no sphica-pane entry"]);
 });
