@@ -190,17 +190,14 @@ test("fails a commit that changes only the marketplace source without a version 
     r.git("add", "-A");
     r.git("commit", "-qm", "base");
     const base = r.git("rev-parse", "HEAD");
-    write(
-      r.dir,
-      ".claude-plugin/marketplace.json",
-      JSON.stringify({
-        plugins: [{ name: "sphica", source: { source: "npm", package: "sphica-fork", version: "1.0.0" } }],
-      }),
-    );
+    // Only the npm package name changes: every version still agrees, so only the input check can catch it
+    const market = JSON.parse(fs.readFileSync(path.join(r.dir, ".claude-plugin/marketplace.json"), "utf8"));
+    market.plugins[0].source.package = "sphica-fork";
+    write(r.dir, ".claude-plugin/marketplace.json", JSON.stringify(market));
     r.git("commit", "-qam", "change only the source");
     const missed = check(r.dir, "--base", base);
     assert.equal(missed.status, 1, missed.stderr);
-    assert.match(missed.stderr, /marketplace\.json/);
+    assert.match(missed.stderr, /\.claude-plugin\/marketplace\.json.*were not bumped together/);
   } finally {
     r.done();
   }

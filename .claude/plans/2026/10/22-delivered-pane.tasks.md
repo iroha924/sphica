@@ -103,6 +103,17 @@ base: main
   - 結果: `node -e '...releaseKind(["pane/hooks/register.tsx"])...'` → plugin
   - 結果: `cd server && node --test test/release-scope.test.ts test/check-mcp-version.test.ts test/release-plan.test.ts test/release-gate.test.ts test/release-gate-cli.test.ts test/release-finish.test.ts` → 55 件 pass（pane のマニフェストが 1.0.0 のまま、または marketplace の ref が v1.0.0 のままのとき、どちらも名指しで落ちる）
   - 結果: `bun run release:plan -- --base v0.6.65` → release kind: plugin（版を上げる前に流した）。`bun run verify:ai` → 0 で終わった
+- [x] T09: marketplace の source だけを変えるテストに pane のエントリを残し、入力の検査で落ちることを確かめる（T05 のレビューの F1）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（直すテストと pane のエントリが要る）
+  - 変更: `server/test/check-mcp-version.test.ts`
+  - red: `cd server && node --test --test-name-pattern="changes only the marketplace source" test/check-mcp-version.test.ts` → marketplace.json を EXACT_PACKAGE_INPUTS から外しても pass する（版の不一致で別の理由により落ちていた）
+  - 完了条件: `cd server && node --test --test-name-pattern="changes only the marketplace source" test/check-mcp-version.test.ts` → pass。marketplace.json を EXACT_PACKAGE_INPUTS から外すと fail
+  - コミット: `test(release): keep the pane entry when only the marketplace source changes (T09)`
+  - 結果: `cd server && node --test --test-name-pattern="changes only the marketplace source" test/check-mcp-version.test.ts` → 直す前は、marketplace.json を入力から外した状態でも 1 件 pass（空振り）
+  - 結果: `cd server && node --test --test-name-pattern="changes only the marketplace source" test/check-mcp-version.test.ts` → 直した後は pass、入力から外した状態では fail（release-scope.mjs は戻してある）
+
 - [x] T06: `check-pane.mjs` に marketplace のエントリの照合を足し、README に入れ方・確かめた版・Codex には入れないこと・外し方を書き、plugin-release の Skill に出荷後の確認を足す
   - 種別: 追加
   - 計画: S6
@@ -133,3 +144,4 @@ base: main
 - 2026-10-22 / T04 / Codex のレビュー（731a2474）の F1（register.tsx 以外のモジュールの注記を読み飛ばす、再現済み）と F2（コピー中の失敗で一時ディレクトリが残る、再現済み）を受理 / 修正タスク T08 を足す
 - 2026-10-22 / T05 / review-shipping → コミットを止める指摘なし。tarball は 0.6.65 と版以外同じ、既存利用者の更新は Claude Code 2.1.139・2.1.306・Codex 0.163.0 で通った。指摘: 2.1.139 では sphica-pane が読み込みに失敗する（受理、T06 の README に最低版を書く）、Codex に sphica-pane を入れると毎セッション hooks.json の modules で警告が出る（plan のリスクどおり PR の段階で持ち主に聞く）、release の prepare が CLI も取得する（棄却: 取得元は他の依存と同じ npm で、OSV の扱いは tools/sandbox と同じ）
 - 2026-10-22 / T06 / エントリの照合は単体テストのため pane-report.mjs に entryProblems として置き、2.1.139 で読み込みに失敗する件（review-shipping の指摘）に合わせて pane の README にも最低版を書いた / 変更欄に pane-report.mjs・型宣言・テスト・pane/README.md を足した（前の値は 3 ファイル、新しい値は 7 ファイル）
+- 2026-10-22 / T05 / Codex のレビュー（9e62623a）の F1（marketplace の source だけを変えるテストが、pane のエントリが無いため版の不一致で落ち、入力の検査を守っていない、再現済み）を受理 / 修正タスク T09 を足した
