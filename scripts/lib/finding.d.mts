@@ -26,5 +26,5 @@ export class CheckFailure extends Error {
   readonly finding: Finding;
 }
 export function fail(parts: FindingParts): never;
-export function runCheck(check: string, main: () => unknown): Promise<void>;
+export function guard(check: string, collected?: () => readonly Finding[]): void;
 export function crashFinding(check: string, error: unknown): Finding;

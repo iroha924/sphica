@@ -11,16 +11,11 @@ const DETAIL = /^ {4}/;
 /** The count report() closes with */
 const COUNT = /^[\w :.-]+: \d+ finding\(s\)$/;
 
-/**
- * Asserts that stderr holds at least one finding and that every line is a finding, its detail, or the count. With `after`, lines before
- * the first finding are a tool's own output (markdownlint, lychee) and are left as they are.
- */
-export function assertFindings(stderr: string, label: string, { after = false } = {}): void {
+/** Asserts that stderr starts with a finding and that every line is a finding, its detail, or the count */
+export function assertFindings(stderr: string, label: string): void {
   const lines = stderr.replace(/\n+$/, "").split("\n");
-  const first = lines.findIndex((l) => LINE.test(l));
-  assert.ok(first !== -1, `${label}: no finding line in\n${stderr}`);
-  if (!after) assert.equal(first, 0, `${label}: output before the first finding:\n${stderr}`);
-  for (const line of lines.slice(first))
+  assert.match(lines[0] ?? "", LINE, `${label}: the output does not start with a finding:\n${stderr}`);
+  for (const line of lines)
     assert.ok(
       LINE.test(line) || DETAIL.test(line) || COUNT.test(line),
       `${label}: a line is neither a finding, its detail, nor the count: ${JSON.stringify(line)}`,

@@ -120,8 +120,10 @@ test("the repository's .oxlintrc.json loads the plugin and turns every one of it
     assert.equal([on[rule]].flat()[0], "error", rule);
 });
 
-test("check-findings reports a check script that prints, throws, or fails outside finding.mjs, and nothing elsewhere", () => {
+test("check-findings reports a check script that prints, throws, or fails outside finding.mjs, or does not start with guard(), and nothing elsewhere", () => {
   const raw = [
+    'import { guard } from "./lib/finding.mjs";',
+    'guard("x");',
     'console.error("broke");',
     'process.stderr.write("broke");',
     'throw new Error("broke");',
@@ -131,7 +133,8 @@ test("check-findings reports a check script that prints, throws, or fails outsid
     "",
   ].join("\n");
   const kept = [
-    'import { finding, report } from "./lib/finding.mjs";',
+    'import { finding, guard, report } from "./lib/finding.mjs";',
+    'guard("ok");',
     'report("x", [finding({ where: "a", what: "b", why: "c", fix: "d" })]);',
     "process.exit(0);",
     "process.exit();",
@@ -142,16 +145,30 @@ test("check-findings reports a check script that prints, throws, or fails outsid
     "scripts/check-x.mjs": raw,
     "scripts/run-unit.mjs": raw,
     "scripts/check-ok.mjs": kept,
+    // Parsing before guard() would crash as a bare stack
+    "scripts/check-late.mjs":
+      'import { parseArgs } from "node:util";\nconst a = parseArgs({});\nguard("late");\n',
+    "scripts/check-none.mjs": 'console.log("passed");\n',
     "scripts/release-plan.mjs": raw,
     "scripts/lib/check-y.mjs": raw,
   });
-  const lines = [1, 2, 3, 4, 5, 6];
+  const lines = [3, 4, 5, 6, 7, 8];
   assert.deepEqual(
     found.map((f) => f.slice(0, 3)).sort(),
     [
       ...lines.map((l) => ["scripts/check-x.mjs", l, "check-findings"]),
       ...lines.map((l) => ["scripts/run-unit.mjs", l, "check-findings"]),
+      ["scripts/check-late.mjs", 2, "check-findings"],
+      ["scripts/check-none.mjs", 1, "check-findings"],
     ].sort(),
   );
-  assert.match(String(found[0]?.[3]), /^the check prints, throws, or fails outside .+\. Why: .+\. Fix: .+$/);
+  const message = (file: string) => String(found.find((f) => f[0] === file)?.[3]);
+  assert.match(
+    message("scripts/check-x.mjs"),
+    /^the check prints, throws, or fails outside .+\. Why: .+\. Fix: .+$/,
+  );
+  assert.match(
+    message("scripts/check-late.mjs"),
+    /^the first statement after the imports is not guard\(\)\. Why: .+\. Fix: .+$/,
+  );
 });

@@ -13,7 +13,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("rule scopes", () => failures);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rulesDirectory = path.join(root, ".claude", "rules");

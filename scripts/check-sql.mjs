@@ -8,8 +8,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import url from "node:url";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { REPLACE } from "./lib/sql-style.mjs";
+
+guard("SQL style");
 
 const root = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
 const text = fs.readFileSync(path.join(root, "db/schema.sql"), "utf8");

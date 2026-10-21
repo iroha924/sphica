@@ -7,7 +7,9 @@
 
 import process from "node:process";
 import { partProblems } from "./lib/check-parts.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("check");
 
 let needs;
 try {

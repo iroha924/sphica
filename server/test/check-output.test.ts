@@ -30,7 +30,8 @@ const TRACKED = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "
   env: cleanEnv(),
 })
   .split("\0")
-  .filter(Boolean);
+  // node_modules is linked into the copy below; as a link of its own it is a file git does not ignore
+  .filter((f) => f && !/(?:^|\/)node_modules(?:\/|$)/.test(f));
 
 /** A copy of the tracked files with `edit` applied, made a git repository of its own after the edit so new files are tracked */
 function copy(edit: (root: string) => void): string {
@@ -68,7 +69,7 @@ const HEADER = "// Copyright (c) 2026 iroha924 and contributors\n// SPDX-License
 function fails(
   root: string,
   script: string,
-  { args = [] as string[], env = {} as NodeJS.ProcessEnv, after = false, timeout = 50_000 } = {},
+  { args = [] as string[], env = {} as NodeJS.ProcessEnv, timeout = 50_000 } = {},
 ) {
   const r = spawnSync(process.execPath, [path.join(root, "scripts", script), ...args], {
     cwd: root,
@@ -77,7 +78,7 @@ function fails(
     timeout,
   });
   assert.equal(r.status, 1, `${script} exited ${r.status}\n${r.stdout}${r.stderr}`);
-  assertFindings(r.stderr, script, { after });
+  assertFindings(r.stderr, script);
   return r.stderr;
 }
 
@@ -126,13 +127,21 @@ test("the static checks print each failure as a finding", () => {
     /^package\.json: packageManager is bun@[^,]+, but mise\.toml pins bun 0\.0\.1/m,
   );
   assert.match(
-    fails(root, "check-markdown.mjs", { after: true }),
-    /markdownlint found Markdown that renders or links wrong/,
+    fails(root, "check-markdown.mjs"),
+    /markdownlint found Markdown that renders or links wrong.+\n {4}\S/,
   );
-  // lychee's own report comes first; without lychee on PATH the one finding says so
+  // lychee's report is the detail; without lychee on PATH the one finding says so
   assert.match(
-    fails(root, "check-links.mjs", { after: true }),
-    /^(?:the lychee output above|lychee): lychee /m,
+    fails(root, "check-links.mjs"),
+    /^lychee(?: \(each link below\))?: lychee (?:found broken links|is not on PATH)/m,
+  );
+});
+
+test("a manifest that does not parse is named in the AI config check's finding", () => {
+  const root = copy((r) => append(r, "plugin/hooks/codex.json", "}"));
+  assert.match(
+    fails(root, "check-ai-config.mjs"),
+    /^plugin\/hooks\/codex\.json: the file is not valid JSON: /m,
   );
 });
 
@@ -148,6 +157,15 @@ test("the architecture check prints each failure as a finding", () => {
 
 test("the checks that take a file, a message, or the CI context print each failure as a finding", () => {
   const root = copy(() => {});
+  // What fails before a check gets going: a message file that is not there, and an option without its value
+  assert.match(
+    fails(root, "check-commit-msg.mjs", { args: [path.join(root, "..", "absent.txt")] }),
+    /^commit messages: the check crashed: ENOENT/m,
+  );
+  assert.match(
+    fails(root, "check-mcp-version.mjs", { args: ["--base"] }),
+    /^version: the check crashed: Option '--base <value>' argument missing/m,
+  );
   const message = path.join(root, "..", "msg.txt");
   fs.writeFileSync(message, `feat: ${JAPANESE}\n\nbody\n`);
   assert.match(
@@ -194,6 +212,10 @@ test("the lanes that run what ships print each failure as a finding, a crash inc
   assert.match(
     fails(root, "check-tarball.mjs", { args: [tgz] }),
     /^pack\.tgz: tarball is missing dist\/cli\.js\./m,
+  );
+  assert.match(
+    fails(root, "check-tarball.mjs", { args: [path.join(root, "..", "absent.tgz")] }),
+    /^absent\.tgz: tar tzf failed: .+\n {4}\S/,
   );
   // A package root that does not exist stops the hook lanes before they start anything
   const nowhere = path.join(root, "..", "no-package");

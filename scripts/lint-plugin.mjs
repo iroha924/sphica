@@ -37,7 +37,12 @@ const CHECK_SCRIPT = /^scripts\/(?:check-[^/]+|run-unit)\.mjs$/;
 const OUTSIDE_FINDING = ruleMessage({
   what: "the check prints, throws, or fails outside scripts/lib/finding.mjs",
   why: "every check failure names where, what broke, why, and the fix, so it can be fixed from the line alone",
-  fix: "build it with finding() and print it with report(), or stop with fail() inside runCheck()",
+  fix: "build it with finding() and print it with report(), or stop with fail()",
+});
+const GUARD_FIRST = ruleMessage({
+  what: "the first statement after the imports is not guard()",
+  why: "an error before guard() runs, argument parsing included, prints as a bare stack with no where, why, or fix",
+  fix: 'call guard("<check name>") right after the imports',
 });
 /** `a.b` as written, for a member expression of two plain names */
 const dotted = (node) =>
@@ -88,6 +93,18 @@ export default {
         if (!CHECK_SCRIPT.test(file)) return {};
         const report = (node) => context.report({ node, message: OUTSIDE_FINDING });
         return {
+          Program(node) {
+            const first = node.body.find((st) => st.type !== "ImportDeclaration");
+            const call = first?.type === "ExpressionStatement" ? first.expression : null;
+            if (
+              !(
+                call?.type === "CallExpression" &&
+                call.callee.type === "Identifier" &&
+                call.callee.name === "guard"
+              )
+            )
+              context.report({ node: first ?? node, message: GUARD_FIRST });
+          },
           CallExpression(node) {
             const callee = dotted(node.callee);
             if (callee === "console.error" || callee === "console.warn") report(node);

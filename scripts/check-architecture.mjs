@@ -12,7 +12,9 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import url from "node:url";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("architecture", () => fail);
 
 const repo = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
 // --root points the check at a copy of the sources, so a test can show it failing

@@ -6,21 +6,42 @@
 // It checks the file list, the version, that the CLI starts outside the repository and creates a database in a temp HOME, that the hook names
 // the version for an older database that init then backs up and migrates, that the hook delivers quickly under a write lock, and answers SubagentStart
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hasBannedName } from "./lib/banned-name.mjs";
-import { fail, finding, report, runCheck } from "./lib/finding.mjs";
+import { fail, finding, guard, report } from "./lib/finding.mjs";
 import { linksOutside } from "./lib/link-containment.mjs";
 import { tarballProblems, trackedDistribution } from "./lib/tarball.mjs";
+
+guard("tarball");
 
 const root = path.resolve(import.meta.dirname, "..");
 // Every step runs what users receive, so a failure here is a defect in the package itself
 const SHIPPED = "users install exactly this tarball, so what fails here fails for them";
+// The packed Markdown is built from these: plugin/README.md is a copy bundle.mjs makes of the root README.md, so edits there are lost
+const PACKED_FROM =
+  "the file it was packed from (README.md at the repository root for README.md, plugin/<same path> for the rest)";
 
-await runCheck("tarball", () => {
+/** tar's output, or a finding with what tar said */
+function tar(args, where) {
+  const r = spawnSync("tar", args, { encoding: "utf8" });
+  if (r.error || r.status !== 0)
+    fail({
+      where,
+      what: `tar ${args[0]} failed: ${r.error?.message ?? `exit ${r.status}`}`,
+      why: "the tarball is checked as users receive it, so it must be a gzipped tar that tar can read",
+      fix: "pass the .tgz npm pack wrote, and pack again if it is cut short",
+      detail: r.stderr,
+    });
+  return r.stdout;
+}
+
+main();
+
+function main() {
   const tgz = process.argv[2] && path.resolve(process.argv[2]);
   if (!tgz)
     fail({
@@ -29,13 +50,14 @@ await runCheck("tarball", () => {
       why: "the check runs the one tarball it is given",
       fix: "run node scripts/check-tarball.mjs <the .tgz npm pack wrote>",
     });
+  const where = path.basename(tgz);
+  const listed = tar(["tzf", tgz], where);
   const paths = new Set(
-    execFileSync("tar", ["tzf", tgz], { encoding: "utf8" })
+    listed
       .split("\n")
       .filter((f) => f && !f.endsWith("/"))
       .map((f) => f.replace(/^package\//, "")),
   );
-  const where = path.basename(tgz);
   if (
     report(
       "tarball",
@@ -68,7 +90,7 @@ await runCheck("tarball", () => {
   );
   parentEnv.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ""}`;
   try {
-    execFileSync("tar", ["xzf", tgz, "-C", out]);
+    tar(["xzf", tgz, "-C", out], where);
     const pkg = path.join(out, "package");
     const cli = (...args) =>
       execFileSync(process.execPath, [path.join(pkg, "dist", "cli.js"), ...args], {
@@ -88,49 +110,60 @@ await runCheck("tarball", () => {
     // The packed Markdown, which the repository's own checks do not see as shipped: a link whose target is in the checkout but not in the
     // package passes there. Same rules and offline link check as the repository, with every path given literally.
     const docs = [...paths].filter((f) => f.endsWith(".md")).map((f) => path.join(pkg, f));
-    try {
-      execFileSync(
-        process.execPath,
-        [
-          path.join(root, "server", "node_modules", "markdownlint-cli2", "markdownlint-cli2-bin.mjs"),
-          "--config",
-          path.join(root, ".markdownlint-cli2.jsonc"),
-          ...docs.map((f) => `:${f}`),
-        ],
-        { cwd: pkg, stdio: ["ignore", "ignore", "inherit"] },
-      );
-    } catch {
+    const linted = spawnSync(
+      process.execPath,
+      [
+        path.join(root, "server", "node_modules", "markdownlint-cli2", "markdownlint-cli2-bin.mjs"),
+        "--config",
+        path.join(root, ".markdownlint-cli2.jsonc"),
+        ...docs.map((f) => `:${f}`),
+      ],
+      { cwd: pkg, encoding: "utf8" },
+    );
+    // markdownlint-cli2 exits 1 when it linted and found errors, and 2 when it could not lint
+    if (linted.status !== 0)
       fail({
-        where: `${where} (the markdownlint-cli2 output above)`,
-        what: "markdownlint found packed Markdown that renders or links wrong",
-        why: "npm and the hosts show the packed Markdown away from the repository",
-        fix: "fix each line markdownlint names in the file under plugin/ it was packed from",
-      });
-    }
-    let links;
-    try {
-      links = execFileSync(
-        "lychee",
-        ["--config", path.join(root, "lychee.toml"), "--format", "json", "--verbose", "--", ...docs],
-        // --verbose (which the containment check needs) also lists every excluded URL on stderr, so it is shown only on failure
-        { cwd: pkg, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      );
-    } catch (e) {
-      fail({
-        where,
+        where: `${where} (markdownlint-cli2)`,
         what:
-          e.code === "ENOENT"
-            ? "lychee is not on PATH"
-            : "lychee found broken links, images, or anchors in the packed Markdown",
+          linted.status === 1
+            ? "markdownlint found packed Markdown that renders or links wrong"
+            : `markdownlint-cli2 could not lint the packed Markdown (${linted.error?.message ?? `exit ${linted.status}`})`,
+        why: "npm and the hosts show the packed Markdown away from the repository",
+        fix:
+          linted.status === 1
+            ? `fix each line below in ${PACKED_FROM}, then bundle and pack again`
+            : "run `bun run setup` to install it, and fix what its output below names",
+        detail: `${linted.stdout ?? ""}${linted.stderr ?? ""}`,
+      });
+    // --verbose (which the containment check needs) also lists every excluded URL on stderr, so it is shown only on failure
+    const checked = spawnSync(
+      "lychee",
+      ["--config", path.join(root, "lychee.toml"), "--format", "json", "--verbose", "--", ...docs],
+      { cwd: pkg, encoding: "utf8" },
+    );
+    // lychee exits 2 on links that failed the check, and 1 or 3 when it could not check
+    if (checked.error?.code === "ENOENT")
+      fail({
+        where: `${where} (lychee)`,
+        what: "lychee is not on PATH",
+        why: "the packed Markdown's links cannot be checked without it, and a check that did not run must not pass (invariant no-silent-skip)",
+        fix: "run `mise install`, which installs the lychee version mise.toml pins",
+      });
+    if (checked.status !== 0)
+      fail({
+        where: `${where} (lychee)`,
+        what:
+          checked.status === 2
+            ? "lychee found broken links, images, or anchors in the packed Markdown"
+            : `lychee could not check the packed Markdown (${checked.error?.message ?? `exit ${checked.status}`})`,
         why: "a link that holds in the checkout can point at a file the package does not carry",
         fix:
-          e.code === "ENOENT"
-            ? "run `mise install`, which installs the lychee version mise.toml pins"
-            : "fix each link lychee names below in the file under plugin/ it was packed from",
-        detail: `${e.stderr ?? ""}${e.stdout ?? ""}`,
+          checked.status === 2
+            ? `fix each link below in ${PACKED_FROM}, then bundle and pack again`
+            : "fix the input or lychee.toml setting its output below names",
+        detail: `${checked.stderr ?? ""}${checked.stdout ?? ""}`,
       });
-    }
-    const outside = linksOutside(JSON.parse(links), pkg);
+    const outside = linksOutside(JSON.parse(checked.stdout), pkg);
     if (outside.length)
       report(
         "tarball",
@@ -139,7 +172,7 @@ await runCheck("tarball", () => {
             where: x.source,
             what: `the packed Markdown links outside the package: ${x.url}`,
             why: "the package is read away from the repository, where a file outside it does not exist",
-            fix: "link to a file the package carries, or to the repository's page on GitHub",
+            fix: `in ${PACKED_FROM}, link to a file the package carries, or to the repository's page on GitHub`,
           }),
         ),
       );
@@ -253,7 +286,7 @@ await runCheck("tarball", () => {
           where: "sphica init (tarball CLI, older database)",
           what: `init did not back up and migrate a revision ${older} database`,
           why: BEHIND,
-          fix: "check the backup and the migration chain in server/src/admin.ts by the output below",
+          fix: "check the backup in server/src/admin.ts and the migrations in db/migrations/ by the output below",
           detail: migrated,
         });
       const [backup] = fs.readdirSync(path.join(behind, ".sphica", "backups"));
@@ -278,7 +311,7 @@ await runCheck("tarball", () => {
           where: "sphica init (tarball CLI, older database)",
           what: `the migrated database is at revision ${now} with ${kept} of its 1 message`,
           why: "a migration must carry the owner's records over",
-          fix: `check the migrations after revision ${older} in server/src/admin.ts for the source table`,
+          fix: `check the migrations after revision ${older} in db/migrations/ for what they do to the source table`,
         });
     } finally {
       fs.rmSync(behind, { recursive: true, force: true });
@@ -458,4 +491,4 @@ await runCheck("tarball", () => {
     fs.rmSync(out, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
-});
+}

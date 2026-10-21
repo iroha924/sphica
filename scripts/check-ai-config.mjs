@@ -5,8 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { withoutComments } from "./lib/english.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { CheckFailure, fail as stop, finding, guard, report } from "./lib/finding.mjs";
 import { readerProblems, reviewCommandProblems, settingsProblems } from "./lib/fork-intake.mjs";
+
+guard("AI config", () => failures);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -410,8 +412,23 @@ for (const [publish] of releaseSteps.matchAll(/npm publish [^\n`]*/g)) {
   }
 }
 
+/** A manifest's JSON, or a stop naming the file: the checks below cannot read one that does not parse */
+function manifest(relative) {
+  const text = read(relative);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return stop({
+      where: relative,
+      what: `the file is not valid JSON: ${error.message}`,
+      why: "the hook and marketplace checks read their settings from it",
+      fix: "fix the JSON at the position the error names",
+    });
+  }
+}
+
 try {
-  const pluginManifest = JSON.parse(read("plugin/.codex-plugin/plugin.json"));
+  const pluginManifest = manifest("plugin/.codex-plugin/plugin.json");
   if (pluginManifest.skills !== "./skills/") {
     fail({
       where: "plugin/.codex-plugin/plugin.json",
@@ -429,7 +446,7 @@ try {
     });
   }
   const CODEX_HOOKS = "plugin/hooks/codex.json";
-  const codexHooks = JSON.parse(read(CODEX_HOOKS)).hooks;
+  const codexHooks = manifest(CODEX_HOOKS).hooks;
   // Codex runs commandWindows through the session's shell (PowerShell, cmd, or Git Bash). The path stays in the environment and the
   // shell sees only base64, so no character in the path is parsed as code. A node that never starts leaves $LASTEXITCODE null.
   const windowsCommand = (name) =>
@@ -522,7 +539,7 @@ try {
       why: "delivering after a tool call was tried and removed: most of what it delivered was noise",
       fix: "remove the delivery hook from PostToolUse; records are delivered before a tool call",
     });
-  const claudeHooks = JSON.parse(read("plugin/hooks/hooks.json")).hooks ?? {};
+  const claudeHooks = manifest("plugin/hooks/hooks.json").hooks ?? {};
   // Exec form: Claude Code starts node with the script path as one argument, with no shell (PowerShell on Windows without Git Bash
   // adds about 230 ms per launch). Each event's hooks are pinned, so a lost timeout, async, or matcher fails here too.
   const script = (name) => [["$", "{CLAUDE_PLUGIN_ROOT}"].join(""), "dist", `${name}.js`].join("/");
@@ -580,7 +597,7 @@ try {
       });
   }
   const MARKETPLACE = ".claude-plugin/marketplace.json";
-  const marketplace = JSON.parse(read(MARKETPLACE));
+  const marketplace = manifest(MARKETPLACE);
   const entry = marketplace.plugins?.[0];
   const src = entry?.source;
   if (src?.source !== "npm" || src?.package !== "sphica") {
@@ -607,12 +624,14 @@ try {
     });
   }
 } catch (error) {
-  fail({
-    where: "plugin manifests",
-    what: `a manifest cannot be read: ${error instanceof Error ? error.message : String(error)}`,
-    why: "the hook and marketplace checks cannot run on a manifest that does not parse",
-    fix: "make the manifest named in the error valid JSON",
-  });
+  if (error instanceof CheckFailure) failures.push(error.finding);
+  else
+    fail({
+      where: "plugin manifests",
+      what: `the manifest checks stopped: ${error instanceof Error ? error.message : String(error)}`,
+      why: "a manifest whose shape the checks do not expect leaves the rest of them unchecked",
+      fix: "compare the manifests with the shape the checks in scripts/check-ai-config.mjs read",
+    });
 }
 
 // Sphica's MCP tools by server, read from where they are registered, so a Skill can be held against the tools that exist.

@@ -16,10 +16,12 @@ import path from "node:path";
 import process from "node:process";
 import { unmeasured } from "./lib/coverage-report.mjs";
 import { coveredSites } from "./lib/coverage.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { root } from "./lib/live-harness.mjs";
 import { ALLOWED_UNCOVERED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
 import { runTestsIsolated } from "./lib/test-run.mjs";
+
+guard("sql:reach");
 
 // Source files that hold only types: nothing in them runs, so the coverage report never lists them
 const TYPES_ONLY = ["src/db-types.ts"];

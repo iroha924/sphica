@@ -9,8 +9,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { commentMarker, headerLines, headerProblem, sourceFiles } from "./lib/license-header.mjs";
+
+guard("license headers");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // What .gitignore keeps out of the repository (build output and tool state), and the frozen copies of old schemas that the migration

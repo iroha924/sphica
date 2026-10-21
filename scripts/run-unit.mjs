@@ -7,9 +7,11 @@
 
 import process from "node:process";
 import { sqlReach } from "./check-sql-reach.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { root } from "./lib/live-harness.mjs";
 import { runTestsIsolated } from "./lib/test-run.mjs";
+
+guard("unit");
 
 const MODES = ["full", "tests-only"];
 

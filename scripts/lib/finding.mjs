@@ -34,7 +34,12 @@ export function finding(parts) {
   const f = required(parts, PARTS);
   if (parts.detail !== undefined && typeof parts.detail !== "string")
     throw new TypeError("a finding's detail is a string when given");
-  f.detail = parts.detail?.replace(/\r\n?/g, "\n").replace(CONTROL, "?").trimEnd() || undefined;
+  // Every line break a terminal or a renderer honors becomes \n, so formatFinding indents each line it starts
+  f.detail =
+    parts.detail
+      ?.replace(/\r\n?|[\u2028\u2029]/g, "\n")
+      .replace(CONTROL, "?")
+      .trimEnd() || undefined;
   made.add(Object.freeze(f));
   return f;
 }
@@ -68,7 +73,7 @@ export function report(check, findings) {
   return true;
 }
 
-/** Thrown by a check that cannot go on after a failure; `runCheck` reports it */
+/** Thrown by a check that cannot go on after a failure; the handler guard() installs reports it */
 export class CheckFailure extends Error {
   constructor(parts) {
     const f = finding(parts);
@@ -82,16 +87,28 @@ export function fail(parts) {
   throw new CheckFailure(parts);
 }
 
+let guarded = null;
+
 /**
- * Runs a check's steps and reports what stops them: a CheckFailure as its finding, and any other error as one that names the crash.
- * The process exit code is set to 1 on either.
+ * Makes whatever the check does not catch end as a finding, a fail() as its own and any other error as a crash with its stack, with the
+ * process failed. Every check script calls it first, so even its argument parsing is covered. `collected` gives the findings made so far,
+ * printed with it. A later call takes over, so a script that imports another check is named for itself.
  */
-export async function runCheck(check, main) {
-  try {
-    await main();
-  } catch (error) {
-    report(check, [crashFinding(check, error)]);
-  }
+export function guard(check, collected = () => []) {
+  const first = guarded === null;
+  guarded = { check, collected };
+  if (!first) return;
+  const stop = (error) => {
+    let made = [];
+    try {
+      made = guarded.collected();
+    } catch {
+      // Findings that cannot be read are left out; the crash itself is still reported
+    }
+    report(guarded.check, [...made, crashFinding(guarded.check, error)]);
+  };
+  process.on("uncaughtException", stop);
+  process.on("unhandledRejection", stop);
 }
 
 /** A thrown error as a finding: a CheckFailure is its own, and anything else is the check crashing before it could decide */

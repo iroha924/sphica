@@ -10,7 +10,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REFERENCE_RULE, referenceProblems } from "./lib/comment-refs.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("comments");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

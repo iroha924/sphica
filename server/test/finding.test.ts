@@ -3,17 +3,21 @@
 
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import url from "node:url";
 import {
   CheckFailure,
   crashFinding,
-  fail,
   finding,
   formatFinding,
   report,
   ruleMessage,
-  runCheck,
 } from "../../scripts/lib/finding.mjs";
+import { assertFindings } from "./finding-shape.ts";
+import { tempDir } from "./temp-dir.ts";
 
 const parts = { where: "a.ts:3", what: "it broke", why: "the rule exists", fix: "do this instead" };
 
@@ -57,6 +61,18 @@ test("text from outside cannot start a line or rewrite the terminal, in a part o
   const [line, ...rest] = formatFinding(f).split("\n");
   assert.equal(line, "a.ts:3: line one line two?[2J. Why: the rule exists. Fix: do this instead");
   assert.deepEqual(rest, ["    out", "    more?"]);
+  // Unicode's line and paragraph separators break a line in some renderers, so they start an indented line too
+  const forged = finding({
+    ...parts,
+    what: "a\u2028b",
+    detail: "safe\u2028forged.ts: x. Why: y. Fix: z\u2029end",
+  });
+  assert.deepEqual(formatFinding(forged).split("\n").slice(1), [
+    "    safe",
+    "    forged.ts: x. Why: y. Fix: z",
+    "    end",
+  ]);
+  assert.equal(forged.what, "a b");
 });
 
 test("only a finding prints, so a string or a look-alike object cannot pass for one", () => {
@@ -83,20 +99,54 @@ test("report prints the findings and their count and fails the process, and does
   assert.equal(some.code, 1);
 });
 
-test("runCheck reports a fail() as its finding and any other error as a crash with its stack", async () => {
-  const stopped = await captured(() => runCheck("lane", () => fail(parts)));
-  assert.equal(stopped.out, `${formatFinding(finding(parts))}\nlane: 1 finding(s)`);
-  assert.equal(stopped.code, 1);
-  const crashed = await captured(() =>
-    runCheck("lane", async () => {
-      await Promise.resolve();
-      throw new Error("boom");
-    }),
+/** A check script of the given body run as a child, with guard() and the helpers imported first */
+function script(body: string) {
+  const dir = tempDir("sphica-guard-");
+  const file = path.join(dir, "check-x.mjs");
+  const helper = url.pathToFileURL(
+    path.join(import.meta.dirname, "..", "..", "scripts", "lib", "finding.mjs"),
+  ).href;
+  fs.writeFileSync(
+    file,
+    `import { fail, finding, guard, report } from ${JSON.stringify(helper)};\n${body}\n`,
   );
-  assert.match(crashed.out, /^lane: the check crashed: boom\. Why: .+\. Fix: .+\n {4}Error: boom\n/);
-  assert.equal(crashed.code, 1);
-  const passed = await captured(() => runCheck("lane", () => undefined));
-  assert.deepEqual(passed, { out: "", code: undefined });
+  const r = spawnSync(process.execPath, [file], { encoding: "utf8" });
+  return { status: r.status, err: r.stderr, out: r.stdout };
+}
+
+test("guard() turns whatever the check does not catch into a finding, before and after an await, and fails the process", () => {
+  const stopped = script(`guard("lane");\nfail(${JSON.stringify(parts)});`);
+  assert.deepEqual(stopped, {
+    status: 1,
+    err: `${formatFinding(finding(parts))}\nlane: 1 finding(s)\n`,
+    out: "",
+  });
+  // Argument parsing right after guard() is covered too
+  const parsed = script(
+    'guard("lane");\nimport("node:util").then((u) => u.parseArgs({ options: { base: { type: "string" } }, args: ["--base"] }));',
+  );
+  assert.equal(parsed.status, 1);
+  assert.match(
+    parsed.err,
+    /^lane: the check crashed: Option '--base <value>' argument missing\. Why: .+\. Fix: .+\n {4}\S/,
+  );
+  const late = script('guard("lane");\nawait Promise.resolve();\nthrow new Error("boom");');
+  assert.equal(late.status, 1);
+  assert.match(late.err, /^lane: the check crashed: boom\. Why: .+\. Fix: .+\n {4}Error: boom\n/);
+  assertFindings(late.err, "guard");
+  assert.deepEqual(script('guard("lane");\nconsole.log("passed");'), { status: 0, err: "", out: "passed\n" });
+});
+
+test("guard() prints the findings collected before a crash, and the last call names the check", () => {
+  const r = script(
+    `const found = [];\nguard("first", () => found);\nguard("lane", () => found);\nfound.push(finding(${JSON.stringify(parts)}));\nthrow new Error("boom");`,
+  );
+  assert.equal(r.status, 1);
+  const lines = r.err.split("\n");
+  assert.equal(lines[0], formatFinding(finding(parts)));
+  assert.match(lines[1] ?? "", /^lane: the check crashed: boom\./);
+  assert.match(r.err, /\nlane: 2 finding\(s\)\n$/);
+  assert.doesNotMatch(r.err, /first/);
   const thrown = new CheckFailure(parts);
   assert.equal(crashFinding("lane", thrown), thrown.finding);
   assert.equal(crashFinding("lane", "not an error").what, "the check crashed: not an error");

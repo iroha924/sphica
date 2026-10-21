@@ -12,8 +12,10 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { fail, finding, report, runCheck } from "./lib/finding.mjs";
+import { fail, finding, guard, report } from "./lib/finding.mjs";
 import { DEPENDENCY_INPUTS, isPackageInput, withoutReleaseVersion } from "./lib/release-scope.mjs";
+
+guard("version");
 
 // A change whose only package inputs are server/package.json and server/bun.lock ships nothing new when the packed tarball matches the
 // last release. --defer-deps lets it through without a bump and leaves that to CI; --verdict takes the verdict
@@ -39,7 +41,9 @@ const at = (ref, file) => {
   }
 };
 
-await runCheck("version", () => {
+main();
+
+function main() {
   let skipped = null;
   try {
     git("rev-parse", "HEAD");
@@ -227,4 +231,4 @@ await runCheck("version", () => {
       return `the verdict compared with ${v.npm?.version ?? "no release"}, not the base's ${released ?? "release"}`;
     return null;
   }
-});
+}

@@ -11,8 +11,10 @@
 // (the same check at each stage of a path, the same data built in different shapes by two interfaces) are not caught here. A section in AGENTS.md covers them.
 
 import fs from "node:fs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
 import { verifyProblems } from "./lib/verify-pairs.mjs";
+
+guard("pairs", () => fail);
 
 const SELF = "scripts/check-pairs.mjs";
 const read = (f) => fs.readFileSync(f, "utf8");

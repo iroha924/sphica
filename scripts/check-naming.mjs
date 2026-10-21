@@ -11,7 +11,9 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { bannedNameLines, hasBannedName } from "./lib/banned-name.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("names", () => hits);
 
 /** Spellings allowed to remain, with the reason. */
 const ALLOWED = [

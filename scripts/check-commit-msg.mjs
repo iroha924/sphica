@@ -10,7 +10,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { commitMessageProblems } from "./lib/commit-msg.mjs";
-import { finding, report } from "./lib/finding.mjs";
+import { finding, guard, report } from "./lib/finding.mjs";
+
+guard("commit messages");
 
 const args = process.argv.slice(2);
 
