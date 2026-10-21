@@ -52,6 +52,8 @@ test("--compare refuses a ref outside this checkout's history, since the ref's c
       GIT_COMMITTER_EMAIL: "t@example.invalid",
     },
   }).trim();
+  // The runner's git sees the commit, so the refusal is for its history and not for a name git cannot find
+  assert.equal(spawnSync("git", ["cat-file", "-e", `${loose}^{commit}`], { env }).status, 0);
   const r = spawnSync(
     process.execPath,
     [path.join(import.meta.dirname, "..", "evals", "retrieval", "run.ts"), "--compare", loose],
