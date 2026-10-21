@@ -43,6 +43,16 @@ s.on("close", () => { if (open.length) { console.log(open.join("; ")); process.e
 s.on("error", () => {});
 `;
 
+// srt blocks writes to files like .mcp.json and .bashrc in its working directory by placing stubs there while it runs, so it starts in
+// an empty directory and this moves into the checkout
+const IN_ROOT = `
+const [dir, command, ...args] = process.argv.slice(1);
+process.chdir(dir);
+const r = require("node:child_process").spawnSync(command, args, { stdio: "inherit" });
+if (r.error) console.error(r.error.message);
+process.exit(r.status ?? 1);
+`;
+
 function main(command) {
   if (!command.length)
     throw new CheckFailure({
@@ -61,6 +71,11 @@ function main(command) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-sandbox-")));
   try {
     const settings = path.join(dir, "srt-settings.json");
+    const start = path.join(dir, "start");
+    // srt points TMPDIR inside the sandbox here, or at /tmp/claude, which need not exist
+    const tmp = path.join(dir, "tmp");
+    fs.mkdirSync(start);
+    fs.mkdirSync(tmp);
     fs.writeFileSync(
       settings,
       JSON.stringify({
@@ -73,7 +88,15 @@ function main(command) {
       }),
     );
     const srt = (args, opts) =>
-      spawnSync(process.execPath, [cli, "--settings", settings, "--", ...args], { cwd: root, ...opts });
+      spawnSync(
+        process.execPath,
+        [cli, "--settings", settings, "--", process.execPath, "-e", IN_ROOT, root, ...args],
+        {
+          cwd: start,
+          env: { ...process.env, CLAUDE_CODE_TMPDIR: tmp, CLAUDE_TMPDIR: tmp },
+          ...opts,
+        },
+      );
     const canary = srt([process.execPath, "-e", CANARY, root], { encoding: "utf8" });
     if (canary.status !== 0 || canary.error)
       throw new CheckFailure({
