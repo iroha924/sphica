@@ -2,8 +2,8 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// For a push to main in check.yml: writes tested=true to GITHUB_OUTPUT when the pushed merge has the tree its pull request's last
-// passed run tested (scripts/lib/same-tree.mjs), else tested=false. Anything it cannot read is a reason for false, never true.
+// For a push to main in check.yml: writes tested=true, with that run's id and attempt, to GITHUB_OUTPUT when the pushed merge has the
+// tree its pull request's last passed run tested (scripts/lib/same-tree.mjs), else tested=false. Anything it cannot read is a reason for false, never true.
 // Env: BEFORE (main before the push), GITHUB_REPOSITORY, GH_TOKEN (read access to Actions), GITHUB_OUTPUT.
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -63,7 +63,8 @@ async function main() {
     runs: head ? await runsOf(head) : "no merged head",
   });
   console.log(`same tree: ${decision.tested ? "tested" : "not tested"}: ${decision.reason}`);
-  fs.appendFileSync(process.env.GITHUB_OUTPUT ?? "", `tested=${decision.tested}\n`);
+  const run = decision.run ? `run=${decision.run.id}\nattempt=${decision.run.attempt}\n` : "";
+  fs.appendFileSync(process.env.GITHUB_OUTPUT ?? "", `tested=${decision.tested}\n${run}`);
 }
 
 await main();

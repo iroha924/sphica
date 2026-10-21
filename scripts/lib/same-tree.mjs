@@ -61,6 +61,7 @@ export function sameTree({ parents, before, ancestor, tree, headTree, workflow, 
   return {
     tested: true,
     reason: `run ${latest.id} passed on the merged head ${head.slice(0, 12)} with this tree`,
+    run: { id: latest.id, attempt: latest.run_attempt },
   };
 }
 

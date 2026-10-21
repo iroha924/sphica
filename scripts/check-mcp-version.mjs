@@ -206,7 +206,9 @@ function verdictProblem(file) {
   if (v?.verdict !== "same") return `the verdict is ${v?.verdict ?? "missing"}: ${v?.reason ?? "no reason"}`;
   // The index is what this check reads and what the commit will hold, so the verdict has to be for its tree
   if (v.tree !== git("write-tree").trim()) return "the verdict is for another tree";
-  if (v.base !== git("rev-parse", `${ref}^{commit}`).trim())
-    return "the verdict compared against another base";
+  // The base's release is what the tarball was compared with; a push to main reuses its pull request's verdict, whose base commit differs
+  const released = sameName(ref) ? JSON.parse(at(ref, PACKAGE)).version : undefined;
+  if (v.npm?.version !== released)
+    return `the verdict compared with ${v.npm?.version ?? "no release"}, not the base's ${released ?? "release"}`;
   return null;
 }

@@ -255,10 +255,20 @@ function sameTreeProblems(check) {
         (st) => st.includes("        id: decide") && st.includes("        run: node scripts/same-tree.mjs"),
       ) ||
       !has('node scripts/check-commit-msg.mjs --range "$RANGE"') ||
-      !has('node scripts/check-mcp-version.mjs --base "$BASE"')
+      !has("node scripts/main-version-check.mjs")
     )
       problems.push(
         "check.yml same-tree job does not run only on push, check the push's messages and version, and decide with scripts/same-tree.mjs",
+      );
+    // The version check reads the decision, so it comes after it and takes its outputs
+    const decide = all.findIndex((st) => st.includes("        id: decide"));
+    const version = all.findIndex((st) => st.some((l) => l.includes("node scripts/main-version-check.mjs")));
+    const reads = (key) =>
+      // oxlint-disable-next-line no-template-curly-in-string -- the workflow line under check holds an expression
+      all[version]?.includes(`          ${key}: \${{ steps.decide.outputs.${key.toLowerCase()} }}`);
+    if (version !== -1 && (decide === -1 || version < decide || !["TESTED", "RUN", "ATTEMPT"].every(reads)))
+      problems.push(
+        "check.yml same-tree job: the version check does not run after the decision with its tested, run, and attempt",
       );
   }
   for (const name of HEAVY) {

@@ -72,7 +72,7 @@ Claude runs every other command exactly as written in the steps below.
 Do not merge Renovate's dependency PRs (1 a month) or lockfile maintenance PRs directly; pull them into a PR of this repository and close the original
 after pulling it in (closed first, Renovate may ignore that update). A PR whose only package inputs are `server/package.json` and `server/bun.lock` needs no bump
 when CI's static part (Node 24.15) finds the packed tarball the same as the last release apart from the version and README (`scripts/release-verdict.mjs`,
-then `check-mcp-version.mjs --verdict`); pre-commit leaves that decision to CI (`--defer-deps`). A tarball that differs, or a comparison that cannot run
+then `check-mcp-version.mjs --verdict`); pre-commit leaves that decision to CI (`--defer-deps`), and the push to main reuses the verdict of the pull request run same-tree reused (`scripts/main-version-check.mjs`). A tarball that differs, or a comparison that cannot run
 (the registry unreachable, the base version unpublished), asks for a bump as before. Ship vulnerability fixes without waiting for the monthly one.
 
 | Kind | Changes | Versions to move |

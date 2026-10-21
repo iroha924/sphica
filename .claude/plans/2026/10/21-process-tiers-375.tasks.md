@@ -84,13 +84,14 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `feat(release): report none for a dependency-only change only on a verified same verdict (T06)`
   - 結果: 実行の選び方（自分のリポジトリの check.yml の pull_request の最新の run が成功していること）と判定の照合（same、run と attempt、index の tree、base のリリースのバージョン）を `scripts/lib/release-verdict.mjs` の `latestRun` と `verdictMismatch` に置き、release:plan は依存の 2 ファイルだけのときに gh で artifact を読む。`cd server && node --import ./test/isolate-home.ts --test test/release-plan.test.ts test/release-scope.test.ts` → 5 件と 4 件 pass（same は none、differs・別の tree・別の attempt・別のバージョン・fork の run・失敗した run・実行中の run は plugin と理由、ほかの入力が混ざれば判定を読まない）。`bun run verify` → exit 0（acceptance 151 件 pass）
 
-- [ ] T07: main の same-tree が判定を照合してから検査する
+- [x] T07: main の same-tree が判定を照合してから検査する
   - 種別: 変更
   - 計画: S7
   - 依存: T05（検査の --verdict が要る）
-  - 変更: `scripts/same-tree.mjs`, `scripts/lib/same-tree.mjs`, `server/test/same-tree.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
+  - 変更: `scripts/same-tree.mjs`, `scripts/lib/same-tree.mjs`, `scripts/lib/same-tree.d.mts`, `server/test/same-tree.test.ts`, `scripts/main-version-check.mjs`, `scripts/lib/main-version.mjs`, `scripts/lib/main-version.d.mts`, `server/test/main-version.test.ts`, `scripts/check-mcp-version.mjs`, `server/test/check-mcp-version.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/same-tree.test.ts test/verify-pairs.test.ts` → 判定の tree・baseline・run が合うときだけ渡し、合わない・読めないときは渡さない。`bun run verify` → 0 で終わる
   - コミット: `feat(release): carry the tarball verdict to the push to main (T07)`
+  - 結果: same-tree は引き継いだ run の id と attempt を出し、same-tree ジョブの版の検査は判定の後の `scripts/main-version-check.mjs` にした（引き継いだときは API の run・attempt・自分のリポジトリ・artifact の run が合えば --verdict、合わなければ今の規則、引き継がないときは --defer-deps で重いジョブの比較に任せる）。`--verdict` の照合は base のコミットから base のリリースのバージョンに替えた（PR と push で base のコミットが違うため）。`cd server && node --import ./test/isolate-home.ts --test test/same-tree.test.ts test/main-version.test.ts test/verify-pairs.test.ts test/check-mcp-version.test.ts` → pass（41 件と 1 件の追加分）。`bun run verify` → exit 0（acceptance 151 件 pass）
 
 - [x] T08: T05 のレビューの指摘を直す（判定の tree を index と比べる、バージョンがずれたまま免除しない）
   - 種別: 修正
@@ -122,3 +123,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 - 2026-10-21 / T06 / 変更欄を `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts` から `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts` に替えた / DEPENDENCY_INPUTS は T05 で入れ、実行と判定の照合は T07 と共有するため release-verdict に置いた
 - 2026-10-21 / T05 / Codex のタスクレビュー（high）: 2 件（P2）、どちらも Codex が再現 / 2 件とも採り、修正タスク T08 を足した
 - 2026-10-21 / T06 / Codex のタスクレビュー（high）: 2 件（P1 1、P2 1）、どちらも Codex がモックで再現 / 2 件とも採り、修正タスク T09 を足した
+- 2026-10-21 / T07 / 変更欄を足した（前の値は same-tree の 2 ファイルとテスト、check.yml、verify-pairs とテスト） / push の判定の読み取りを `scripts/main-version-check.mjs` と `scripts/lib/main-version.mjs` に分け、--verdict の base の照合をリリースのバージョンに替え、plugin-release に一文足したため

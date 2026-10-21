@@ -51,16 +51,22 @@ jobs:
         env:
           RANGE: ${{ format('{0}..HEAD', github.event.before) }}
         run: node scripts/check-commit-msg.mjs --range "$RANGE"
-      - name: Is the plugin version bumped
-        env:
-          BASE: ${{ github.event.before }}
-        run: node scripts/check-mcp-version.mjs --base "$BASE"
       - name: Did the pull request already pass this tree
         id: decide
         env:
           BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/same-tree.mjs
+      # After the decision: a reused pull request run's release verdict decides a dependency-only change, since the jobs that would
+      # compare the tarball are skipped; otherwise those jobs run and decide (scripts/main-version-check.mjs)
+      - name: Is the plugin version bumped
+        env:
+          BASE: ${{ github.event.before }}
+          TESTED: ${{ steps.decide.outputs.tested }}
+          RUN: ${{ steps.decide.outputs.run }}
+          ATTEMPT: ${{ steps.decide.outputs.attempt }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/main-version-check.mjs
 
   # verify runs here split into parts that run at once: each part runs package.json's ci:<part>, and `bun run pairs` checks that the parts
   # add up to verify exactly (pre-push runs verify whole before a push to main). Every part runs on both the engines floor (24.15) and the next line (26).

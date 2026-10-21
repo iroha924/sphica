@@ -370,6 +370,7 @@ function verdictFile(r: ReturnType<typeof repo>, base: string, fields: Record<st
     paths: [],
     tree: r.git("rev-parse", "HEAD^{tree}"),
     base,
+    npm: { name: "sphica", version: "1.0.0", integrity: "sha512-x" },
     ...fields,
   };
   fs.writeFileSync(file, JSON.stringify(v));
@@ -413,7 +414,10 @@ test("--verdict lets a dependency-only change through only on same, for this tre
       [{ verdict: "differs", reason: "1 shipped file(s) differ" }, /verdict is differs/],
       [{ verdict: "unknown", reason: "sphica@1.0.0 is not published" }, /verdict is unknown/],
       [{ tree: "0".repeat(40) }, /another tree/],
-      [{ base: "0".repeat(40) }, /another base/],
+      [
+        { npm: { name: "sphica", version: "0.9.0", integrity: "x" } },
+        /compared with 0\.9\.0, not the base's 1\.0\.0/,
+      ],
     ] as const) {
       const res = check(r.dir, "--base", base, "--verdict", verdictFile(r, base, fields));
       assert.equal(res.status, 1, JSON.stringify(fields));

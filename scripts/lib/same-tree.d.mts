@@ -21,5 +21,5 @@ export function sameTree(facts: {
   headTree: string | null;
   workflow: string | null;
   runs: Run[] | string;
-}): { tested: boolean; reason: string };
+}): { tested: boolean; reason: string; run?: { id: number; attempt: number } };
 export function runsFrom(reply: unknown): Run[] | string;
