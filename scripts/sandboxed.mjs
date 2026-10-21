@@ -6,8 +6,9 @@
 // never .git, and the network is closed. A canary under the same settings runs first and must be refused, so a sandbox that does
 // nothing fails the run instead of passing it. Usage: node scripts/sandboxed.mjs <command> [args...]
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -28,19 +29,27 @@ const cli = path.join(
 );
 const WHY =
   "tests must not reach the owner's ~/.sphica, Codex home, or repository, and only the OS can stop one that gets it wrong";
+const home = os.homedir();
+// srt leaves these writable when they exist, as a convenience for npm and Claude Code
+const HOME_DEFAULTS = [path.join(home, ".claude", "debug"), path.join(home, ".npm", "_logs")];
+const CLOSED = "sandbox canary: every way out was refused";
 
-// Tries each way out and prints the ones that worked; the sandbox is on only when it prints nothing
+// Tries each way out and prints the ones that worked, or CLOSED when none did: a runtime that runs nothing prints neither
 const CANARY = `
-const fs = require("node:fs"), net = require("node:net"), os = require("node:os"), path = require("node:path");
+const fs = require("node:fs"), net = require("node:net"), path = require("node:path");
+const [root, port, ...dirs] = process.argv.slice(1);
 const open = [];
-for (const file of [path.join(os.homedir(), ".sphica-sandbox-canary-" + process.pid), path.join(process.argv[1], ".git", "sandbox-canary-" + process.pid)]) {
+for (const dir of [path.join(root, ".git"), ...dirs]) {
+  const file = path.join(dir, "sandbox-canary-" + process.pid);
   try { fs.writeFileSync(file, ""); fs.rmSync(file); open.push("wrote " + file); } catch {}
 }
-const s = net.connect({ host: "1.1.1.1", port: 53, timeout: 3000 });
-s.on("connect", () => { open.push("connected to 1.1.1.1:53"); s.destroy(); });
+const s = net.connect({ host: "127.0.0.1", port: Number(port), timeout: 3000 });
+s.on("connect", () => { open.push("connected to 127.0.0.1:" + port); s.destroy(); });
 s.on("timeout", () => s.destroy());
-s.on("close", () => { if (open.length) { console.log(open.join("; ")); process.exitCode = 1; } });
 s.on("error", () => {});
+s.on("close", () => {
+  if (open.length) { console.log(open.join("; ")); process.exitCode = 1; } else console.log(${JSON.stringify(CLOSED)});
+});
 `;
 
 // srt blocks writes to files like .mcp.json and .bashrc in its working directory by placing stubs there while it runs, so it starts in
@@ -53,7 +62,39 @@ if (r.error) console.error(r.error.message);
 process.exit(r.status ?? 1);
 `;
 
-function main(command) {
+/** Resolves with the child's exit status and, when piped, its output */
+function run(command, args, opts) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, opts);
+    let out = "";
+    child.stdout?.on("data", (d) => (out += d));
+    child.stderr?.on("data", (d) => (out += d));
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, out }));
+  });
+}
+
+/** A loopback listener outside the sandbox that the canary must not reach; it is checked reachable from here first */
+async function listener() {
+  const server = net.createServer((socket) => {
+    server.reached = true;
+    socket.destroy();
+  });
+  server.reached = false;
+  await new Promise((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const reached = new Promise((resolve) => server.once("connection", resolve));
+  await new Promise((resolve, reject) => {
+    const probe = net.connect({ host: "127.0.0.1", port });
+    probe.once("error", reject);
+    probe.once("close", resolve);
+  });
+  await reached;
+  server.reached = false;
+  return { server, port };
+}
+
+async function main(command) {
   if (!command.length)
     throw new CheckFailure({
       where: "scripts/sandboxed.mjs",
@@ -83,12 +124,12 @@ function main(command) {
         filesystem: {
           denyRead: [],
           allowWrite: [root, fs.realpathSync(os.tmpdir())],
-          denyWrite: [path.join(root, ".git")],
+          denyWrite: [path.join(root, ".git"), ...HOME_DEFAULTS],
         },
       }),
     );
     const srt = (args, opts) =>
-      spawnSync(
+      run(
         process.execPath,
         [cli, "--settings", settings, "--", process.execPath, "-e", IN_ROOT, root, ...args],
         {
@@ -97,27 +138,28 @@ function main(command) {
           ...opts,
         },
       );
-    const canary = srt([process.execPath, "-e", CANARY, root], { encoding: "utf8" });
-    if (canary.status !== 0 || canary.error)
+    const { server, port } = await listener();
+    let canary;
+    try {
+      canary = await srt([process.execPath, "-e", CANARY, root, String(port), home, ...HOME_DEFAULTS], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } finally {
+      server.close();
+    }
+    if (canary.status !== 0 || !canary.out.includes(CLOSED) || server.reached)
       throw new CheckFailure({
         where: "scripts/sandboxed.mjs",
-        what: "the sandbox let the canary out, or did not start",
+        what: "the sandbox let the canary out, or did not run it",
         why: WHY,
         fix: "on Linux install bubblewrap, socat, and ripgrep and allow unprivileged user namespaces; the output below says which",
-        detail: `${canary.stdout ?? ""}${canary.stderr ?? ""}${canary.error?.message ?? ""}`,
+        detail: `${server.reached ? `the listener on 127.0.0.1:${port} was reached\n` : ""}${canary.out}`,
       });
-    const r = srt(command, { stdio: "inherit" });
-    if (r.error)
-      throw new CheckFailure({
-        where: "scripts/sandboxed.mjs",
-        what: `the sandboxed command could not start: ${r.error.message}`,
-        why: WHY,
-        fix: "check that node runs tools/sandbox's srt",
-      });
+    const r = await srt(command, { stdio: "inherit" });
     process.exitCode = r.status ?? 1;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-main(process.argv.slice(2));
+await main(process.argv.slice(2));
