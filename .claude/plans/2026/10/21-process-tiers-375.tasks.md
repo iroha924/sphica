@@ -53,13 +53,14 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
   - コミット: `feat(release): compare a packed tarball with the published one (T03)`
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/tarball-diff.test.ts` → 4 件 pass（バージョンと README だけの違いは same、バイト・notices・バージョン以外の欄・ファイルの追加・実行ビットは differs、未公開・integrity の不一致・取得の失敗・別の場所を指す tarball は unknown）。実物でも試した: main の pack を npm の 0.6.65 と比べて same、0.6.64 と比べて differs（THIRD_PARTY_NOTICES.md、dist/mcp-record.js、dist/mcp.js）
 
-- [ ] T04: 判定を書く `scripts/release-verdict.mjs` と、CI の static での比較と artifact
+- [x] T04: 判定を書く `scripts/release-verdict.mjs` と、CI の static での比較と artifact
   - 種別: 追加
   - 計画: S3, S4
   - 依存: T03（比較の関数が要る）
-  - 変更: `scripts/release-verdict.mjs`, `server/test/release-verdict.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts`
-  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts test/verify-pairs.test.ts` → pass。`bun run pairs` → 0 で終わる
+  - 変更: `scripts/release-verdict.mjs`, `scripts/lib/release-verdict.mjs`, `scripts/lib/release-verdict.d.mts`, `server/test/release-verdict.test.ts`, `.github/workflows/check.yml`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts` → pass。`bun run pairs` → 0 で終わる
   - コミット: `feat(release): record whether the packed tarball matches the last release in CI (T04)`
+  - 結果: 判定は `scripts/lib/release-verdict.mjs`（取得を差し替えられる）と薄い CLI に分けた。`cd server && node --import ./test/isolate-home.ts --test test/release-verdict.test.ts` → 1 件 pass（判定、npm の name・version・integrity、checkout・tree・base・run を記録）。check.yml の static は pack を `$RUNNER_TEMP/pack` に置き、Node 24.15 の行だけ判定を書いて artifact `release-verdict` に上げる。`mise exec -- actionlint .github/workflows/check.yml` → 0、`bun run pairs` → 0、knip・typecheck・lint → 0
 
 ## P3: 検査の免除
 
@@ -93,3 +94,4 @@ CI で pack した tarball を npm の前のリリースと比べ、判定を JS
 
 - 2026-10-21 / 全体 / 持ち主が S1〜S7 を全部まとめて進めると決めた（Go） / タスクごとの Codex レビューは、挙動を変える T04〜T07 で行う
 - 2026-10-21 / T02 / plugin-release の Shipping と依存 PR の節、verification.md の Release は依存の免除（3B）の説明なので、免除を入れる T05 に移した / T02 の変更欄から 2 件を外し、T05 に足した
+- 2026-10-21 / T04 / 判定の書き出しをテストできるよう lib と CLI に分け、verify-pairs の構造の検査は最終の検査と一緒に T05 で足す / T04 の変更欄を `scripts/release-verdict.mjs`, `server/test/release-verdict.test.ts`, `.github/workflows/check.yml`, `scripts/lib/verify-pairs.mjs`, `server/test/verify-pairs.test.ts` から上の値に、完了条件から verify-pairs のテストを外した

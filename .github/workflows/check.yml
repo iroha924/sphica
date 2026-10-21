@@ -152,9 +152,24 @@ jobs:
         if: matrix.part == 'static'
         run: |
           set -e
-          cd plugin
-          tgz="$(npm pack --silent)"
-          node ../scripts/check-tarball.mjs "$tgz"
+          mkdir -p "$RUNNER_TEMP/pack"
+          tgz="$(cd plugin && npm pack --silent --pack-destination "$RUNNER_TEMP/pack")"
+          node scripts/check-tarball.mjs "$RUNNER_TEMP/pack/$tgz"
+
+      # Whether the packed tarball ships the same files as the release the base names (scripts/release-verdict.mjs). One line writes it,
+      # so a run has one verdict, and the artifact lets the push to main and release:plan read it back
+      - name: Does the tarball differ from the last release
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: node scripts/release-verdict.mjs --packed "$(ls "$RUNNER_TEMP"/pack/*.tgz)" --base "$BASE" --out "$RUNNER_TEMP/release-verdict.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.part == 'static' && matrix.node == '24.15'
+        with:
+          name: release-verdict
+          path: ${{ runner.temp }}/release-verdict.json
+          if-no-files-found: error
+          retention-days: 30
 
   # The required checks are named check (24.15) and check (26). A required check passes when skipped, and a job after a failed need is
   # skipped, so this runs always and fails unless every part (on both lines) and both macos jobs succeeded.
