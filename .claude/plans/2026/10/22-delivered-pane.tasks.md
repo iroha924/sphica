@@ -22,13 +22,15 @@ base: main
 
 `pane/` が手元の `claude --plugin-dir pane` で動き、拾う関数が実際の配信文で検査される
 
-- [ ] T01: `pane/` の骨組み（マニフェスト、types、README、LICENSE）と `sift.ts`（拾う関数と描画の割り付け）を足し、実際の deliver の出力で検査する
+- [x] T01: `pane/` の骨組み（マニフェスト、types、README、LICENSE）と `sift.ts`（拾う関数と描画の割り付け）を足し、実際の deliver の出力で検査する
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `pane/.claude-plugin/plugin.json`, `pane/types/index.d.ts`, `pane/hooks/sift.ts`, `pane/README.md`, `pane/LICENSE`, `server/test/pane-sift.test.ts`, `server/tsconfig.json`, `scripts/check-english.mjs`
+  - 変更: `pane/.claude-plugin/plugin.json`, `pane/package.json`, `pane/types/index.d.ts`, `pane/hooks/sift.ts`, `pane/README.md`, `pane/LICENSE`, `server/test/pane-sift.test.ts`, `scripts/check-english.mjs`, `scripts/oxlint.mjs`, `scripts/oxfmt.mjs`
   - 完了条件: `cd server && node --test test/pane-sift.test.ts` → pass（SessionStart・読む前・編集の前・プロンプト・SubagentStart・unavailable・#218 の deny の実際の出力を全部拾い、他のプラグインの文面と空を拾わない。`layout` が 8,000 文字と 1 件 1,500 文字に収め、省略の件数を返す）。`bun run typecheck`・`bun run lint`・`bun run english`・`bun run headers`・`bun run comments` → 0 で終わる
   - コミット: `feat(pane): add the sphica-pane plugin skeleton and the sift of Sphica's hook text (T01)`
+  - 結果: `cd server && node --test test/pane-sift.test.ts` → 2 件 pass（SessionStart・SubagentStart・編集の前・読む前・プロンプト・#218 の停止・unavailable の実際の出力を 1 件ずつ拾い、停止は stop として拾った。他のプラグインの文面・空・undefined は拾わなかった。layout の上限ちょうどと 1 文字超えを確かめた）
+  - 結果: `bun run check` → 0 で終わった（typecheck・lint・english・headers・comments を含む）
 - [ ] T02: `register.tsx`（5 つの classic hook、`/sphica-pane`、ペインの描画）と `register.test.tsx` を足す
   - 種別: 追加
   - 計画: S3
@@ -76,3 +78,5 @@ base: main
   - コミット: `feat(pane): list sphica-pane in the marketplace and document it (T06)`
 
 ## 記録
+
+- 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "sphica-pane",
+  "version": "0.6.65",
+  "description": "A Claude Code pane that lists what Sphica's hooks handed the agent in this session. Reads hook results only; writes nothing.",
+  "author": {
+    "name": "iroha924",
+    "email": "shunichi@hir4ta.com"
+  },
+  "homepage": "https://github.com/iroha924/sphica",
+  "repository": "https://github.com/iroha924/sphica",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

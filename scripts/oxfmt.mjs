@@ -16,7 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(root, "server/package.json"));
 const oxfmt = path.join(path.dirname(require.resolve("oxfmt/package.json")), "bin", "oxfmt");
 
-const DIRS = ["server/src", "server/test", "server/evals", "scripts"];
+const DIRS = ["server/src", "server/test", "server/evals", "scripts", "pane"];
 const json = (dir) =>
   fs
     .readdirSync(path.join(root, dir))
@@ -24,7 +24,7 @@ const json = (dir) =>
     .map((f) => (dir === "." ? f : `${dir}/${f}`));
 const inScope = (file) =>
   /^[^/]+\.json$|^server\/[^/]+\.json$/.test(file) ||
-  (DIRS.some((d) => file.startsWith(`${d}/`)) && /\.(?:ts|mts|mjs|json)$/.test(file));
+  (DIRS.some((d) => file.startsWith(`${d}/`)) && /\.(?:tsx?|mts|mjs|json)$/.test(file));
 
 const args = process.argv.slice(2);
 // A value after a separate flag would be read as a file here, and a file outside the scope leaves nothing to format
