@@ -44,13 +44,14 @@ plan ファイルと grill-codex を戻しにくい変更に絞り、ローカ�
 
 CI で pack した tarball を npm の前のリリースと比べ、判定を JSON と artifact に残す。
 
-- [ ] T03: tarball を比べる `scripts/lib/tarball-diff.mjs` とテスト
+- [x] T03: tarball を比べる `scripts/lib/tarball-diff.mjs` とテスト
   - 種別: 追加
   - 計画: S3
   - 依存: なし
   - 変更: `scripts/lib/tarball-diff.mjs`, `scripts/lib/tarball-diff.d.mts`, `server/test/tarball-diff.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/tarball-diff.test.ts` → 取得の失敗・未公開・中身・実行ビット・notices・README だけ・バージョンだけの違いの各ケースが pass
   - コミット: `feat(release): compare a packed tarball with the published one (T03)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/tarball-diff.test.ts` → 4 件 pass（バージョンと README だけの違いは same、バイト・notices・バージョン以外の欄・ファイルの追加・実行ビットは differs、未公開・integrity の不一致・取得の失敗・別の場所を指す tarball は unknown）。実物でも試した: main の pack を npm の 0.6.65 と比べて same、0.6.64 と比べて differs（THIRD_PARTY_NOTICES.md、dist/mcp-record.js、dist/mcp.js）
 
 - [ ] T04: 判定を書く `scripts/release-verdict.mjs` と、CI の static での比較と artifact
   - 種別: 追加
