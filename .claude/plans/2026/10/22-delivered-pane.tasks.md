@@ -157,6 +157,17 @@ base: main
   - 結果: `bun run check` → 直す前は license headers: 3 finding(s)（pane/.claude-plugin/types/claude-code{,-mcp,-tools}/index.d.ts）
   - 結果: `bun run check` → 生成ファイルがある状態で 0 で終わった。`node scripts/release-status.mjs` → 「pane cache: not installed」を出して最後まで動いた（リリース前なので他の差分は出る）
 
+- [x] T13: 固定した CLI を、持ち主の SPHICA_DB・SPHICA_HOME・CODEX_HOME を渡さずに起動する（GitHub の Codex のレビュー、PR #383）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T03（直す launcher が要る）
+  - 変更: `scripts/claude-cli.mjs`, `scripts/claude-cli.d.mts`, `server/test/claude-cli.test.ts`
+  - red: `cd server && node --test test/claude-cli.test.ts` → 子の環境に SPHICA_DB・SPHICA_HOME・CODEX_HOME が残って fail
+  - 完了条件: `cd server && node --test test/claude-cli.test.ts` → pass。`SPHICA_DB=/nonexistent node scripts/check-pane.mjs` → 0 で終わる
+  - コミット: `fix(scripts): keep the owner's Sphica and Codex locations from the pinned CLI (T13)`
+  - 結果: `cd server && node --test test/claude-cli.test.ts` → 今の振る舞いのまま childEnv に切り出すと、3 つが残って fail
+  - 結果: `cd server && node --test test/claude-cli.test.ts` → 直した後は pass。`SPHICA_DB=/nonexistent node scripts/check-pane.mjs` → 0 で終わった。`bun run lint`・`bun run typecheck` → 0 で終わった
+
 ## 記録
 
 - 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル
@@ -182,3 +193,4 @@ base: main
 - 2026-10-22 / T10 / Codex のレビュー（b9508d30） → F1（./ で始まらない注記を読み飛ばす、再現済み）と F2（./register.tsx の後ろに別の名前が続く注記を register.tsx と読む、再現済み）を受理。注記を解析して穴を塞ぐ形は 3 回続けて抜けが出たので、レビューした 11 行との完全一致に変えた / 修正タスク T11 を足した
 - 2026-10-22 / T11 / Codex のレビュー（8573c1b3） → P1・権限・セキュリティの指摘なし。レビューの往復はここで収まった
 - 2026-10-22 / 全体 / 全差分の Codex のレビュー（origin/main...8573c1b3） → F1（mod を読み込むと生成される型でヘッダーの検査が落ちる、再現済み。A6 の実機確認でも同じものに当たった）と F2（release-status がユーザースコープのペインしか見ない）を受理 / 修正タスク T12 を足した
+- 2026-10-22 / PR #383 / CI（b61b6d6a） → 全ジョブ pass。Windows のジョブで 2.1.300 の pane:check が通ったことをログで確かめた（plan の A2）。GitHub の Codex のコードレビュー → P2 が 1 件（固定した CLI に持ち主の SPHICA_DB などが渡る）、受理して修正タスク T13 を足した

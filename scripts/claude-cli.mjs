@@ -28,6 +28,12 @@ export function claudeBinary() {
   }
 }
 
+/** The environment the pinned CLI runs in: no location of the owner's Sphica or Codex, which a test the mod runs could open */
+export function childEnv(config, env = process.env) {
+  const { SPHICA_DB, SPHICA_HOME, CODEX_HOME, ...rest } = env;
+  return { ...rest, CLAUDE_CONFIG_DIR: config, HOME: config, USERPROFILE: config };
+}
+
 /** Runs the pinned CLI with args in a throwaway config directory; resolves its exit code, output, and errors */
 export function runClaude(args, { cwd = root } = {}) {
   const config = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-claude-cli-"));
@@ -35,7 +41,7 @@ export function runClaude(args, { cwd = root } = {}) {
     const r = spawnSync(claudeBinary(), args, {
       cwd,
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_CONFIG_DIR: config, HOME: config, USERPROFILE: config },
+      env: childEnv(config),
       maxBuffer: 64 * 1024 * 1024,
     });
     if (r.error) throw r.error;
