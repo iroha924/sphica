@@ -1,7 +1,7 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Decides whether a change needs a release. If it does, npm and the 3 plugin channel manifests move to the same version (kind plugin).
+// Decides whether a change needs a release. If it does, every place VERSION_SOURCES names moves to the same version (kind plugin).
 // The version gate, the release plan, and manual release preparation all use this decision.
 // README.md is not listed: bundle copies it into the tarball, but a change to it alone ships with the next release.
 
@@ -15,7 +15,38 @@ export const EXACT_PACKAGE_INPUTS = new Set([
   ".claude-plugin/marketplace.json",
 ]);
 
-export const PACKAGE_PREFIXES = ["plugin/", "server/src/", "db/", "scripts/licenses/"];
+// pane/ is the sphica-pane plugin, which the marketplace installs from this repository at the release tag, not from npm
+export const PACKAGE_PREFIXES = ["plugin/", "server/src/", "db/", "scripts/licenses/", "pane/"];
+
+const entry = (j, name) => (Array.isArray(j?.plugins) ? j.plugins.find((x) => x?.name === name) : undefined);
+
+/**
+ * Every place a release writes its version, by name: the npm package, the 3 plugin channel manifests, and the sphica-pane plugin, whose
+ * marketplace entry pins the release tag. A release moves them all to one version; each check reads them from here.
+ */
+export const VERSION_SOURCES = {
+  package: { file: "plugin/package.json", pick: (j) => j?.version },
+  claude: { file: "plugin/.claude-plugin/plugin.json", pick: (j) => j?.version },
+  codex: { file: "plugin/.codex-plugin/plugin.json", pick: (j) => j?.version },
+  // The version lives in the entry's source: a version in the entry too makes Claude Code prefer plugin.json without a word
+  marketplace: { file: ".claude-plugin/marketplace.json", pick: (j) => entry(j, "sphica")?.source?.version },
+  pane: { file: "pane/.claude-plugin/plugin.json", pick: (j) => j?.version },
+  paneRef: {
+    file: ".claude-plugin/marketplace.json",
+    pick: (j) => {
+      const ref = entry(j, "sphica-pane")?.source?.ref;
+      return typeof ref === "string" && ref.startsWith("v") ? ref.slice(1) : undefined;
+    },
+  },
+};
+
+/** The files VERSION_SOURCES reads, each once */
+export const VERSION_FILES = new Set(Object.values(VERSION_SOURCES).map((v) => v.file));
+
+/** Each VERSION_SOURCES name with the version read through `read(file)` (parsed JSON), undefined where it is missing */
+export function releaseVersions(read) {
+  return Object.fromEntries(Object.entries(VERSION_SOURCES).map(([name, v]) => [name, v.pick(read(v.file))]));
+}
 
 /** Package inputs whose change ships nothing new unless the packed tarball shows it (scripts/check-mcp-version.mjs --verdict) */
 export const DEPENDENCY_INPUTS = new Set(["server/package.json", "server/bun.lock"]);
@@ -36,7 +67,11 @@ export function withoutReleaseVersion(text) {
     delete value.version;
     for (const plugin of Array.isArray(value.plugins) ? value.plugins : []) {
       delete plugin.version;
-      if (plugin.source && typeof plugin.source === "object") delete plugin.source.version;
+      if (plugin.source && typeof plugin.source === "object") {
+        delete plugin.source.version;
+        // The pane plugin's ref is the release tag, so it moves with the version
+        if (plugin.source.source === "git-subdir") delete plugin.source.ref;
+      }
     }
     return JSON.stringify(value);
   } catch {

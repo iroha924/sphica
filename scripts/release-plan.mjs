@@ -11,6 +11,8 @@ import {
   DEPENDENCY_INPUTS,
   isPackageInput,
   releaseKind,
+  releaseVersions,
+  VERSION_FILES,
   withoutReleaseVersion,
 } from "./lib/release-scope.mjs";
 import { latestRun, verdictMismatch } from "./lib/release-verdict.mjs";
@@ -36,12 +38,6 @@ function defaultBase() {
 }
 
 const ref = base ?? defaultBase();
-const versionFiles = new Set([
-  "plugin/package.json",
-  "plugin/.claude-plugin/plugin.json",
-  "plugin/.codex-plugin/plugin.json",
-  ".claude-plugin/marketplace.json",
-]);
 const at = (revision, file) => {
   try {
     return git("show", `${revision}:${file}`);
@@ -65,7 +61,8 @@ const files = paths("diff", "--name-only", ref, "--cached")
   .filter(isPackageInput)
   .filter(
     (file) =>
-      !versionFiles.has(file) || withoutReleaseVersion(at(ref, file)) !== withoutReleaseVersion(at("", file)),
+      !VERSION_FILES.has(file) ||
+      withoutReleaseVersion(at(ref, file)) !== withoutReleaseVersion(at("", file)),
   );
 let kind = releaseKind(files);
 const unstaged = [
@@ -74,12 +71,8 @@ const unstaged = [
   .filter(isPackageInput)
   .sort();
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
-const packageVersion = read("plugin/package.json").version;
-const claudeVersion = read("plugin/.claude-plugin/plugin.json").version;
-const codexVersion = read("plugin/.codex-plugin/plugin.json").version;
-const marketplaceVersion = read(".claude-plugin/marketplace.json").plugins.find(
-  (entry) => entry.name === "sphica",
-)?.source?.version;
+const versions = releaseVersions(read);
+const packageVersion = versions.package;
 // A release relies on settings only an admin can read (release.yml's GITHUB_TOKEN cannot); read them with the owner's gh
 const gh = (args) =>
   execFileSync("gh", args, {
@@ -198,12 +191,7 @@ const plan = {
   verdict,
   files,
   unstaged,
-  versions: {
-    package: packageVersion,
-    claude: claudeVersion,
-    codex: codexVersion,
-    marketplace: marketplaceVersion,
-  },
+  versions,
   actions,
   settings,
 };
@@ -215,7 +203,7 @@ if (json) {
   console.log(`release kind: ${label}`);
   console.log(`compared: ${ref}..index (HEAD ${plan.commit})`);
   console.log(
-    `version: npm ${packageVersion} / plugin ${claudeVersion} / marketplace ${marketplaceVersion} / Codex ${codexVersion}`,
+    `version: npm ${packageVersion} / plugin ${versions.claude} / marketplace ${versions.marketplace} / Codex ${versions.codex} / pane ${versions.pane} (ref v${versions.paneRef})`,
   );
   if (files.length) console.log(`inputs: ${files.map(shown).join(", ")}`);
   if (verdict) console.log(`release verdict: ${verdict.same ? "same" : "not usable"}: ${verdict.reason}`);

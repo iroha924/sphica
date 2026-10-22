@@ -78,7 +78,7 @@ then `check-mcp-version.mjs --verdict`); pre-commit leaves that decision to CI (
 | Kind | Changes | Versions to move |
 |---|---|---|
 | `none` | Dev docs that do not ship, repository dev Skills, tests only, a change to the root `README.md` alone (it goes into npm, but ships with the next release), and a change to the server's dependency files whose packed tarball CI found the same as the last release | None |
-| `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules | The npm package and the 3 places of the plugin channel |
+| `plugin` | MCP, CLI, capture, hooks, plugin Skills and Agents, shared modules, the sphica-pane mod (`pane/`) | Every place `VERSION_SOURCES` in `scripts/lib/release-scope.mjs` lists: the npm package, the 3 places of the plugin channel, and the sphica-pane manifest with its marketplace ref (`v<version>`) |
 
 The source of truth for the classification is `scripts/lib/release-scope.mjs`; the version gate and
 the release command read the same file.
@@ -188,6 +188,14 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    For `codex exec`, `SPHICA_DB` is not enough: Codex starts MCP servers without it, so `read` and `search` hit the owner's `~/.sphica` (measured 2026-09-27).
    Put the database at `<tmp>/.sphica/sphica.db` and run with `HOME=<tmp>`, `CODEX_HOME=$HOME/.codex` (the installed plugin and its trust), and the real
    Node directory first on `PATH` (mise shims look under `HOME`)
+7. The sphica-pane plugin installs from this repository's `pane/` at the release tag, not from npm, so the npm checks above do not reach it.
+   In a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, run `claude plugin marketplace add iroha924/sphica`,
+   `claude plugin install sphica@sphica` (the pane only shows what Sphica's own hooks deliver), and `claude plugin install sphica-pane@sphica`,
+   then `claude plugin list --json` must show `sphica-pane@sphica` at the release version and enabled. Open a session there with a temporary `SPHICA_DB` (no `--plugin-dir`), run `/sphica-pane`, read a file with an anchored record,
+   and check the pane lists that delivery. From the second release with the pane on, install the previous release first and check
+   `claude plugin update sphica-pane@sphica` moves it to the new version. If the owner uses the pane, also update it on their machine
+   (`claude plugin update sphica-pane@sphica`). A broken pane is fixed by the next release, never by removing its marketplace entry:
+   a removed entry leaves installed copies in place with nothing to update them from
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.

@@ -13,7 +13,21 @@
       "source": {
         "source": "npm",
         "package": "sphica",
-        "version": "0.6.65"
+        "version": "0.6.66"
+      },
+      "author": {
+        "name": "iroha924",
+        "email": "shunichi@hir4ta.com"
+      }
+    },
+    {
+      "name": "sphica-pane",
+      "description": "Optional, Claude Code only: a pane that lists what Sphica's hooks handed the agent in this session. Install sphica first.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/iroha924/sphica.git",
+        "path": "pane",
+        "ref": "v0.6.66"
       },
       "author": {
         "name": "iroha924",

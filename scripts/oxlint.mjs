@@ -21,7 +21,7 @@ const tsgolint = require.resolve(
 const args = process.argv.slice(2);
 const targets = args.some((a) => !a.startsWith("-"))
   ? []
-  : ["server/src", "server/test", "server/evals", "scripts"];
+  : ["server/src", "server/test", "server/evals", "scripts", "pane"];
 const r = spawnSync(process.execPath, [oxlint, "--type-aware", "--deny-warnings", ...args, ...targets], {
   cwd: root,
   stdio: "inherit",

@@ -38,11 +38,15 @@ function repo() {
   write(dir, "plugin/package.json", JSON.stringify({ name: "sphica", version: "1.0.0" }));
   write(dir, "plugin/.claude-plugin/plugin.json", JSON.stringify({ version: "1.0.0" }));
   write(dir, "plugin/.codex-plugin/plugin.json", JSON.stringify({ version: "1.0.0" }));
+  write(dir, "pane/.claude-plugin/plugin.json", JSON.stringify({ version: "1.0.0" }));
   write(
     dir,
     ".claude-plugin/marketplace.json",
     JSON.stringify({
-      plugins: [{ name: "sphica", source: { source: "npm", package: "sphica", version: "1.0.0" } }],
+      plugins: [
+        { name: "sphica", source: { source: "npm", package: "sphica", version: "1.0.0" } },
+        { name: "sphica-pane", source: { source: "git-subdir", url: "u", path: "pane", ref: "v1.0.0" } },
+      ],
     }),
   );
   write(dir, "plugin/skills/a.md", "a");
