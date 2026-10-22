@@ -38,7 +38,7 @@ export type Block = "agent-run" | "subagent-start";
 const BLOCKS: Block[] = ["agent-run", "subagent-start"];
 
 /** A dead-end stop and the context it returns stay in agent-started runs, so their rows are never dropped */
-const STOPS = new Set(["command", "command_context"]);
+export const STOPS = new Set(["command", "command_context"]);
 
 /** The block that would drop a pair, or null for one the change keeps */
 export function blockOf(p: Pair): Block | null {

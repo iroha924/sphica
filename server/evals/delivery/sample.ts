@@ -86,7 +86,7 @@ function instant(name: string, value: string): string {
   return d.toISOString();
 }
 
-function window(from: string, to: string): Window {
+export function window(from: string, to: string): Window {
   const w = { from: instant("from", from), to: instant("to", to) };
   if (w.from >= w.to) throw new Error(`--from must be before --to (${w.from}, ${w.to})`);
   return w;
