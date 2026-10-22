@@ -1,0 +1,179 @@
+{
+  "note": "Records of this project ever active as an AI's decision, from a read-only copy of the owner's database taken 2026-10-23 (AI adoptions from 2026-10-05 to 2026-10-18). Each unchanged record was labelled against the code at main 661ce5f8 by Claude and by Codex, neither seeing the other's labels; a disagreement is unknown. The labels were fixed before labelling: holds (the code, files, and later work agree and its reason still applies), no longer holds (they depart from it, or its reason no longer applies), unknown (the repository cannot settle it).",
+  "extracted_at": "2026-10-22T15:08:45.800Z",
+  "counts": {
+    "outcomes": {
+      "owner adopted": 0,
+      "replaced": 1,
+      "withdrawn": 0,
+      "taken back": 0,
+      "unchanged": 9
+    },
+    "unchanged": {
+      "holds": 5,
+      "no longer holds": 2,
+      "unknown": 2
+    }
+  },
+  "rows": [
+    {
+      "unit": 263,
+      "key": "trace:09baa1c4-0d4f-46a2-8e7b-03c65c196917/duplicate-keys-declined",
+      "activeAt": "2026-10-05T04:18:49.586Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 348,
+      "key": "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/decline-notices-finding",
+      "activeAt": "2026-10-06T11:49:31.261Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 423,
+      "key": "trace:5973501a-084b-4653-9fd3-eb02ba130309/o1-followups-to-existing",
+      "activeAt": "2026-10-08T11:23:43.261Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 424,
+      "key": "trace:5973501a-084b-4653-9fd3-eb02ba130309/codex-review-delivery-deferred",
+      "activeAt": "2026-10-08T11:23:43.261Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 450,
+      "key": "trace:8c8dba6b-9f75-4ccb-b27f-661f99549b19/post-shell-ask-keep-or-undo",
+      "activeAt": "2026-10-10T12:36:54.760Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 529,
+      "key": "trace:15ab6a31-eb6e-4f61-bf5e-7c6dcd9c5d97/no-issue-two-rare-findings",
+      "activeAt": "2026-10-12T04:15:42.048Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 539,
+      "key": "trace:05365efa-c426-48ee-922a-0b4708bbda5e/observed-need-first",
+      "activeAt": "2026-10-12T09:18:58.011Z",
+      "lifecycle": "superseded",
+      "authority": "agent",
+      "outcome": "replaced",
+      "replacedBy": {
+        "unit": 543,
+        "key": "trace:cbc0dbe8-014d-4719-9165-5a39fdb1e53f/wanted-features-stay-open",
+        "authority": "owner"
+      }
+    },
+    {
+      "unit": 569,
+      "key": "trace:b0a5e96c-75bb-4261-b2e6-9cd864b1db9b/windows-skill-path-case-declined",
+      "activeAt": "2026-10-13T07:56:46.604Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 664,
+      "key": "trace:d8f022f9-de50-4a49-a89d-07829bc3ddfb/license-badge-npm",
+      "activeAt": "2026-10-18T05:22:47.736Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    },
+    {
+      "unit": 675,
+      "key": "trace:32dfbb23-b477-431b-a076-f698bf1ed269/shell-writes-not-delivered",
+      "activeAt": "2026-10-18T05:30:36.233Z",
+      "lifecycle": "active",
+      "authority": "agent",
+      "outcome": "unchanged",
+      "replacedBy": null
+    }
+  ],
+  "labels": [
+    {
+      "unit": 263,
+      "claude": "holds",
+      "claude_reason": "server/src/codex-trust.ts:144 still tells apart only a handler that writes both commandWindows and command_windows; no other duplicate-key check was added.",
+      "codex": "holds",
+      "codex_reason": "server/src/codex-trust.ts:113 still uses JSON.parse without detecting duplicate keys, while line 144 explicitly rejects simultaneous commandWindows and command_windows fields. The shipped plugin/hooks/codex.json uses distinct keys, consistent with the stated rationale."
+    },
+    {
+      "unit": 348,
+      "claude": "holds",
+      "claude_reason": "scripts/third-party-notices.mjs:150 takes each version from the resolved package, so the notices follow the lockfile, as the decision says they should.",
+      "codex": "holds",
+      "codex_reason": "server/bun.lock:664 resolves proxy-addr to 2.0.8, matching plugin/THIRD_PARTY_NOTICES.md:86. scripts/third-party-notices.mjs:150 derives the reported version from the installed package manifest, preserving the intended version-dependent notices."
+    },
+    {
+      "unit": 423,
+      "claude": "holds",
+      "claude_reason": "The comments were added to #209 and #206 as decided, and the anchors were fixed later once glean could retire one (retire_anchor), as the decision deferred them to; no new issue was filed for the trend.",
+      "codex": "no longer holds",
+      "codex_reason": "The stated rationale that glean only supports reattachment no longer applies: commit 0d0d517a added anchor retirement using the owner's words, and commit 9260e2dd added the reference-file anchor warning. GitHub API access failed, so the original issue comments remain unverified."
+    },
+    {
+      "unit": 424,
+      "claude": "no longer holds",
+      "claude_reason": "The deferred delivery to Codex runs Claude starts was later cut: server/src/deliver.ts:899-910 (agentRun) holds back session start and read delivery for codex exec runs, documented in README.md:146.",
+      "codex": "no longer holds",
+      "codex_reason": "Commit 80f2c36a subsequently suppressed session-start and read delivery for agent-started runs, including Codex exec sessions launched from Claude Code. README.md:143-146 explains that these deliveries were seldom useful, departing from the earlier deferral."
+    },
+    {
+      "unit": 450,
+      "claude": "no longer holds",
+      "claude_reason": "The post-shell delivery whose wording it chose was removed in 79c764e2 (2026-10-15), so the decision is about code that no longer exists.",
+      "codex": "no longer holds",
+      "codex_reason": "Commit 79c764e2 removed post-shell delivery and its trial option from server/src/deliver.ts. The post-change message whose wording this decision selected no longer exists."
+    },
+    {
+      "unit": 529,
+      "claude": "holds",
+      "claude_reason": "No issue was filed for either case (searching issues for shell_write_delivery finds only #333, which is unrelated); the Windows half is moot since 79c764e2 removed the shell_write_delivery trial.",
+      "codex": "unknown",
+      "codex_reason": "server/src/glean.ts:941 still retains the first 200 characters of the withdrawal quote, while commit 79c764e2 removed the shell-delivery trial. Neither establishes whether the Windows failure recurred or either concern received an issue; GitHub API access failed."
+    },
+    {
+      "unit": 569,
+      "claude": "holds",
+      "claude_reason": "server/src/review-bridge.ts:67 still matches skills/<name>/SKILL.md by its exact letter case.",
+      "codex": "holds",
+      "codex_reason": "server/src/review-bridge.ts:67 still matches skills/<name>/SKILL.md case-sensitively, including when backslashes are used. Alternate capitalization therefore remains unrecognized and produces the conservative missed-delivery behavior described by the decision."
+    },
+    {
+      "unit": 664,
+      "claude": "holds",
+      "claude_reason": "README.md:14 and README.ja.md:14 use https://img.shields.io/npm/l/sphica.",
+      "codex": "holds",
+      "codex_reason": "README.md:14 and README.ja.md:14 both use https://img.shields.io/npm/l/sphica. Both badges remain derived from npm metadata rather than a fixed license string."
+    },
+    {
+      "unit": 675,
+      "claude": "holds",
+      "claude_reason": "README.md:146 says a shell command that names a file gets nothing in an agent-started run, even one that writes it (sed -i).",
+      "codex": "holds",
+      "codex_reason": "server/src/deliver.ts:1386 suppresses named-path delivery for agent-started shell calls without distinguishing reads from writes. README.md:146 explicitly documents that this includes commands such as sed -i."
+    }
+  ]
+}
