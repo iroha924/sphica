@@ -100,7 +100,7 @@ function whole(name: string, value: string, min: number): number {
   return n;
 }
 
-function directory(name: string, value: string): string {
+export function directory(name: string, value: string): string {
   if (!fs.existsSync(value) || !fs.statSync(value).isDirectory())
     throw new Error(`--${name} ${value} is not a directory`);
   return value;

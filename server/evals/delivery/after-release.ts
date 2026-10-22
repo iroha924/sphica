@@ -1,20 +1,20 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// What holding back delivery to agent-started runs did after its release, window by window: starts held back, agent-started runs that
-// still got their start or reads, subagent starts that still carried records, and pairs per interactive session. Recipients are read the
-// way agent-runs.ts reads them (the delivery row and the Codex session log), so a claude -p run that was not held counts as a Claude Code
-// main session.
+// Recipients are read as agent-runs.ts reads them, from the delivery row and the Codex session log: no log tells a claude -p run that was
+// not held from a person's Claude Code session, so such a run counts as interactive.
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { type Recipient, recipientOf, STOPS } from "./agent-runs.ts";
-import { type Window, walk, window } from "./sample.ts";
+import { directory, type Window, walk, window } from "./sample.ts";
 
 /** One conversation (a session's main conversation, or one subagent or child thread) and its delivery rows in a window */
 export type Conversation = {
   recipient: Recipient;
+  /** Its start was held back, in the window or before it, so a person does not run it */
+  heldRun?: boolean;
   rows: { event: string; outcome: string; reason: string | null; units: number }[];
 };
 
@@ -58,14 +58,15 @@ export function summarize(conversations: Conversation[]): Summary {
     const held = starts.filter((r) => r.outcome === "suppressed").length;
     if (held) bump(s.held, c.recipient, held);
     if (AGENT_RUNS.has(c.recipient)) {
-      const missed = pairsOf(
-        c.rows.filter(
-          (r) => r.event === "session_start" || (r.event === "pre_read" && !STOPS.has(r.reason ?? "")),
-        ),
+      // A start that showed only current work or a trace notice is logged as emitted with no units: the run still got its start
+      const missed = c.rows.filter(
+        (r) =>
+          r.outcome === "emitted" &&
+          (r.event === "session_start" || (r.event === "pre_read" && !STOPS.has(r.reason ?? ""))),
       );
-      if (missed) {
+      if (missed.length) {
         s.not_held.conversations++;
-        s.not_held.pairs += missed;
+        s.not_held.pairs += pairsOf(missed);
       }
     }
     if (SUBAGENTS.has(c.recipient))
@@ -77,7 +78,7 @@ export function summarize(conversations: Conversation[]): Summary {
           s.subagent_starts.pairs += carried;
         }
       }
-    if ((c.recipient === "claude-main" && !held) || c.recipient === "codex-tui") {
+    if ((c.recipient === "claude-main" && !held && !c.heldRun) || c.recipient === "codex-tui") {
       s.interactive.conversations++;
       s.interactive.pairs += pairs;
     }
@@ -119,6 +120,22 @@ async function conversations(
       .orderBy("d.at")
       .orderBy("d.id")
       .execute();
+    // A run's start can fall before the window while its edits fall inside it
+    const heldRuns = new Set(
+      (
+        await db
+          .selectFrom("delivery as d")
+          .innerJoin("session as s", "s.id", "d.session_id")
+          .where("s.project_id", "=", p.id)
+          .where("d.event", "=", "session_start")
+          .where("d.outcome", "=", "suppressed")
+          .where("d.agent_id", "is", null)
+          .where("d.at", "<", w.to)
+          .select("d.session_id")
+          .distinct()
+          .execute()
+      ).map((r) => r.session_id),
+    );
     const byKey = new Map<string, Conversation>();
     for (const r of rows) {
       // A subagent's start the host sent without its agent id belongs to no conversation it can be told from, so it stands alone
@@ -126,7 +143,11 @@ async function conversations(
       const key = alone ? `start:${byKey.size}` : `${r.session_id}\0${r.agent_id ?? ""}`;
       let c = byKey.get(key);
       if (!c) {
-        c = { recipient: recipientOf(r, codexLog), rows: [] };
+        c = {
+          recipient: recipientOf(r, codexLog),
+          heldRun: !alone && !r.agent_id && heldRuns.has(r.session_id),
+          rows: [],
+        };
         byKey.set(key, c);
       }
       c.rows.push({ event: r.event, outcome: r.outcome, reason: r.reason, units: Number(r.units) });
@@ -152,12 +173,15 @@ async function main(): Promise<void> {
   });
   const missing = (["db", "project", "codex", "window", "out"] as const).filter((k) => !values[k]);
   if (missing.length) throw new Error(`pass ${missing.map((k) => `--${k}`).join(", ")}`);
+  if (path.resolve(values.out as string) === path.resolve(values.db as string))
+    throw new Error("--out is the database --db reads; write the output elsewhere");
   const windows = (values.window as string[]).map((v) => {
     const [from, to, ...rest] = v.split("/");
     if (!from || !to || rest.length) throw new Error(`--window ${v} is not from/to`);
     return window(from, to);
   });
-  const logs = walk(values.codex as string);
+  // A missing log directory would count every Codex session as log-less
+  const logs = walk(directory("codex", values.codex as string));
   const codexLog = (thread: string) =>
     logs.find((f) => path.basename(f).endsWith(`-${thread}.jsonl`)) ?? null;
   const out = {

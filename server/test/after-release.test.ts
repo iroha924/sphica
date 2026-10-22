@@ -43,19 +43,23 @@ test("a window counts held starts, missed runs, subagent starts that still carri
     },
     // A log-less run that got nothing but an edit is not missed
     { recipient: "codex-no-log", rows: [row({ event: "pre_edit" })] },
+    // A log-less run whose start showed no records but still emitted is missed, with no pairs
+    { recipient: "codex-no-log", rows: [row({ event: "session_start", units: 0 })] },
+    // A claude -p run held before the window is not interactive even though only its edit falls inside it
+    { recipient: "claude-main", heldRun: true, rows: [row({ event: "pre_edit" })] },
     // A subagent start with only the search line, and one that still carried records
     { recipient: "claude-subagent", rows: [row({ event: "session_start", reason: "subagent", units: 0 })] },
     { recipient: "codex-child", rows: [row({ event: "session_start", units: 2 })] },
   ];
   const s = summarize(conversations);
-  assert.equal(s.conversations["claude-main"], 2);
+  assert.equal(s.conversations["claude-main"], 3);
   assert.equal(s.conversations["codex-exec"], 2);
   assert.deepEqual(s.held, { "claude-main": 1, "codex-exec": 1 });
-  assert.deepEqual(s.not_held, { conversations: 1, pairs: 4 });
+  assert.deepEqual(s.not_held, { conversations: 2, pairs: 4 });
   assert.deepEqual(s.subagent_starts, { total: 2, with_records: 1, pairs: 2 });
   // A held claude -p run is not an interactive session, since it shows that a person does not run it
   assert.deepEqual(s.interactive, { conversations: 2, pairs: 3, per_conversation: 1.5 });
-  assert.equal(s.pairs.total, 3 + 3 + 1 + 1 + 1 + 1 + 2);
+  assert.equal(s.pairs.total, 3 + 3 + 1 + 1 + 1 + 1 + 1 + 2);
 });
 
 test("a window with no interactive session reports no per-session rate rather than dividing by zero", () => {
@@ -110,6 +114,15 @@ test("the script reads each window from the database and the Codex logs, and lea
     log(main, { event: "session_start", reason: "subagent", agent_id: "a1", at: at(after) });
     log(exec, { event: "session_start", reason: "startup", outcome: "suppressed", at: at(after) });
     log(tui, { event: "pre_read", at: at(after) }, [u]);
+    // A claude -p run held just before the window, whose edit falls inside it
+    const headless = session(db, p, "s-headless");
+    log(headless, {
+      event: "session_start",
+      reason: "startup",
+      outcome: "suppressed",
+      at: at("2026-10-18T23:59:00Z"),
+    });
+    log(headless, { event: "pre_edit", at: at(after) }, [u]);
     // Outside both windows, and another project's row inside one
     log(main, { event: "pre_read", at: at("2026-10-17T00:00:00Z") }, [u]);
     log(elsewhere, { event: "pre_read", at: at(after) }, [u]);
@@ -143,34 +156,36 @@ test("the script reads each window from the database and the Codex logs, and lea
     assert.deepEqual(a.summary.not_held, { conversations: 0, pairs: 0 });
     assert.deepEqual(a.summary.subagent_starts, { total: 1, with_records: 0, pairs: 0 });
     assert.deepEqual(a.summary.interactive, { conversations: 2, pairs: 2, per_conversation: 1 });
-    assert.equal(a.summary.pairs.total, 2);
+    assert.equal(a.summary.pairs.total, 3);
+    assert.equal(a.summary.conversations["claude-main"], 2);
   } finally {
     await db.done();
   }
 });
 
-test("the script refuses a window that does not parse or runs backwards, and an unknown project", async () => {
+test("the script refuses a bad window, an unknown project, a missing Codex directory, and an output over its database", async () => {
   const db = tempDb();
   try {
     project(db);
     const dir = tempDir("sphica-after-");
-    const args = (window: string, key = "git:github.com/o/r") => [
-      SCRIPT,
-      "--db",
-      db.file,
-      "--project",
-      key,
-      "--codex",
-      dir,
-      "--window",
-      window,
-      "--out",
-      path.join(dir, "out.json"),
-    ];
+    const args = (
+      window: string,
+      key = "git:github.com/o/r",
+      codex = dir,
+      out = path.join(dir, "out.json"),
+    ) => [SCRIPT, "--db", db.file, "--project", key, "--codex", codex, "--window", window, "--out", out];
     const run1 = (a: string[]) => spawnSync(process.execPath, a, { encoding: "utf8" });
     assert.match(run1(args("2026-10-09")).stderr, /from\/to/);
     assert.match(run1(args("2026-10-16T00:00:00Z/2026-10-09T00:00:00Z")).stderr, /before/);
     assert.match(run1(args("2026-10-09T00:00:00Z/2026-10-16T00:00:00Z", "git:x")).stderr, /no project/);
+    const w = "2026-10-09T00:00:00Z/2026-10-16T00:00:00Z";
+    assert.match(run1(args(w, undefined, path.join(dir, "missing"))).stderr, /not a directory/);
+    const before = fs.readFileSync(db.file);
+    assert.match(
+      run1(args(w, undefined, dir, path.join(path.dirname(db.file), ".", path.basename(db.file)))).stderr,
+      /--out is the database/,
+    );
+    assert.deepEqual(fs.readFileSync(db.file), before);
     assert.equal(fs.existsSync(path.join(dir, "out.json")), false);
   } finally {
     await db.done();
