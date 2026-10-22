@@ -13,6 +13,8 @@ const T0 = at("2026-09-20T00:00:00Z");
 const T1 = at("2026-09-21T00:00:00Z");
 const T2 = at("2026-09-22T00:00:00Z");
 const T3 = at("2026-09-23T00:00:00Z");
+const T4 = at("2026-09-24T00:00:00Z");
+const T5 = at("2026-09-25T00:00:00Z");
 
 // A decision with the AI's own adoption, made the way the schema allows one: its reply deciding, a decides quote, an interactive run
 function agentAdopted(db: TempDb, p: number, key: string) {
@@ -80,7 +82,38 @@ function agentAdopted(db: TempDb, p: number, key: string) {
     run_id: run,
     added_at: T1,
   });
-  return { unit, run };
+  return { unit, run, reply };
+}
+
+const RETRACT_OWNER =
+  "update unit_adoption set retracted_at = ?, retraction_reason = 'no', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and route = 'owner_statement'";
+
+// The moments a record moves and the owner's adoption, for the cases where the order of those moments decides when it became an AI's
+function history(db: TempDb, p: number, owner: number) {
+  const move = (unit: number, run: number, steps: [string | null, string, string][]) => {
+    for (const [from, to, when] of steps)
+      insert(db, "unit_state", {
+        unit_id: unit,
+        from_state: from,
+        to_state: to,
+        at: when,
+        reason: "r",
+        run_id: run,
+      });
+  };
+  const ownerAdopts = (unit: number, run: number, added: string, retracted: string) => {
+    insert(db, "unit_adoption", {
+      unit_id: unit,
+      route: "owner_statement",
+      source_id: owner,
+      span_start: 0,
+      span_end: 4,
+      run_id: run,
+      added_at: added,
+    });
+    db.owner.prepare(RETRACT_OWNER).run(retracted, owner, unit);
+  };
+  return { move, ownerAdopts };
 }
 
 test("authority: the owner outranks an AI, both read from adoption history as of any time", async () => {
@@ -233,6 +266,108 @@ test("agent history: a record still active when the owner's adoption is taken ba
     assert.deepEqual(
       (await agentHistory(db.reader, p)).map((h) => [h.key, h.activeAt, h.lifecycle, h.authority]),
       [["both", T2, "active", "agent"]],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent history: the first moment it was active as an AI's decision, whatever order its states and the owner's retraction came in", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, { id: "o1", text: "Keep it as is.", sent: "2026-09-19T00:00:00Z" });
+    const { move, ownerAdopts } = history(db, p, owner);
+    // Active as the owner's, then the AI's when the owner takes it back, then active a second time later
+    const twice = agentAdopted(db, p, "twice");
+    ownerAdopts(twice.unit, twice.run, T0, T2);
+    move(twice.unit, twice.run, [
+      [null, "candidate", T0],
+      ["candidate", "active", T1],
+      ["active", "candidate", T3],
+      ["candidate", "active", T4],
+    ]);
+    // Back to a candidate before the owner takes it back: an AI's only from its next activation, and withdrawn after that
+    const paused = agentAdopted(db, p, "paused");
+    ownerAdopts(paused.unit, paused.run, T0, T3);
+    move(paused.unit, paused.run, [
+      [null, "candidate", T0],
+      ["candidate", "active", T1],
+      ["active", "candidate", T2],
+      ["candidate", "active", T4],
+      ["active", "withdrawn", T5],
+    ]);
+    // The owner's adoption taken back before the record had any state
+    const early = agentAdopted(db, p, "early");
+    ownerAdopts(early.unit, early.run, T0, T1);
+    move(early.unit, early.run, [
+      [null, "candidate", T2],
+      ["candidate", "active", T3],
+    ]);
+    // Listed by when each became an AI's decision, not by when it was made
+    const first = agentAdopted(db, p, "first");
+    move(first.unit, first.run, [
+      [null, "candidate", T0],
+      ["candidate", "active", T1],
+    ]);
+    assert.deepEqual(
+      (await agentHistory(db.reader, p)).map((h) => [h.key, h.activeAt, h.lifecycle, h.authority]),
+      [
+        ["first", T1, "active", "agent"],
+        ["twice", T2, "active", "agent"],
+        ["early", T3, "active", "agent"],
+        ["paused", T4, "withdrawn", "agent"],
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent history: the AI's adoptions are the ones in effect when it became active, with the words they cite", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, { id: "o1", text: "Keep it as is.", sent: "2026-09-19T00:00:00Z" });
+    const { move } = history(db, p, owner);
+    const { unit, run, reply } = agentAdopted(db, p, "cited");
+    // A second quote of the same reply ("as is"), adopted at T0 and taken back at T1, and a third ("keep"), adopted after activation
+    for (const [start, end, added] of [
+      [10, 15, T0],
+      [2, 6, T3],
+    ] as const) {
+      insert(db, "unit_evidence", {
+        unit_id: unit,
+        source_id: reply,
+        span_start: start,
+        span_end: end,
+        role: "decides",
+        run_id: run,
+        added_at: T0,
+      });
+      insert(db, "unit_adoption", {
+        unit_id: unit,
+        route: "agent",
+        source_id: reply,
+        span_start: start,
+        span_end: end,
+        run_id: run,
+        added_at: added,
+      });
+    }
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'no', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and span_start = 10",
+      )
+      .run(T1, owner, unit);
+    move(unit, run, [
+      [null, "candidate", T0],
+      ["candidate", "active", T2],
+    ]);
+    const listed = await agentHistory(db.reader, p);
+    assert.deepEqual(
+      listed.map((h) => [h.activeAt, h.adoptions]),
+      [[T2, [{ sourceId: reply, spanStart: 0, spanEnd: 3 }]]],
     );
   } finally {
     await db.done();
