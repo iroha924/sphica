@@ -1,12 +1,13 @@
 {
   "note": "Records of this project ever active as an AI's decision, from a read-only copy of the owner's database taken 2026-10-23 (AI adoptions from 2026-10-05 to 2026-10-18). Each unchanged record was labelled against the code at main 661ce5f8 by Claude and by Codex, neither seeing the other's labels; a disagreement is unknown. The labels were fixed before labelling: holds (the code, files, and later work agree and its reason still applies), no longer holds (they depart from it, or its reason no longer applies), unknown (the repository cannot settle it).",
-  "extracted_at": "2026-10-22T15:08:45.800Z",
+  "extracted_at": "2026-10-22T15:23:52.563Z",
   "counts": {
     "outcomes": {
       "owner adopted": 0,
       "replaced": 1,
       "withdrawn": 0,
       "taken back": 0,
+      "deactivated": 0,
       "unchanged": 9
     },
     "unchanged": {

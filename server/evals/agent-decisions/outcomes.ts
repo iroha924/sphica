@@ -2,16 +2,25 @@
 // SPDX-License-Identifier: MIT
 
 // How the records that were ever active as an AI's decision held up: what happened to each later (the owner adopted, replaced, or withdrew
-// it, or nothing), and, for the ones nothing happened to, whether Claude and Codex each judge that it still holds against the code now.
+// it, the AI's adoption was taken back, it went back to a candidate, or nothing), and, for the ones nothing happened to, whether Claude and
+// Codex each judge that it still holds against the code now.
 // No change is not counted as holding up: those are labelled, and a disagreement between the two labels is unknown.
 import fs from "node:fs";
+import path from "node:path";
 import { parseArgs } from "node:util";
 import { type Authority, agentHistory, authorityOf } from "../../src/authority.ts";
 import { openReader, type Reads } from "../../src/db.ts";
 import { projectId } from "../../src/project.ts";
 
-export type Outcome = "owner adopted" | "replaced" | "withdrawn" | "taken back" | "unchanged";
-const OUTCOMES: Outcome[] = ["owner adopted", "replaced", "withdrawn", "taken back", "unchanged"];
+export type Outcome = "owner adopted" | "replaced" | "withdrawn" | "taken back" | "deactivated" | "unchanged";
+const OUTCOMES: Outcome[] = [
+  "owner adopted",
+  "replaced",
+  "withdrawn",
+  "taken back",
+  "deactivated",
+  "unchanged",
+];
 
 const LABELS = ["holds", "no longer holds", "unknown"] as const;
 type Label = (typeof LABELS)[number];
@@ -27,12 +36,13 @@ export type Row = {
   replacedBy: { unit: number; key: string; authority: Authority } | null;
 };
 
-/** What happened to it after it became an AI's decision. What ended it outranks who adopted it */
+/** What happened to it after it became an AI's decision. What ended it outranks who adopted it, and no longer active outranks the owner's adoption */
 export function outcomeOf(r: { lifecycle: string; authority: Authority }): Outcome {
   if (r.lifecycle === "withdrawn") return "withdrawn";
   if (r.lifecycle === "superseded") return "replaced";
-  if (r.authority === "owner") return "owner adopted";
-  return r.authority === "none" ? "taken back" : "unchanged";
+  if (r.authority === "none") return "taken back";
+  if (r.lifecycle === "candidate") return "deactivated";
+  return r.authority === "owner" ? "owner adopted" : "unchanged";
 }
 
 export async function outcomes(db: Reads, project: number): Promise<Row[]> {
@@ -79,10 +89,28 @@ export type Labelled = {
 
 const settle = (l: Labelled): Label => (l.claude === l.codex ? l.claude : "unknown");
 
+/** Each model's label is one of the fixed set and carries a reason, and each record is labelled once */
+function checkLabels(labels: Labelled[]): void {
+  const seen = new Set<number>();
+  for (const l of labels) {
+    if (seen.has(l.unit)) throw new Error(`u${l.unit} is labelled more than once`);
+    seen.add(l.unit);
+    for (const by of ["claude", "codex"] as const) {
+      if (!(LABELS as readonly unknown[]).includes(l[by]))
+        throw new Error(
+          `u${l.unit}: ${by}'s label ${JSON.stringify(l[by])} is not one of ${LABELS.join(", ")}`,
+        );
+      if (typeof l[`${by}_reason`] !== "string" || !l[`${by}_reason`].trim())
+        throw new Error(`u${l.unit}: ${by}'s label has no reason`);
+    }
+  }
+}
+
 export type Counts = { outcomes: Record<Outcome, number>; unchanged: Record<Label, number> };
 
 /** Counts the outcomes, and the settled labels of the unchanged records; an unchanged record without both labels is an error */
 export function count(rows: Row[], labels: Labelled[]): Counts {
+  checkLabels(labels);
   const unchanged = Object.fromEntries(LABELS.map((l) => [l, 0])) as Record<Label, number>;
   for (const r of rows.filter((x) => x.outcome === "unchanged")) {
     const l = labels.find((x) => x.unit === r.unit);
@@ -128,6 +156,8 @@ async function main(): Promise<void> {
   const missing = (["db", "project", "out"] as const).filter((k) => !values[k]);
   if (missing.length)
     throw new Error(`pass --check <file>, or ${missing.map((k) => `--${k}`).join(", ")} to extract`);
+  if (path.resolve(values.out as string) === path.resolve(values.db as string))
+    throw new Error("--out is the database --db reads; write the output elsewhere");
   const reader = openReader(values.db as string);
   try {
     const id = await projectId(reader, values.project as string);

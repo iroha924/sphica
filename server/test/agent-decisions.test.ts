@@ -4,9 +4,14 @@
 // What happened to each record that was ever active as an AI's decision, read from a real database, and how the labels are counted.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { count, type Labelled, outcomeOf, outcomes, type Row } from "../evals/agent-decisions/outcomes.ts";
 import { aiDecided, at, insert, message, project, run, tempDb } from "./temp-db.ts";
+
+const SCRIPT = path.join(import.meta.dirname, "..", "evals", "agent-decisions", "outcomes.ts");
 
 const LATER = at("2026-09-28T00:00:00Z");
 
@@ -117,7 +122,14 @@ test("outcomes: unchanged records are counted by their settled label, and a disa
       label(3, "no longer holds", "no longer holds"),
     ]),
     {
-      outcomes: { "owner adopted": 0, replaced: 1, withdrawn: 0, "taken back": 0, unchanged: 3 },
+      outcomes: {
+        "owner adopted": 0,
+        replaced: 1,
+        withdrawn: 0,
+        "taken back": 0,
+        deactivated: 0,
+        unchanged: 3,
+      },
       unchanged: { holds: 1, "no longer holds": 1, unknown: 1 },
     },
   );
@@ -135,4 +147,62 @@ test("outcomes: unchanged records are counted by their settled label, and a disa
       ]),
     /labels for records that are not unchanged: u4/,
   );
+});
+
+test("outcomes: a record moved back to a candidate while the AI's adoption stays is deactivated, not unchanged", () => {
+  assert.equal(outcomeOf({ lifecycle: "candidate", authority: "agent" }), "deactivated");
+  assert.equal(outcomeOf({ lifecycle: "candidate", authority: "owner" }), "deactivated");
+  assert.equal(outcomeOf({ lifecycle: "candidate", authority: "none" }), "taken back");
+});
+
+test("outcomes: labels outside the fixed set, missing a model's label, or given twice for one record are refused", () => {
+  const rows: Row[] = [
+    {
+      unit: 1,
+      key: "k1",
+      activeAt: LATER,
+      lifecycle: "active",
+      authority: "agent",
+      outcome: "unchanged",
+      replacedBy: null,
+    },
+  ];
+  const good = { unit: 1, claude: "holds", claude_reason: "r", codex: "holds", codex_reason: "r" };
+  const bad = (over: object) => [{ ...good, ...over }] as unknown as Labelled[];
+  assert.throws(
+    () => count(rows, bad({ claude: "hold", codex: "hold" })),
+    /u1: claude's label "hold" is not one of/,
+  );
+  assert.throws(() => count(rows, bad({ codex: undefined })), /u1: codex's label undefined is not one of/);
+  assert.throws(() => count(rows, bad({ codex_reason: "" })), /u1: codex's label has no reason/);
+  assert.throws(
+    () => count(rows, [...bad({}), ...bad({ codex: "unknown" })]),
+    /u1 is labelled more than once/,
+  );
+});
+
+test("outcomes: the command refuses to write its output over the database it reads", async () => {
+  const db = tempDb();
+  try {
+    project(db);
+    const before = fs.readFileSync(db.file);
+    const ran = spawnSync(
+      process.execPath,
+      [
+        SCRIPT,
+        "--db",
+        db.file,
+        "--project",
+        "git:github.com/o/r",
+        "--out",
+        path.join(path.dirname(db.file), ".", path.basename(db.file)),
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(ran.status, 0);
+    assert.match(ran.stderr, /--out is the database --db reads/);
+    assert.ok(fs.readFileSync(db.file).equals(before));
+  } finally {
+    await db.done();
+  }
 });
