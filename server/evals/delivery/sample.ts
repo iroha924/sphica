@@ -86,7 +86,7 @@ function instant(name: string, value: string): string {
   return d.toISOString();
 }
 
-function window(from: string, to: string): Window {
+export function window(from: string, to: string): Window {
   const w = { from: instant("from", from), to: instant("to", to) };
   if (w.from >= w.to) throw new Error(`--from must be before --to (${w.from}, ${w.to})`);
   return w;
@@ -100,7 +100,7 @@ function whole(name: string, value: string, min: number): number {
   return n;
 }
 
-function directory(name: string, value: string): string {
+export function directory(name: string, value: string): string {
   if (!fs.existsSync(value) || !fs.statSync(value).isDirectory())
     throw new Error(`--${name} ${value} is not a directory`);
   return value;
