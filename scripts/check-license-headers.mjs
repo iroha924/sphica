@@ -18,7 +18,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // What .gitignore keeps out of the repository (build output and tool state), and the frozen copies of old schemas that the migration
 // tests compare against, which stay as they are.
 const SKIP =
-  /^(?:plugin\/dist\/|plugin\/db\/|\.build\/|\.review-tmp\/|\.serena\/|\.stryker-tmp\/|reports\/|server\/migrate-[^/]*\.ts$|server\/test\/fixtures\/[^/]*\.sql$)/;
+  /^(?:plugin\/dist\/|plugin\/db\/|pane\/\.claude-plugin\/types\/|\.build\/|\.review-tmp\/|\.serena\/|\.stryker-tmp\/|reports\/|server\/migrate-[^/]*\.ts$|server\/test\/fixtures\/[^/]*\.sql$)/;
 
 const files = sourceFiles(root, SKIP);
 if (files.length === 0)

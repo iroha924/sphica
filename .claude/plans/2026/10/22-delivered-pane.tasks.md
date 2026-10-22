@@ -146,6 +146,17 @@ base: main
   - 結果: `cd server && node --test --test-name-pattern="any other shape" test/pane-report.test.ts` → 直す前は 1 件 fail（2 つの形を読み飛ばした）
   - 結果: `cd server && node --test test/pane-report.test.ts` → 4 件 pass。`bun run pane:check` → 0 で終わった。hooks.json に "hooks": {} を足すと「pane/hooks/hooks.json: it holds ...」で 1 件の指摘（戻してある）
 
+- [x] T12: Claude Code が mod の横に書く型と tsconfig.json を git と検査の対象から外し、release-status がどのスコープのペインも見る（全差分のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S4, S5
+  - 依存: T11（直す検査が要る）, T05（直す release-status が要る）
+  - 変更: `.gitignore`, `scripts/check-license-headers.mjs`, `scripts/check-english.mjs`, `scripts/release-status.mjs`
+  - red: `bun run check` → `claude --plugin-dir pane` で読み込んだ後、pane/.claude-plugin/types/ の 3 つの index.d.ts でヘッダーの検査が落ちる
+  - 完了条件: `bun run check` → 生成された型と tsconfig.json がある状態で 0 で終わる。`node scripts/release-status.mjs` → 「pane cache:」の行が出て落ちない
+  - コミット: `fix(scripts): skip the types Claude Code writes beside the pane, and check every pane install (T12)`
+  - 結果: `bun run check` → 直す前は license headers: 3 finding(s)（pane/.claude-plugin/types/claude-code{,-mcp,-tools}/index.d.ts）
+  - 結果: `bun run check` → 生成ファイルがある状態で 0 で終わった。`node scripts/release-status.mjs` → 「pane cache: not installed」を出して最後まで動いた（リリース前なので他の差分は出る）
+
 ## 記録
 
 - 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル
@@ -169,3 +180,5 @@ base: main
 - 2026-10-22 / T05 / Codex のレビュー（9e62623a）の F1（marketplace の source だけを変えるテストが、pane のエントリが無いため版の不一致で落ち、入力の検査を守っていない、再現済み）を受理 / 修正タスク T09 を足した
 - 2026-10-22 / T06・T08・T09 / Codex のレビュー（ba6643b4・f8a3aeb7・cf986c02） → F1（空白を含む名前の別モジュールの注記を読み飛ばす、再現済み）と F2（出荷後の確認に Sphica 本体の導入が無い）を受理、T09 は指摘なし / 修正タスク T10 を足した
 - 2026-10-22 / T10 / Codex のレビュー（b9508d30） → F1（./ で始まらない注記を読み飛ばす、再現済み）と F2（./register.tsx の後ろに別の名前が続く注記を register.tsx と読む、再現済み）を受理。注記を解析して穴を塞ぐ形は 3 回続けて抜けが出たので、レビューした 11 行との完全一致に変えた / 修正タスク T11 を足した
+- 2026-10-22 / T11 / Codex のレビュー（8573c1b3） → P1・権限・セキュリティの指摘なし。レビューの往復はここで収まった
+- 2026-10-22 / 全体 / 全差分の Codex のレビュー（origin/main...8573c1b3） → F1（mod を読み込むと生成される型でヘッダーの検査が落ちる、再現済み。A6 の実機確認でも同じものに当たった）と F2（release-status がユーザースコープのペインしか見ない）を受理 / 修正タスク T12 を足した

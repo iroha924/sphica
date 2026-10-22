@@ -31,7 +31,7 @@ const filesUnder = (dir, re) =>
 const ENGLISH = [
   ...filesUnder("server/src", /\.tsx?$/),
   ...filesUnder("scripts", /\.(c?js|mjs|m?ts|tsx)$/),
-  ...filesUnder("pane", /\.tsx?$/),
+  ...filesUnder("pane", /\.tsx?$/).filter((f) => !f.startsWith("pane/.claude-plugin/types/")),
   "server/test/pane-sift.test.ts",
   "server/test/assets.test.ts",
   "server/test/check-mcp-version.test.ts",
