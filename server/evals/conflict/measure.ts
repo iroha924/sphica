@@ -102,14 +102,20 @@ const B0 = "B0";
 const Z = 1.959964;
 const round = (x: number) => Math.round(x * 1e4) / 1e4;
 
-/** The Wilson score interval at 95%: unlike the normal one it stays inside [0, 1] and says something at 0 of n */
-export function wilson(k: number, n: number): Rate {
-  if (n === 0) return { k, n, rate: null, low: null, high: null };
+/** The Wilson score interval at 95%, unrounded, for n > 0: unlike the normal one it stays inside [0, 1] and says something at 0 of n */
+function interval(k: number, n: number): { low: number; high: number } {
   const p = k / n;
   const d = 1 + (Z * Z) / n;
   const mid = (p + (Z * Z) / (2 * n)) / d;
   const half = (Z * Math.sqrt((p * (1 - p)) / n + (Z * Z) / (4 * n * n))) / d;
-  return { k, n, rate: round(p), low: round(Math.max(0, mid - half)), high: round(Math.min(1, mid + half)) };
+  return { low: Math.max(0, mid - half), high: Math.min(1, mid + half) };
+}
+
+/** The Wilson interval rounded to four decimals, as stored and shown. A verdict compares the unrounded bound instead */
+export function wilson(k: number, n: number): Rate {
+  if (n === 0) return { k, n, rate: null, low: null, high: null };
+  const { low, high } = interval(k, n);
+  return { k, n, rate: round(k / n), low: round(low), high: round(high) };
 }
 
 /** The stage a positive prompt reached: shown, or why not. The first stage its conflict set reaches decides */
@@ -269,12 +275,12 @@ export function decide(s: Summary, bars: Bars, judged: string[]): Verdict {
   if (reasons.length) return { verdict: "hold", reasons, passing: [] };
   const base = s.methods[B0];
   if (!base) throw new Error(`the summary has no ${B0}`);
-  // Compared as counts over the same prompts, so no rounding decides a bar
+  // Compared as counts over the same prompts, and the unrelated bound recomputed from its counts, so no rounding decides a bar
   const passing = Object.entries(s.methods)
     .filter(([name]) => name !== B0 && judged.includes(name))
     .filter(([, m]) => {
       const { k, n } = m.positive.all.shown;
-      const high = m.ordinary_unrelated.high;
+      const u = m.ordinary_unrelated;
       return (
         n > 0 &&
         k >= bars.minShown * n - 1e-9 &&
@@ -282,8 +288,8 @@ export function decide(s: Summary, bars: Bars, judged: string[]): Verdict {
         m.vs_b0.lost === 0 &&
         m.positive.ja.shown.k >= base.positive.ja.shown.k &&
         m.positive.en.shown.k >= base.positive.en.shown.k &&
-        high !== null &&
-        high <= bars.maxUnrelatedUpper
+        u.n > 0 &&
+        interval(u.k, u.n).high <= bars.maxUnrelatedUpper
       );
     })
     .map(([name]) => name);

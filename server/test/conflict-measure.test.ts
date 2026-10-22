@@ -214,6 +214,15 @@ test("the verdict holds first, then advances a method only when it clears every 
     i === 8 ? { ...p, labels: { "3": "unrelated" as const }, results: { ...p.results, B1b: shows([3]) } } : p,
   );
   assert.equal(verdict(noisy).verdict, "not_now");
+  // 6 unrelated in 126 ordinary prompts: the bound is 0.10000168, just over 10%, though it is stored and shown as 0.1
+  const edge = passing(126).map((p, i) =>
+    i >= 8 && i < 14
+      ? { ...p, labels: { "3": "unrelated" as const }, results: { ...p.results, B1b: shows([3]) } }
+      : p,
+  );
+  const edgeSummary = summarize(edge, METHODS, "held_out");
+  assert.equal(edgeSummary.methods.B1b?.ordinary_unrelated.high, 0.1);
+  assert.equal(decide(edgeSummary, BARS, ["B1b", "B2"]).verdict, "not_now");
   // 4 of 8 shown is short of 60%, though still 2 more than B0 and none lost
   const short = passing().map((p, i) =>
     i === 1 || i === 2 ? { ...p, results: { ...p.results, B1b: none } } : p,
