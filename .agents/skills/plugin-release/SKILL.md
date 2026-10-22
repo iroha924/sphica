@@ -189,9 +189,9 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    Put the database at `<tmp>/.sphica/sphica.db` and run with `HOME=<tmp>`, `CODEX_HOME=$HOME/.codex` (the installed plugin and its trust), and the real
    Node directory first on `PATH` (mise shims look under `HOME`)
 7. The sphica-pane plugin installs from this repository's `pane/` at the release tag, not from npm, so the npm checks above do not reach it.
-   In a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, run `claude plugin marketplace add iroha924/sphica` and
-   `claude plugin install sphica-pane@sphica`, then `claude plugin list --json` must show `sphica-pane@sphica` at the release version and
-   enabled. Open a session there with a temporary `SPHICA_DB` (no `--plugin-dir`), run `/sphica-pane`, read a file with an anchored record,
+   In a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, run `claude plugin marketplace add iroha924/sphica`,
+   `claude plugin install sphica@sphica` (the pane only shows what Sphica's own hooks deliver), and `claude plugin install sphica-pane@sphica`,
+   then `claude plugin list --json` must show `sphica-pane@sphica` at the release version and enabled. Open a session there with a temporary `SPHICA_DB` (no `--plugin-dir`), run `/sphica-pane`, read a file with an anchored record,
    and check the pane lists that delivery. From the second release with the pane on, install the previous release first and check
    `claude plugin update sphica-pane@sphica` moves it to the new version. If the owner uses the pane, also update it on their machine
    (`claude plugin update sphica-pane@sphica`). A broken pane is fixed by the next release, never by removing its marketplace entry:

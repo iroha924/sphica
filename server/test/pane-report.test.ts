@@ -45,10 +45,12 @@ test("notes from any module other than register.tsx fail, whatever they say", ()
     ...allowedNotes(),
     "./extra.tsx calls: $.fs.read",
     "./extra.tsx gating hook without .catch: classic.Stop",
+    "./extra 2.tsx calls: $.fs.read",
   ];
   assert.deepEqual(differences(reported(validated(notes))), [
-    "./extra.tsx: a module the pane does not ship (calls: $.fs.read)",
-    "./extra.tsx: a module the pane does not ship (gating hook without .catch: classic.Stop)",
+    "a module the pane does not ship: ./extra.tsx calls: $.fs.read",
+    "a module the pane does not ship: ./extra.tsx gating hook without .catch: classic.Stop",
+    "a module the pane does not ship: ./extra 2.tsx calls: $.fs.read",
   ]);
 });
 

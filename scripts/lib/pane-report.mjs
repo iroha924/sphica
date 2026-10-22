@@ -29,14 +29,15 @@ export function reported(report) {
   const register = {};
   const others = [];
   for (const note of notes) {
-    const m = /^(\.\/\S+) ([a-z .]+): (.+)$/.exec(note);
-    if (!m) continue;
-    if (m[1] !== "./register.tsx") {
-      others.push(`${m[1]}: a module the pane does not ship (${m[2]}: ${m[3]})`);
+    // Any note about another module counts, whatever its name or wording: a name may hold spaces, so it is not parsed
+    if (note.startsWith("./") && !note.startsWith("./register.tsx ")) {
+      others.push(`a module the pane does not ship: ${note}`);
       continue;
     }
+    const m = /^\.\/register\.tsx ([a-z .]+): (.+)$/.exec(note);
+    if (!m) continue;
     // A matcher holds commas inside braces, so split only on commas outside them
-    register[m[2]] = m[3].split(/, (?![^{]*\})/).map((s) => s.trim());
+    register[m[1]] = m[2].split(/, (?![^{]*\})/).map((s) => s.trim());
   }
   return { register, others };
 }

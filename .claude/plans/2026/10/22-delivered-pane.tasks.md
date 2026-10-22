@@ -124,6 +124,17 @@ base: main
   - 結果: `bun run pane:check` → 0 で終わった（エントリの照合を含む）。path を panes に書き換えると「sphica-pane: source.path is "panes", not "pane"」で 1 件の指摘になった（戻してある）。`cd server && node --test test/pane-report.test.ts` → 4 件 pass
   - 結果: `bun run verify` → acceptance の前の段階（check・bundle・unit・sql:live・hooks:live・codex-trust:live）は通り、acceptance は 8 件が時間切れなどで落ちた。pmset の記録で 02:53:30 から 928 秒の熱によるスリープ（Dark Wake Thermal Emergency）があり、時間切れの所要時間と一致した。`bun run acceptance` → 流し直して 151 件 pass
 
+- [x] T10: 名前に空白を含む別モジュールの注記も失敗にし、出荷後の確認で Sphica 本体も入れる（T06・T08 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S4, S5
+  - 依存: T08（直す pane-report.mjs が要る）, T06（直す Skill の手順が要る）
+  - 変更: `scripts/lib/pane-report.mjs`, `server/test/pane-report.test.ts`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="any module" test/pane-report.test.ts` → `./extra 2.tsx calls: $.fs.read` を読み飛ばして落ちる
+  - 完了条件: `cd server && node --test test/pane-report.test.ts` → 4 件 pass。`bun run pane:check` → 0 で終わる
+  - コミット: `fix(scripts): fail on any other module's note and install Sphica in the arrival check (T10)`
+  - 結果: `cd server && node --test --test-name-pattern="any module" test/pane-report.test.ts` → 直す前は空白を含む名前の注記を読み飛ばして fail
+  - 結果: `cd server && node --test test/pane-report.test.ts` → 4 件 pass。`node scripts/check-pane.mjs` → 0 で終わった
+
 ## 記録
 
 - 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル
@@ -145,3 +156,4 @@ base: main
 - 2026-10-22 / T05 / review-shipping → コミットを止める指摘なし。tarball は 0.6.65 と版以外同じ、既存利用者の更新は Claude Code 2.1.139・2.1.306・Codex 0.163.0 で通った。指摘: 2.1.139 では sphica-pane が読み込みに失敗する（受理、T06 の README に最低版を書く）、Codex に sphica-pane を入れると毎セッション hooks.json の modules で警告が出る（plan のリスクどおり PR の段階で持ち主に聞く）、release の prepare が CLI も取得する（棄却: 取得元は他の依存と同じ npm で、OSV の扱いは tools/sandbox と同じ）
 - 2026-10-22 / T06 / エントリの照合は単体テストのため pane-report.mjs に entryProblems として置き、2.1.139 で読み込みに失敗する件（review-shipping の指摘）に合わせて pane の README にも最低版を書いた / 変更欄に pane-report.mjs・型宣言・テスト・pane/README.md を足した（前の値は 3 ファイル、新しい値は 7 ファイル）
 - 2026-10-22 / T05 / Codex のレビュー（9e62623a）の F1（marketplace の source だけを変えるテストが、pane のエントリが無いため版の不一致で落ち、入力の検査を守っていない、再現済み）を受理 / 修正タスク T09 を足した
+- 2026-10-22 / T06・T08・T09 / Codex のレビュー（ba6643b4・f8a3aeb7・cf986c02） → F1（空白を含む名前の別モジュールの注記を読み飛ばす、再現済み）と F2（出荷後の確認に Sphica 本体の導入が無い）を受理、T09 は指摘なし / 修正タスク T10 を足した
