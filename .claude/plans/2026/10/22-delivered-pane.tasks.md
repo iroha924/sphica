@@ -135,6 +135,17 @@ base: main
   - 結果: `cd server && node --test --test-name-pattern="any module" test/pane-report.test.ts` → 直す前は空白を含む名前の注記を読み飛ばして fail
   - 結果: `cd server && node --test test/pane-report.test.ts` → 4 件 pass。`node scripts/check-pane.mjs` → 0 で終わった
 
+- [x] T11: validate の注記を解析せず、レビューした 11 行と完全一致で比べ、hooks.json も `{"modules":["./register.tsx"]}` ちょうどに限る（T10 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T10（直す pane-report.mjs が要る）
+  - 変更: `scripts/lib/pane-report.mjs`, `scripts/lib/pane-report.d.mts`, `scripts/check-pane.mjs`, `server/test/pane-report.test.ts`
+  - red: `cd server && node --test --test-name-pattern="any other shape" test/pane-report.test.ts` → `extra.tsx calls: $.fs.read` と `./register.tsx extra.tsx calls: $.fs.read` を読み飛ばして fail
+  - 完了条件: `cd server && node --test test/pane-report.test.ts` → 4 件 pass（5 つの形の余分な注記、欠けた注記、変わった calls、hooks ファイルが 1 つでない報告がすべて落ちる）。`bun run pane:check` → 0 で終わり、hooks.json に `hooks` を足すと名指しで落ちる
+  - コミット: `fix(scripts): compare the pane's validate notes exactly and pin its hooks.json (T11)`
+  - 結果: `cd server && node --test --test-name-pattern="any other shape" test/pane-report.test.ts` → 直す前は 1 件 fail（2 つの形を読み飛ばした）
+  - 結果: `cd server && node --test test/pane-report.test.ts` → 4 件 pass。`bun run pane:check` → 0 で終わった。hooks.json に "hooks": {} を足すと「pane/hooks/hooks.json: it holds ...」で 1 件の指摘（戻してある）
+
 ## 記録
 
 - 2026-10-22 / T01 / 変更欄に足りないファイルがあった（pane/ を lint と format の対象に入れる oxlint.mjs・oxfmt.mjs、node が pane の .ts を ES module として読むための pane/package.json） / 変更欄に足した。前の値は 8 ファイル、新しい値は 11 ファイル。その後 `server/tsconfig.json` を外した（パッケージの入力で、変えるとバージョンを上げることになる。テストが sift.ts を import するので tsc はそれだけで検査する）。最終は 10 ファイル
@@ -157,3 +168,4 @@ base: main
 - 2026-10-22 / T06 / エントリの照合は単体テストのため pane-report.mjs に entryProblems として置き、2.1.139 で読み込みに失敗する件（review-shipping の指摘）に合わせて pane の README にも最低版を書いた / 変更欄に pane-report.mjs・型宣言・テスト・pane/README.md を足した（前の値は 3 ファイル、新しい値は 7 ファイル）
 - 2026-10-22 / T05 / Codex のレビュー（9e62623a）の F1（marketplace の source だけを変えるテストが、pane のエントリが無いため版の不一致で落ち、入力の検査を守っていない、再現済み）を受理 / 修正タスク T09 を足した
 - 2026-10-22 / T06・T08・T09 / Codex のレビュー（ba6643b4・f8a3aeb7・cf986c02） → F1（空白を含む名前の別モジュールの注記を読み飛ばす、再現済み）と F2（出荷後の確認に Sphica 本体の導入が無い）を受理、T09 は指摘なし / 修正タスク T10 を足した
+- 2026-10-22 / T10 / Codex のレビュー（b9508d30） → F1（./ で始まらない注記を読み飛ばす、再現済み）と F2（./register.tsx の後ろに別の名前が続く注記を register.tsx と読む、再現済み）を受理。注記を解析して穴を塞ぐ形は 3 回続けて抜けが出たので、レビューした 11 行との完全一致に変えた / 修正タスク T11 を足した

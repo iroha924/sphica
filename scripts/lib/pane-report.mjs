@@ -1,64 +1,40 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// What the sphica-pane mod may hook and call, held against the notes of claude plugin validate --json (scripts/check-pane.mjs).
+// What the sphica-pane mod may hook and call, held against claude plugin validate --json, and where the marketplace installs it from.
 
-/** What validate reports for ./register.tsx, line by line, as the reviewed mod has it */
-export const ALLOWED = {
-  hooks: [
-    "session.start",
-    "command.run{command=sphica-pane}",
-    "classic.SessionStart",
-    "classic.SubagentStart",
-    "classic.UserPromptSubmit",
-    "classic.UserPromptExpansion",
-    "classic.PreToolUse",
-    "ui.render{component=Pane, requestId=sphica-delivered}",
-  ],
-  calls: ["$.command.register", "$.state.get", "$.state.set", "$.ui.open", "$.ui.resolve"],
-  "state writes": ["sphica-pane.delivered"],
-  "state reads": ["sphica-pane.delivered"],
-};
+const CLASSIC = [
+  "classic.SessionStart",
+  "classic.SubagentStart",
+  "classic.UserPromptSubmit",
+  "classic.UserPromptExpansion",
+  "classic.PreToolUse",
+];
 
 /**
- * The `./<module> <label>: a, b` notes of a validate --json report: register.tsx's as lists by label, and every other module's whole,
- * since the pane ships no other module and one added to hooks.json would otherwise go unchecked
+ * Every note validate prints for the reviewed mod, whole. A new hook, call, state key, or module adds or changes a note, so the check
+ * compares the notes exactly instead of parsing them: a shape it does not know cannot slip past.
  */
-export function reported(report) {
-  const notes = (report.contents ?? []).flatMap((c) => c.notes ?? []);
-  const register = {};
-  const others = [];
-  for (const note of notes) {
-    // Any note about another module counts, whatever its name or wording: a name may hold spaces, so it is not parsed
-    if (note.startsWith("./") && !note.startsWith("./register.tsx ")) {
-      others.push(`a module the pane does not ship: ${note}`);
-      continue;
-    }
-    const m = /^\.\/register\.tsx ([a-z .]+): (.+)$/.exec(note);
-    if (!m) continue;
-    // A matcher holds commas inside braces, so split only on commas outside them
-    register[m[1]] = m[2].split(/, (?![^{]*\})/).map((s) => s.trim());
-  }
-  return { register, others };
-}
+export const EXPECTED_NOTES = [
+  `./register.tsx hooks: session.start, command.run{command=sphica-pane}, ${CLASSIC.join(", ")}, ui.render{component=Pane, requestId=sphica-delivered}`,
+  `./register.tsx hooks on ${CLASSIC.join(", ")} do not run in a plugin a person installs where an organization manages Claude Code: there, these events pass over the plugins you install, and only a plugin the organization lists in managed settings runs them`,
+  "./register.tsx answers its own command: command.run{command=sphica-pane}",
+  ...CLASSIC.map((event) => `./register.tsx gating hook with .catch: ${event}`),
+  "./register.tsx calls: $.command.register, $.state.get, $.state.set, $.ui.open, $.ui.resolve",
+  "./register.tsx state writes: sphica-pane.delivered",
+  "./register.tsx state reads: sphica-pane.delivered",
+];
 
-/** The differences between what validate reported and ALLOWED, one line each */
-export function differences({ register, others }) {
-  const lines = [];
-  for (const [label, allowed] of Object.entries(ALLOWED)) {
-    const seen = register[label];
-    if (!seen) {
-      lines.push(`${label}: validate reported none`);
-      continue;
-    }
-    const extra = seen.filter((x) => !allowed.includes(x));
-    const missing = allowed.filter((x) => !seen.includes(x));
-    if (extra.length) lines.push(`${label}: not allowed ${extra.join(", ")}`);
-    if (missing.length) lines.push(`${label}: missing ${missing.join(", ")}`);
-  }
-  for (const [label, seen] of Object.entries(register))
-    if (label.startsWith("gating hook without")) lines.push(`${label}: ${seen.join(", ")}`);
-  return [...lines, ...others];
+/** How validate --json's report differs from the one hooks file with EXPECTED_NOTES, one line each */
+export function noteProblems(report) {
+  const contents = Array.isArray(report?.contents) ? report.contents : [];
+  if (contents.length !== 1 || contents[0]?.type !== "hooks")
+    return [`validate checked ${JSON.stringify(contents.map((c) => c?.type))}, not one hooks file`];
+  const notes = Array.isArray(contents[0].notes) ? contents[0].notes : [];
+  return [
+    ...notes.filter((n) => !EXPECTED_NOTES.includes(n)).map((n) => `unexpected note: ${n}`),
+    ...EXPECTED_NOTES.filter((n) => !notes.includes(n)).map((n) => `missing note: ${n}`),
+  ];
 }
 
 export const PANE_SOURCE = {

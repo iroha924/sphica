@@ -4,54 +4,50 @@
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  ALLOWED,
-  differences,
-  entryProblems,
-  PANE_SOURCE,
-  reported,
-} from "../../scripts/lib/pane-report.mjs";
+import { EXPECTED_NOTES, entryProblems, noteProblems, PANE_SOURCE } from "../../scripts/lib/pane-report.mjs";
 
-const note = (label: string, items: readonly string[]) => `./register.tsx ${label}: ${items.join(", ")}`;
-const validated = (notes: string[]) => ({ contents: [{ notes }] });
-const allowedNotes = () => Object.entries(ALLOWED).map(([label, items]) => note(label, items));
+const validated = (notes: readonly string[]) => ({ contents: [{ type: "hooks", notes }] });
 
-test("the reviewed mod's notes match, a matcher's commas stay inside it", () => {
-  const got = reported(validated(allowedNotes()));
-  assert.deepEqual(got.register.hooks?.at(-1), "ui.render{component=Pane, requestId=sphica-delivered}");
-  assert.deepEqual(differences(got), []);
+test("the reviewed mod's notes pass, in any order", () => {
+  assert.deepEqual(noteProblems(validated(EXPECTED_NOTES)), []);
+  assert.deepEqual(noteProblems(validated([...EXPECTED_NOTES].reverse())), []);
 });
 
-test("an extra call, a missing hook, a hook without .catch, and notes in another shape all fail", () => {
-  const notes = allowedNotes().map((n) =>
-    n.startsWith("./register.tsx calls:") ? `${n}, $.fs.read` : n.replace("classic.PreToolUse, ", ""),
-  );
-  notes.push("./register.tsx gating hook without .catch: classic.Stop");
-  assert.deepEqual(differences(reported(validated(notes))), [
-    "hooks: missing classic.PreToolUse",
-    "calls: not allowed $.fs.read",
-    "gating hook without .catch: classic.Stop",
-  ]);
-  assert.deepEqual(differences(reported(validated(["register.tsx hooks= session.start"]))), [
-    "hooks: validate reported none",
-    "calls: validate reported none",
-    "state writes: validate reported none",
-    "state reads: validate reported none",
-  ]);
-});
-
-test("notes from any module other than register.tsx fail, whatever they say", () => {
-  const notes = [
-    ...allowedNotes(),
+test("a note in any other shape, a missing note, or a changed list fails", () => {
+  for (const extra of [
     "./extra.tsx calls: $.fs.read",
-    "./extra.tsx gating hook without .catch: classic.Stop",
     "./extra 2.tsx calls: $.fs.read",
-  ];
-  assert.deepEqual(differences(reported(validated(notes))), [
-    "a module the pane does not ship: ./extra.tsx calls: $.fs.read",
-    "a module the pane does not ship: ./extra.tsx gating hook without .catch: classic.Stop",
-    "a module the pane does not ship: ./extra 2.tsx calls: $.fs.read",
+    "extra.tsx calls: $.fs.read",
+    "./register.tsx extra.tsx calls: $.fs.read",
+    "./register.tsx gating hook without .catch: classic.Stop",
+  ])
+    assert.deepEqual(
+      noteProblems(validated([...EXPECTED_NOTES, extra])),
+      [`unexpected note: ${extra}`],
+      extra,
+    );
+  const calls = EXPECTED_NOTES.find((n) => n.startsWith("./register.tsx calls: ")) ?? "";
+  assert.deepEqual(
+    noteProblems(validated(EXPECTED_NOTES.map((n) => (n === calls ? `${calls}, $.fs.read` : n)))),
+    [`unexpected note: ${calls}, $.fs.read`, `missing note: ${calls}`],
+  );
+  assert.deepEqual(noteProblems(validated(EXPECTED_NOTES.filter((n) => n !== calls))), [
+    `missing note: ${calls}`,
   ]);
+});
+
+test("validate must have checked exactly one hooks file", () => {
+  assert.deepEqual(noteProblems({ contents: [] }), ["validate checked [], not one hooks file"]);
+  assert.deepEqual(
+    noteProblems({
+      contents: [
+        { type: "hooks", notes: EXPECTED_NOTES },
+        { type: "hooks", notes: [] },
+      ],
+    }),
+    ['validate checked ["hooks","hooks"], not one hooks file'],
+  );
+  assert.deepEqual(noteProblems(undefined), ["validate checked [], not one hooks file"]);
 });
 
 test("the marketplace entry must install pane/ from this repository at the release tag", () => {

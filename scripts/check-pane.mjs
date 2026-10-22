@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaude } from "./claude-cli.mjs";
 import { fail, finding, guard, report } from "./lib/finding.mjs";
-import { differences, entryProblems, reported } from "./lib/pane-report.mjs";
+import { entryProblems, noteProblems } from "./lib/pane-report.mjs";
 
 guard("pane", () => findings);
 const findings = [];
@@ -46,6 +46,17 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-pane-"));
   try {
     copyShipped(dir);
+    // The engine loads the modules hooks.json names, so a second module or command hooks beside it would run unchecked
+    const hooks = fs.readFileSync(path.join(dir, "hooks", "hooks.json"), "utf8");
+    if (JSON.stringify(JSON.parse(hooks)) !== JSON.stringify({ modules: ["./register.tsx"] }))
+      findings.push(
+        finding({
+          where: "pane/hooks/hooks.json",
+          what: `it holds ${JSON.stringify(JSON.parse(hooks))}, not only the module ./register.tsx`,
+          why: WHY,
+          fix: 'keep it { "modules": ["./register.tsx"] }',
+        }),
+      );
     const validate = runClaude(["plugin", "validate", "--strict", "--json", dir]);
     let parsed;
     try {
@@ -69,13 +80,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
           detail: JSON.stringify(parsed, null, 2),
         }),
       );
-    for (const line of differences(reported(parsed)))
+    for (const line of noteProblems(parsed))
       findings.push(
         finding({
           where: "pane/hooks/register.tsx",
           what: line,
           why: WHY,
-          fix: "remove it, or add it to ALLOWED in scripts/lib/pane-report.mjs after review",
+          fix: "undo the change, or update EXPECTED_NOTES in scripts/lib/pane-report.mjs after review",
         }),
       );
     const test = runClaude(["plugin", "test", dir]);
@@ -107,6 +118,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     );
   if (!report("pane", findings))
     console.log(
-      `pane: validate and test pass on the tracked pane/ files, and the mod does only what ALLOWED lists`,
+      `pane: validate and test pass on the tracked pane/ files, and validate prints only the reviewed notes (EXPECTED_NOTES)`,
     );
 }
