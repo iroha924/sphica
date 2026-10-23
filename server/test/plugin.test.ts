@@ -43,6 +43,17 @@ const REPO_PLUGIN = path.join(SRC, "..", "..", "plugin");
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-plugin-"));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+// observe() starts claude by name from this process's PATH. A fake one goes first, so no test runs the Claude Code installed on the
+// machine: started with this process's environment, it can leave files in the temp directory, which fails the test file. POSIX only
+// (a shebang script); verify does not run on Windows.
+const fakeClaudeBin = path.join(tmp, "fake-claude-bin");
+fs.mkdirSync(fakeClaudeBin);
+fs.writeFileSync(
+  path.join(fakeClaudeBin, "claude"),
+  `#!${process.execPath}\nprocess.stdout.write(process.argv.includes("--version") ? "2.1.288 (Claude Code)\\n" : "[]\\n");\n`,
+  { mode: 0o755 },
+);
+process.env.PATH = `${fakeClaudeBin}${path.delimiter}${process.env.PATH ?? ""}`;
 /** observe() reads CODEX_HOME and starts codex: never the owner's ~/.codex */
 const noCodex = { ...process.env, CODEX_HOME: path.join(tmp, "no-codex-home") };
 /** Builds a package with a manifest and one content file. */
