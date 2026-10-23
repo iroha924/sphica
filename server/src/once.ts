@@ -36,9 +36,14 @@ function ours(dir: string): boolean {
 export function markOnce(kind: string, key: string): boolean {
   const top = marksDir();
   const dir = path.join(top, kind);
+  // Only the mark's own exclusive create answers EEXIST for a seen key: a file in the way of either directory is no mark
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!ours(top)) return true;
+  } catch {
+    return true;
+  }
+  try {
     fs.writeFileSync(path.join(dir, sha256(key).toString("hex").slice(0, 24)), "", { flag: "wx" });
     return true;
   } catch (e) {

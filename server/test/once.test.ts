@@ -27,6 +27,19 @@ test("a directory others can write, or a link in its place, never counts a key a
   assert.equal(markOnce("pending", "a"), true);
   assert.equal(markOnce("pending", "a"), true, "said again rather than silenced");
 
+  // A file where the kind's directory goes makes the directory fail to be made, which is no mark either
+  ownTmpdir("sphica-once-file-");
+  fs.mkdirSync(marksDir());
+  fs.chmodSync(marksDir(), 0o777);
+  fs.writeFileSync(path.join(marksDir(), "pending"), "");
+  assert.equal(markOnce("pending", "a"), true);
+  assert.equal(markOnce("pending", "a"), true, "said again rather than silenced");
+
+  ownTmpdir("sphica-once-top-file-");
+  fs.writeFileSync(marksDir(), "");
+  assert.equal(markOnce("pending", "a"), true);
+  assert.equal(markOnce("pending", "a"), true, "said again rather than silenced");
+
   ownTmpdir("sphica-once-link-");
   const elsewhere = tempDir("sphica-once-elsewhere-");
   fs.chmodSync(elsewhere, 0o700);
