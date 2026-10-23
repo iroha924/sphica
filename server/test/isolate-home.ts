@@ -30,6 +30,9 @@ if (!process.env.SPHICA_TEST_ISOLATED) {
   // Either would point Sphica past the swapped HOME at the owner's database or queue
   delete process.env.SPHICA_DB;
   delete process.env.SPHICA_HOME;
+  // Clack draws its frame in ASCII when TERM is linux (a Linux console, and some containers), decided once on import; the tests check
+  // the Unicode frame every other terminal gets
+  if (process.env.TERM === "linux") delete process.env.TERM;
   // What a test file leaves in the temp directory fails it by name, as sql:reach would have seen it had the temp directory not moved here
   process.on("exit", () => {
     let left: string[] = [];
