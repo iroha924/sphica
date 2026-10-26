@@ -26,12 +26,12 @@ const LEFTOVERS = "a test that leaves files behind can make a later test pass or
 
 /**
  * Runs `command` with `args`; `problems` says why it did not pass cleanly, each with why it matters and the fix (empty when it did), beside the run's whole output. `remove`
- * is how the directory goes away, replaced only by tests.
+ * is how the directory goes away, and `uid` the user the tests run as, both replaced only by tests.
  */
 export function runTestsIsolated(
   command,
   args,
-  { cwd, env, maxBuffer = 64 * 1024 * 1024, remove = removeTree },
+  { cwd, env, maxBuffer = 64 * 1024 * 1024, remove = removeTree, uid = process.getuid?.() },
 ) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-test-run-")));
   const result = { stdout: "", stderr: "", problems: [], dir };
@@ -65,12 +65,20 @@ export function runTestsIsolated(
         why: UNFINISHED,
         fix: "run `bun run test` to see where it stops: a test may hang or run out of memory",
       });
-    else if (r.status !== 0)
+    else if (r.status !== 0) {
       result.problems.push({
         what: `the tests failed (exit ${r.status})`,
         why: "a failing test means the change broke what that test checks",
         fix: "fix each test marked `not ok` in the output below",
       });
+      // Root reads and removes a file whatever its mode, so the tests that make one unreadable or unremovable fail without a word on why
+      if (uid === 0)
+        result.problems.push({
+          what: "the tests ran as root",
+          why: "root reads and removes files whatever their permissions, so the tests that make a file unreadable or unremovable fail as root alone",
+          fix: "run the tests as a normal user, as CI does; a failure that remains as a normal user is the change's",
+        });
+    }
     let left;
     try {
       // npm keeps a compile cache in the temp directory, also for a child given only TMPDIR; it is a tool's cache, not a leftover
