@@ -23,8 +23,9 @@ const childEnv = (): NodeJS.ProcessEnv => {
   return env;
 };
 const whats = (r: ReturnType<typeof runTestsIsolated>) => r.problems.map((p) => p.what);
-const node = (script: string, maxBuffer?: number) =>
-  runTestsIsolated(process.execPath, ["-e", script], { cwd: ROOT, env: childEnv(), maxBuffer });
+/** Runs as a normal user's uid whoever runs the tests, so the problems listed do not depend on it */
+const node = (script: string, maxBuffer?: number, uid = 1000) =>
+  runTestsIsolated(process.execPath, ["-e", script], { cwd: ROOT, env: childEnv(), maxBuffer, uid });
 
 test("a clean run passes, its temp directory is the child's TMPDIR, TMP, and TEMP, and npm's compile cache there is no leftover", () => {
   const r = node(
@@ -44,6 +45,15 @@ test("what a run leaves in its temp directory fails it by name, together with a 
     "the tests left 2 entries in their temp directory: left-dir, left.txt",
   ]);
   assert.equal(fs.existsSync(r.dir), false);
+});
+
+test("a failed run as root says so, since the tests that deny a read or a removal fail only there; a passing one says nothing", () => {
+  assert.deepEqual(whats(node("process.exitCode = 1;", undefined, 0)), [
+    "the tests failed (exit 1)",
+    "the tests ran as root",
+  ]);
+  assert.deepEqual(whats(node("", undefined, 0)), []);
+  assert.deepEqual(whats(node("process.exitCode = 1;")), ["the tests failed (exit 1)"]);
 });
 
 test("a locked directory the run leaves is still removed", () => {
