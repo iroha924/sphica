@@ -27,6 +27,7 @@
         "evals/acceptance/shard-*.ts",
         "evals/asked/run.ts",
         "evals/delivery/sample.ts",
+        "evals/memory-check/codex.ts",
         "evals/order/run.ts",
         "evals/plugin/seed.ts",
         "evals/retrieval/run.ts",

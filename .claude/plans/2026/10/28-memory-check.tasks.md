@@ -64,21 +64,23 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 
 固定ケースを両ホストで各 3 回流し、結果をリポジトリに残す。
 
-- [ ] T03: Claude の plugin eval ケース 1〜7
+- [x] T03: Claude の plugin eval ケース 1〜7
   - 種別: 追加
   - 計画: S4
   - 依存: T01（流す Skill が要る）
   - 変更: `server/evals/plugin/cases/memory-check-*/`, `server/evals/memory-check/claude-runs.json`
   - 完了条件: `bun run eval:plugin` → memory-check の各ケースを 3 回流し、plan の A2 の期待をすべて満たす。結果が `server/evals/memory-check/claude-runs.json` にある
   - コミット: `test(evals): add memory-check plugin eval cases and Claude runs (T03)`
+  - 結果: `bun run eval:plugin --case 'memory-check-*' --ablation none --runs 1` → 8c512d68 の本文で 3 回流して 21/21 pass（Claude Code 2.1.312、claude-sonnet-5-5、1 回 $0.67〜0.69、76〜100 秒）。注入ケースは Edit・Write・Bash・NotebookEdit・record サーバーの書き込みツールの呼び出しが 0、CLAUDE.md は変わらず。結果は `server/evals/memory-check/claude-runs.json`
 
-- [ ] T04: Codex を使い捨ての CODEX_HOME で流す手順と、その実行
+- [x] T04: Codex を使い捨ての CODEX_HOME で流す手順と、その実行
   - 種別: 追加
   - 計画: S5
   - 依存: T03（同じケースの scaffold とメモリのファイルを使う）
-  - 変更: `server/evals/memory-check/codex.ts`, `server/evals/memory-check/codex-runs.json`
+  - 変更: `server/evals/memory-check/codex.ts`, `server/evals/memory-check/codex-runs.json`, `knip.json`
   - 完了条件: `node server/evals/memory-check/codex.ts --runs 3` → plan の A3 の期待を満たす。結果が `server/evals/memory-check/codex-runs.json` にある
   - コミット: `test(evals): run memory-check cases on Codex in a throwaway home (T04)`
+  - 結果: `node server/evals/memory-check/codex.ts --runs 3` → 8c512d68 の本文で 21/21 pass（codex-cli 0.163.0、1 回 14〜66 秒）。21 回すべてで呼ばれた MCP ツールは read サーバーの status・search・read だけ、ファイルの変更と記録の表の変化は 0。record サーバーはプラグインの設定に宣言して入れたが、各回で読み込まれていたかはイベントから確かめていない（未確認）
 
 - [x] T05: README の段落
   - 種別: 追加
@@ -107,3 +109,5 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T07 / 変更欄に `README.md`, `README.ja.md` を足した（前: check-ai-config.mjs と SKILL.md だけ） / Agent を外したことを、T05 で書いた README のホストの違いの行に反映するため
 2026-10-28 / T07 / Codex による 9349159e のレビューは指摘なし / 記録のみ
 2026-10-28 / T08 / Codex の eval で marker のケースが 2/3 落ちた。本文が Read / Glob / Grep の名前でしか読み方を書いておらず、frontmatter の disallowed-tools の Bash を Codex がそのまま守った / 修正タスク T08 を足した。T03・T04 の結果は直した本文で流し直す
+2026-10-28 / T04 / 変更欄に `knip.json` を足した（前: codex.ts と codex-runs.json だけ） / knip が新しい入口の codex.ts を未使用のファイルとして落としたため
+2026-10-28 / T08 / Codex による 8c512d68 のレビューは指摘なし / 記録のみ

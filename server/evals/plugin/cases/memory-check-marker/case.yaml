@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: memory-check-marker
+context:
+  scaffold_script: scaffold.sh
