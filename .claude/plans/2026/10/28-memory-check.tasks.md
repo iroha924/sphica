@@ -111,6 +111,16 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `fix(skills): open named memory files by path and read the argument's paths as extra places (T10)`
   - 結果: `bun run eval:plugin --case 'memory-check-*' --ablation none --runs 1` → 3 回とも 8/8 pass（$0.87〜0.89、88〜112 秒）。`node server/evals/memory-check/codex.ts --runs 3` → 24/24 pass、MCP は read サーバーの status・search・read だけ、ファイルと記録の表の変化は 0。途中の流し直しでは、Claude Code が `~/.codex` を飛ばす回（3 回中 2 回）と、eval の環境で Read が拒否されて何も読めない回があった。後者でも Skill は not checked と報告し、flag 0 件では終えていない。review-shipping の指摘 2 件（リンクを飛ばすのは Claude Code の Glob だけ、not checked の使いどころの食い違い）は文言だけ直した。上の eval はこの 2 件を直す前の本文で流した
 
+- [x] T11: 手元の Codex による全差分のレビュー（b703ce41）の指摘を直す
+  - 種別: 修正
+  - 計画: S3, S5
+  - 依存: T10（直す検査と Codex の eval）
+  - 変更: `scripts/check-ai-config.mjs`, `server/evals/memory-check/codex.ts`, `server/evals/memory-check/codex-runs.json`
+  - red: memory-check の status・search・read を allowed-tools から disallowed-tools へ移して `node scripts/check-ai-config.mjs` → 落ちずに終了コード 0
+  - 完了条件: 同じ red の操作で「allowed-tools lacks」が 3 件出て落ちる。`node server/evals/memory-check/codex.ts --runs 3` → 新しい検査（Codex home の AGENTS.md・memories の変更、記録の表の中身、失敗した judge は票にしない）で 24/24 pass。`mise exec -- bun run verify` → 0
+  - コミット: `fix(evals): watch more of what memory-check must leave alone and keep read tools required (T11)`
+  - 結果: `node scripts/check-ai-config.mjs` → red の操作で終了コード 0（実測）、直した後は「allowed-tools lacks」3 件で落ちる。`node server/evals/memory-check/codex.ts --runs 3` → 新しい検査で 24/24 pass、MCP は read サーバーだけ、ファイル（Codex home の AGENTS.md・memories を含む）と記録の表の中身の変化は 0、judge は 24 回とも有効な 3 票が PASS、残したコマンドに書き込みらしいもの（`>`・rm・mv・tee・sed -i・touch）は無い
+
 ## P3: 試行と採否
 
 同じ PR head で持ち主が両ホストで試し、結果を残して採否を決める。
@@ -136,3 +146,4 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T10 / ケース 8 は初め Claude Code に `~/.codex/AGENTS.md` を読ませる形だったが、Claude Code が Codex の場所を飛ばす回があり判定がぶれた / 各ホストが自分の場所として読むユーザーの指示ファイル（`~/.claude/CLAUDE.md`、Codex home の AGENTS.md）をどちらもリンクにする形に組み替えた。飛ばす件は既知の制約として PR と #216 に書く
 2026-10-28 / T09 / red の欄が検査器の書式（`<command>` → <期待>）に合っていなかった。T09 のコミットの前に検査の出力を見落とした / 中身は変えず書式だけを直した
 2026-10-28 / T10 / Codex による b26eb506 のレビュー: F1（ケース 8 はどちらか片方のファイルで通るので、Claude Code が `~/.codex/AGENTS.md` を読み落としても合格する） / 見送り。Claude Code が `~/.codex` を飛ばすことは既知の制約として書き、ケースは各ホストが自分の場所のリンクを開けることを見る。引数のパスはほかの 7 ケースが `~/notes` の行の判定で見ている
+2026-10-28 / T11 / 手元の Codex による全差分のレビュー（high）が P2 を 5 件出した: Codex home の入力を監視していない、記録の表を行数でしか比べない、書いてすぐ消すシェルコマンドを見逃す、読み取りの必須ツールを disallowed-tools に移すとすり抜ける（再現済み）、失敗した judge の出力を票に数える（再現済み） / 4 件を直した。3 件目はコマンドの一覧を結果に残すところまでにし、シェルの構文を解釈する判定は見送った（自前の解釈は直すたびに別の欠陥が出た記録がある）

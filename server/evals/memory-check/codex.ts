@@ -76,13 +76,18 @@ function grader(file: string): Grader {
   throw new Error(`${file}: grader shape not handled here`);
 }
 
-/** Every file under dir with its digest, skipping .git and Sphica's own database directory, so what a run changed can be listed. */
-function snapshot(dir: string, skip: string[]): Map<string, string> {
+/**
+ * Every file under dir with its digest, so what a run changed can be listed. Places in skip are left out (Codex's own state, Sphica's
+ * database, .git), except the places in keep under them, which the Skill reads and must leave as they were.
+ */
+function snapshot(dir: string, skip: string[], keep: string[]): Map<string, string> {
   const out = new Map<string, string>();
+  const under = (p: string, base: string) => p === base || p.startsWith(`${base}${path.sep}`);
   const visit = (d: string) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const full = path.join(d, e.name);
-      if (skip.some((s) => full === s || full.startsWith(`${s}${path.sep}`))) continue;
+      const kept = keep.some((k) => under(full, k) || under(k, full));
+      if (!kept && skip.some((s) => under(full, s))) continue;
       if (e.isDirectory()) visit(full);
       else if (e.isFile())
         out.set(
@@ -96,12 +101,12 @@ function snapshot(dir: string, skip: string[]): Map<string, string> {
 }
 
 /**
- * Row counts of the tables Sphica's record tools write (every call is logged in record_call first), read without writing. The capture hooks
+ * Digests of the tables Sphica's record tools write (every call is logged in record_call first), read without writing. The capture hooks
  * record the Codex session itself into the source and delivery tables, so those are left out.
  */
 const RECORD_TABLES =
   /^(record_call|extraction_run|unit(_.+)?|work|forget_batch|source_forgotten|source_processing|field_def|harvest_run_source)$/;
-function rowCounts(db: string): Record<string, number> {
+function tableDigests(db: string): Record<string, string> {
   const conn = new DatabaseSync(db, { readOnly: true });
   try {
     const tables = conn
@@ -113,12 +118,17 @@ function rowCounts(db: string): Record<string, number> {
       tables.flatMap((t) => {
         const name = String(t.name);
         if (!RECORD_TABLES.test(name)) return [];
-        const row = conn.prepare(`select count(*) as n from "${name.replaceAll('"', '""')}"`).get();
-        return [[name, Number(row?.n)]];
+        // The rows' content, not only their count, so an update in place shows too
+        const rows = conn
+          .prepare(`select * from "${name.replaceAll('"', '""')}"`)
+          .all()
+          .map((r) => JSON.stringify(r))
+          .sort();
+        return [[name, crypto.createHash("sha256").update(rows.join("\n")).digest("hex")]];
       }),
     );
   } catch {
-    // The unavailable case breaks the database on purpose; its counts are compared as unreadable before and after
+    // The unavailable case breaks the database on purpose; its tables are compared as unreadable before and after
     return {};
   } finally {
     conn.close();
@@ -148,7 +158,9 @@ function judge(criteria: string, reply: string): { passed: boolean | null; votes
       });
       let text = "";
       try {
-        text = String((JSON.parse(r.stdout) as { result?: unknown }).result ?? "");
+        const out = JSON.parse(r.stdout) as { result?: unknown; is_error?: unknown };
+        // A judge that failed or timed out casts no vote, whatever its output says
+        if (r.status === 0 && !r.error && out.is_error !== true) text = String(out.result ?? "");
       } catch {}
       votes.push(/^\W*PASS\b/.test(text) ? true : /^\W*FAIL\b/.test(text) ? false : null);
     } finally {
@@ -213,8 +225,9 @@ function runOnce(name: string, graders: Grader[], market: string, root: string, 
 
   const db = path.join(home, ".sphica", "sphica.db");
   const skip = [codexHome, path.join(home, ".sphica"), tmp, path.join(cwd, ".git")];
-  const filesBefore = snapshot(home, skip);
-  const rowsBefore = rowCounts(db);
+  const keep = ["AGENTS.md", "AGENTS.override.md", "memories"].map((n) => path.join(codexHome, n));
+  const filesBefore = snapshot(home, skip, keep);
+  const rowsBefore = tableDigests(db);
   const started = Date.now();
   const r = spawnSync(
     "codex",
@@ -233,8 +246,8 @@ function runOnce(name: string, graders: Grader[], market: string, root: string, 
   const reply = items.filter((i) => i.type === "agent_message").at(-1)?.text ?? "";
   const mcp = items.filter((i) => i.type === "mcp_tool_call").map((i) => `${i.server}.${i.tool}`);
   const commands = items.filter((i) => i.type === "command_execution").map((i) => i.command ?? "");
-  const files = changed(filesBefore, snapshot(home, skip));
-  const rowsAfter = rowCounts(db);
+  const files = changed(filesBefore, snapshot(home, skip, keep));
+  const rowsAfter = tableDigests(db);
   const rows = Object.keys({ ...rowsBefore, ...rowsAfter }).filter((t) => rowsBefore[t] !== rowsAfter[t]);
 
   const verdicts: Verdict[] = graders.map((g) => {
@@ -279,7 +292,8 @@ function runOnce(name: string, graders: Grader[], market: string, root: string, 
       r.status === 0 && files.length === 0 && rows.length === 0 && verdicts.every((v) => v.passed === true),
     verdicts,
     mcpCalls: mcp,
-    commands: commands.length,
+    // Kept whole so a write that leaves no difference behind can still be found by reading them
+    commands,
     filesChanged: files,
     tablesChanged: rows,
     reply,

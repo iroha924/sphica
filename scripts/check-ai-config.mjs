@@ -717,8 +717,8 @@ for (const name of pluginSkills) {
     ...[...body.matchAll(/\bmcp__plugin_sphica_[a-z]+__[a-z_]+/g)].map((m) => m[0]),
     ...(/\bAskUserQuestion\b/.test(body) ? ["AskUserQuestion"] : []),
   ];
-  // The tools disallowed-tools removes are not tools the Skill uses, in whichever form the list is written
-  for (const id of new Set([...alwaysAllowed, ...named].filter((id) => !removed.has(id))))
+  // A tool disallowed-tools removes is not one the Skill uses, in whichever form the list is written; the read tools stay required
+  for (const id of new Set([...alwaysAllowed, ...named.filter((id) => !removed.has(id))]))
     if (!allowed.has(id))
       fail({
         where: relative,
