@@ -50,6 +50,16 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `fix(skills): keep memory-check's removals required and cover search failures (T07)`
   - 結果: `node scripts/check-ai-config.mjs` → red の操作で終了コード 0（実測）。直した後は、全部消すと「disallowed-tools does not remove ...」が 11 件、Edit だけ消すと 1 件で落ち、元に戻すと 0。READ_ONLY_SKILLS の名前が plugin/skills に無ければ落ちる検査も足した。review-shipping（指摘 0 件）の補足を受けて、サブエージェントから書き込めないよう Agent も外し、両 README の記述を合わせた
 
+- [x] T08: Codex がファイルを読む手段を本文に書く
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T07（直す本文）
+  - 変更: `plugin/skills/memory-check/SKILL.md`
+  - red: `node server/evals/memory-check/codex.ts --runs 3` → marker のケースが 3 回中 2 回、「Read / Glob が無く、シェルは禁じられている」として何も読まずに終わる（2026-10-28 実測）
+  - 完了条件: `node server/evals/memory-check/codex.ts --runs 3 --case memory-check-marker` → 3/3 pass。`node scripts/check-ai-config.mjs` → 0
+  - コミット: `fix(skills): tell Codex to read memory files with read-only shell commands (T08)`
+  - 結果: red は `node server/evals/memory-check/codex.ts --runs 3` → marker 1/3（2 回は何も読まずに終了）。直した後 `node server/evals/memory-check/codex.ts --runs 3 --case memory-check-marker` → 3/3 pass（40s / 37s / 40s）。`node scripts/check-ai-config.mjs` → 0。review-shipping の指摘（Windows の PowerShell に head・wc が無い）を受けて PowerShell での読み方も足した
+
 ## P2: 評価
 
 固定ケースを両ホストで各 3 回流し、結果をリポジトリに残す。
@@ -95,3 +105,5 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T01, T02 / 検査が Skill の本文全体から MCP ツール名を拾うので、disallowed-tools に並べた record のツールが allowed-tools に無いとして落ちた / T02 の検査の変更を T01 と同じコミットに入れた（件名は T01, T02）
 2026-10-28 / T07 / Codex による 002c5352 のレビューが F1（record のツールを全部消すと検査をすり抜ける、再現済み）、F2（status 成功後の search の失敗時の扱いが無い）、F3（パスとキーに文字の置き換えが無い）を出した / 3 件とも採り、修正タスク T07 を足して直した。eval は直した本文で 3 回流し直す
 2026-10-28 / T07 / 変更欄に `README.md`, `README.ja.md` を足した（前: check-ai-config.mjs と SKILL.md だけ） / Agent を外したことを、T05 で書いた README のホストの違いの行に反映するため
+2026-10-28 / T07 / Codex による 9349159e のレビューは指摘なし / 記録のみ
+2026-10-28 / T08 / Codex の eval で marker のケースが 2/3 落ちた。本文が Read / Glob / Grep の名前でしか読み方を書いておらず、frontmatter の disallowed-tools の Bash を Codex がそのまま守った / 修正タスク T08 を足した。T03・T04 の結果は直した本文で流し直す

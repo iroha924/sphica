@@ -27,10 +27,17 @@ changes nothing**: the owner decides what to fix.
 
 ## Flow
 
-Pass the repository root as `cwd` to every Sphica tool. Use only `status`, `search`, `read`, `overview`, and the file reading tools. In
-Claude Code, Bash, subagents, and every write tool are removed until the user's next message, so run the whole check in one turn without asking; they
-come back once the user replies, and in Codex nothing removes them. Either way, do not run shell commands that write, and do not call any
-tool of Sphica's record server.
+Pass the repository root as `cwd` to every Sphica tool. Use only `status`, `search`, `read`, `overview`, and a way to read files, which
+differs by host:
+
+- **Claude Code:** the Read, Glob, and Grep tools. Bash, subagents, and every write tool are removed until the user's next message, so run
+  the whole check in one turn without asking; they come back once the user replies
+- **Codex:** it has no file tools of its own, so read with shell commands that only read (`ls`, `find`, `cat`, `head`, `wc`, `rg`; in PowerShell on Windows,
+  `Get-ChildItem -File`, `Get-Content`, and `Get-Item` for the size). The
+  `disallowed-tools` line above is Claude Code's setting and does not take the shell away here. Never run a command that writes, moves, or
+  deletes anything
+
+In either host, do not call any tool of Sphica's record server.
 
 1. **Check Sphica.** Call `status`. When it fails, report Sphica unavailable, list every place as not checked, and stop. Do not run init,
    migrate, or reinstall, and do not end with "0 flags"
@@ -65,11 +72,11 @@ Keep each place's scope (user-wide or this repository) with every flag from it.
 
 ## Limits
 
-- At most 50 files per place and 512 KiB in all, counted on what was read. A file the Read tool refuses as too large is not checked; do not
-  page through it with offset and limit
-- List with Glob using narrow patterns: `*.md` in the auto memory directory; `*`, `*/*`, and `*/*/*` in Codex's memories (depth 3). Glob
-  does not return symbolic links, so links inside a memory directory are not read; say so once, without a count. When Glob stops at its
-  result cap, say the place was only partly listed
+- At most 50 files per place and 512 KiB in all, counted on what was read. A file over 256 KiB is not checked (the Read tool refuses it;
+  in Codex, look at its size before reading); do not read it in parts
+- List with narrow patterns: `*.md` in the auto memory directory; `*`, `*/*`, and `*/*/*` in Codex's memories (depth 3). Symbolic links
+  inside a memory directory are not read (Glob does not return them; in Codex, list regular files only); say so once, without a count. When
+  a listing stops at a result cap, say the place was only partly listed
 - At most 80 `search` calls and 40 `read` calls per run; a continued page counts as a read. Candidates left when a limit is reached are not
   checked
 - When a listing fails, give the place and the reason, never an invented count
