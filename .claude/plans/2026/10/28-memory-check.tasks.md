@@ -115,13 +115,14 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 
 同じ PR head で持ち主が両ホストで試し、結果を残して採否を決める。
 
-- [ ] T06: 持ち主の試行の記録
+- [x] T06: 持ち主の試行の記録
   - 種別: 追加
   - 計画: S7
   - 依存: T02（試す head に検査が入っている）, T04（両ホストの固定ケースが通っている）, T05（試す head を揃える）
   - 変更: `server/evals/memory-check/trial.json`
   - 完了条件: `node -e "JSON.parse(require('fs').readFileSync('server/evals/memory-check/trial.json','utf8'))"` → 終了コード 0。その中に、両ホストの flag ごとの判定（新しく知ったもの / 既知、正しい / 誤り / 判断保留）、10 単位の抜き取り、重複、失敗、所要時間、ツールの呼び出し回数がある。#216 へのコメントの文面を持ち主が承認している
   - コミット: `test(evals): record the owner's memory-check trial (T06)`
+  - 結果: `node -e "JSON.parse(...trial.json...)"` → 終了コード 0。持ち主の手元で両ホストを 1 回ずつ流した（Claude Code 5 分 15 秒・$2.38・flag 1、Codex 5 分 25 秒・flag 1・search 80 回で打ち切り）。持ち主のラベルはすべて「わからない」、採否は Claude に任され、採った。#216 へのコメントは持ち主が文面を承認して投稿した（https://github.com/iroha924/sphica/issues/216#issuecomment-6468743458）
 
 ## 記録
 2026-10-28 / T01, T02 / 検査が Skill の本文全体から MCP ツール名を拾うので、disallowed-tools に並べた record のツールが allowed-tools に無いとして落ちた / T02 の検査の変更を T01 と同じコミットに入れた（件名は T01, T02）
@@ -134,3 +135,4 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T09 / GitHub の Codex が 85c17196 に 3 件（judge の環境の分離、judge の定足数、ファイル変更で落とす）を出した / 3 件とも直した。judge の HOME は Claude のログインに要るので残し、ツール・設定・MCP の無い起動で届かないことを見送りの理由として PR 本文に書く
 2026-10-28 / T10 / ケース 8 は初め Claude Code に `~/.codex/AGENTS.md` を読ませる形だったが、Claude Code が Codex の場所を飛ばす回があり判定がぶれた / 各ホストが自分の場所として読むユーザーの指示ファイル（`~/.claude/CLAUDE.md`、Codex home の AGENTS.md）をどちらもリンクにする形に組み替えた。飛ばす件は既知の制約として PR と #216 に書く
 2026-10-28 / T09 / red の欄が検査器の書式（`<command>` → <期待>）に合っていなかった。T09 のコミットの前に検査の出力を見落とした / 中身は変えず書式だけを直した
+2026-10-28 / T10 / Codex による b26eb506 のレビュー: F1（ケース 8 はどちらか片方のファイルで通るので、Claude Code が `~/.codex/AGENTS.md` を読み落としても合格する） / 見送り。Claude Code が `~/.codex` を飛ばすことは既知の制約として書き、ケースは各ホストが自分の場所のリンクを開けることを見る。引数のパスはほかの 7 ケースが `~/notes` の行の判定で見ている

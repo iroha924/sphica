@@ -1,0 +1,89 @@
+{
+  "at": "2026-10-28",
+  "head": "85c17196 (the Skill text of 8c512d68)",
+  "note": "The owner's trial on the owner's machine, run by Claude on the owner's request. Lines from the owner's files are not quoted here; places use ~ for the home directory.",
+  "runs": [
+    {
+      "host": "Claude Code 2.1.312",
+      "command": "claude -p --plugin-dir plugin \"/sphica:memory-check\" (repository root as cwd)",
+      "seconds": 315,
+      "costUsd": 2.38,
+      "turns": 106,
+      "calls": { "status": 1, "search": 61, "read": 11, "Read": 25, "Glob": 6 },
+      "claimsChecked": 48,
+      "flags": 1,
+      "namesRejectedOption": { "agrees": 2, "history": 0, "unclear": 0 },
+      "unclear": 3,
+      "recordPairsInConflict": 2,
+      "limitReached": false
+    },
+    {
+      "host": "codex-cli 0.163.0",
+      "command": "codex exec -s read-only '$sphica:memory-check ~/.codex/AGENTS.md ~/.claude/CLAUDE.md ~/.claude/projects/<project>/memory' with the packed plugin in a throwaway CODEX_HOME and the owner's HOME",
+      "seconds": 325,
+      "calls": { "status": 1, "search": 80, "read": 19, "shell": 17 },
+      "claimsChecked": 37,
+      "flags": 1,
+      "namesRejectedOption": { "agrees": 3, "history": 0, "unclear": 1 },
+      "unclear": 2,
+      "recordPairsInConflict": 0,
+      "limitReached": "search (80); the remaining claims were reported as not checked"
+    }
+  ],
+  "flags": [
+    {
+      "host": "codex",
+      "place": "~/.claude/projects/<project>/memory/version-bump-in-first-package-commit.md:15",
+      "record": "trace:5ab9a961-169c-4a15-a601-d9efa44c73af/plan-361",
+      "category": "contradicts",
+      "ownerLabel": "unknown",
+      "claudeCheck": "true: `bun run release:plan -- --base v0.6.68` printed `compared: v0.6.68..index (HEAD ...)` on 2026-10-28, while the line says the compared line names HEAD"
+    },
+    {
+      "host": "claude-code",
+      "place": "~/.claude/CLAUDE.md:130",
+      "record": "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/fork-hardening-both, trace:aa6e8cc6-f1ed-4c37-859e-26b1a53d6975/process-tiers-375",
+      "category": "contradicts",
+      "ownerLabel": "unknown",
+      "claudeCheck": "likely wrong: a user-wide rule against project records; the same file says project instructions take precedence"
+    }
+  ],
+  "recordPairsInConflict": [
+    {
+      "records": [
+        "trace:e719121b-5987-4cae-ad46-9b2ce03f6ae5/owner-asks-codex-review",
+        "trace:0575e67d-804a-4b17-8540-dcb876f9c848/read-codex-comments-myself"
+      ],
+      "note": "both active with no replacement link; the instruction files follow the later one"
+    },
+    {
+      "records": [
+        "trace:d4d84a7c-b41c-496b-a402-8017d2acdbf6/plans-kept-until-done",
+        "trace:aa6e8cc6-f1ed-4c37-859e-26b1a53d6975/process-tiers-375"
+      ],
+      "note": "both active with no replacement link; CLAUDE.md follows the later one"
+    }
+  ],
+  "spotCheck": {
+    "seed": 216,
+    "units": [
+      "AGENTS.md:11",
+      "CLAUDE.md:23",
+      "CLAUDE.md:28",
+      "CLAUDE.md:40",
+      "memory caffeinate-long-checks",
+      "memory gate-commit-on-checks",
+      "memory one-verify-per-tree",
+      "memory plain-japanese-terms",
+      "memory security-fix-push-late",
+      "memory stage-explicit-paths"
+    ],
+    "ownerLabel": "unknown"
+  },
+  "duplicates": "none: the two hosts flagged different lines",
+  "failures": [
+    "Claude Code reported ~/.codex/AGENTS.md as not found: it is a symbolic link and Glob returns no links (fixed in T10, case memory-check-symlink)",
+    "Codex stopped at the 80-search limit with claims left unchecked (limit raised to 120 in T10)"
+  ],
+  "decision": "The owner answered unknown to every label and left the adoption to Claude. Claude adopted it, raising the search limit to 120 and opening named files by path."
+}
