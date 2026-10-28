@@ -60,13 +60,14 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - 完了条件: `node server/evals/memory-check/codex.ts --runs 3` → plan の A3 の期待を満たす。結果が `server/evals/memory-check/codex-runs.json` にある
   - コミット: `test(evals): run memory-check cases on Codex in a throwaway home (T04)`
 
-- [ ] T05: README の段落
+- [x] T05: README の段落
   - 種別: 追加
   - 計画: S6
   - 依存: T01（書くホストの違いが実測で決まる）
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `mise exec -- bun run verify:ai` → 終了コード 0（Markdown の構造とリンク）。両 README に、ホストのメモリとの関係、`memories.disable_on_external_context` の意味、ホストの違いの 3 点がある
   - コミット: `docs(readme): describe memory-check and how Sphica relates to host memories (T05)`
+  - 結果: `node scripts/check-ai-config.mjs` → 0、`node scripts/check-links.mjs` → 62 ファイルのリンクがすべて解決。両 README の「できること」に機能と `memories.disable_on_external_context` の意味、「まだできないこと」にホストの違いを 1 行ずつ足した
 
 ## P3: 試行と採否
 
