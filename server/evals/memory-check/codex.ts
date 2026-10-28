@@ -20,6 +20,8 @@ const REPO = path.resolve(HERE, "..", "..", "..");
 const CASES = path.join(REPO, "server", "evals", "plugin", "cases");
 const PROMPT = "$sphica:memory-check ~/notes";
 const JUDGE_VOTES = 3;
+/** A verdict needs this many votes the same way; votes that failed to come back never make up the difference */
+const JUDGE_QUORUM = 2;
 
 const { values } = parseArgs({
   options: {
@@ -135,8 +137,11 @@ function judge(criteria: string, reply: string): { passed: boolean | null; votes
   for (let i = 0; i < JUDGE_VOTES; i++) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-check-judge-"));
     try {
+      // HOME stays for Claude's login; the judge has no tools, settings, or MCP servers, and Sphica's own overrides are dropped
+      const { SPHICA_DB, SPHICA_HOME, CODEX_HOME, ...env } = process.env;
       const r = spawnSync("claude", [...GRADER_ARGS.claude, "--model", "claude-sonnet-5-5"], {
         cwd: dir,
+        env,
         input: prompt,
         encoding: "utf8",
         timeout: 5 * 60_000,
@@ -152,7 +157,7 @@ function judge(criteria: string, reply: string): { passed: boolean | null; votes
   }
   const yes = votes.filter((v) => v === true).length;
   const no = votes.filter((v) => v === false).length;
-  return { passed: yes > no ? true : no > yes ? false : null, votes };
+  return { passed: yes >= JUDGE_QUORUM ? true : no >= JUDGE_QUORUM ? false : null, votes };
 }
 
 /** The packed plugin, unpacked under a local marketplace directory Codex can add */
@@ -269,8 +274,9 @@ function runOnce(name: string, graders: Grader[], market: string, root: string, 
     run: n,
     exit: r.status,
     seconds,
-    // A record table that changed fails the run whatever the graders say: the Skill must not write records
-    passed: r.status === 0 && rows.length === 0 && verdicts.every((v) => v.passed === true),
+    // A changed file or record table fails the run whatever the graders say: the Skill must not write
+    passed:
+      r.status === 0 && files.length === 0 && rows.length === 0 && verdicts.every((v) => v.passed === true),
     verdicts,
     mcpCalls: mcp,
     commands: commands.length,

@@ -91,6 +91,16 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `docs(readme): describe memory-check and how Sphica relates to host memories (T05)`
   - 結果: `node scripts/check-ai-config.mjs` → 0、`node scripts/check-links.mjs` → 62 ファイルのリンクがすべて解決。両 README の「できること」に機能と `memories.disable_on_external_context` の意味、「まだできないこと」にホストの違いを 1 行ずつ足した
 
+- [x] T09: GitHub の Codex のレビュー（85c17196）の指摘を Codex の eval に入れる
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T04（直すスクリプト）
+  - 変更: `server/evals/memory-check/codex.ts`
+  - red: `node -e` で codex.ts の judge の集計式に `[true, null, null]` を渡す → `true`（失敗した 2 票を数えず 1 票で通る）
+  - 完了条件: 同じ集計で `[true, null, null]` → `null`、`[true, true, null]` → `true`。judge の子プロセスに SPHICA_DB・SPHICA_HOME・CODEX_HOME を渡さない。ファイルが変わった回は判定によらず落ちる。`mise exec -- bun run verify` → 0
+  - コミット: `fix(evals): require a judge quorum and fail memory-check runs that change files (T09)`
+  - 結果: `node -e` の集計で red は `true`、直した後は `[true,null,null]` → `null`、`[true,true,null]` → `true`、`[false,false,true]` → `false`。記録済みの 21 回はすべて有効な 3 票が PASS でファイルの変更も無いので、新しい規則でも結果は同じ（流し直していない）
+
 ## P3: 試行と採否
 
 同じ PR head で持ち主が両ホストで試し、結果を残して採否を決める。
@@ -111,3 +121,4 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T08 / Codex の eval で marker のケースが 2/3 落ちた。本文が Read / Glob / Grep の名前でしか読み方を書いておらず、frontmatter の disallowed-tools の Bash を Codex がそのまま守った / 修正タスク T08 を足した。T03・T04 の結果は直した本文で流し直す
 2026-10-28 / T04 / 変更欄に `knip.json` を足した（前: codex.ts と codex-runs.json だけ） / knip が新しい入口の codex.ts を未使用のファイルとして落としたため
 2026-10-28 / T08 / Codex による 8c512d68 のレビューは指摘なし / 記録のみ
+2026-10-28 / T09 / GitHub の Codex が 85c17196 に 3 件（judge の環境の分離、judge の定足数、ファイル変更で落とす）を出した / 3 件とも直した。judge の HOME は Claude のログインに要るので残し、ツール・設定・MCP の無い起動で届かないことを見送りの理由として PR 本文に書く
