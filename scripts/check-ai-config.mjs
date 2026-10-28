@@ -680,6 +680,13 @@ for (const name of pluginSkills) {
   // allowed-tools pre-approves tools for the Skill's own turn; a tool the body names but the list lacks is denied in a headless run.
   // Reviewers under reviewers/ get their tools from the launch table in SKILL.md, so their names are checked through SKILL.md.
   const referenceDir = path.join(skillDirectory, name, "references");
+  // disallowed-tools names each tool, since whether a wildcard reaches MCP tools there is unverified
+  const removed = new Set(
+    String(fields["disallowed-tools"] ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
   const body = [
     source,
     ...(fs.existsSync(referenceDir)
@@ -699,7 +706,8 @@ for (const name of pluginSkills) {
     ...[...body.matchAll(/\bmcp__plugin_sphica_[a-z]+__[a-z_]+/g)].map((m) => m[0]),
     ...(/\bAskUserQuestion\b/.test(body) ? ["AskUserQuestion"] : []),
   ];
-  for (const id of new Set([...alwaysAllowed, ...named]))
+  // The tools disallowed-tools removes are not tools the Skill uses, in whichever form the list is written
+  for (const id of new Set([...alwaysAllowed, ...named].filter((id) => !removed.has(id))))
     if (!allowed.has(id))
       fail({
         where: relative,
@@ -715,6 +723,35 @@ for (const name of pluginSkills) {
         why: "an approval for a tool that does not exist hides a renamed or removed tool",
         fix: `remove ${id}, or name the tool as the server registers it`,
       });
+
+  for (const id of removed) {
+    if (allowed.has(id))
+      fail({
+        where: relative,
+        what: `${id} is in both allowed-tools and disallowed-tools`,
+        why: "the Skill would approve a tool it says it never uses",
+        fix: `remove ${id} from one of them`,
+      });
+    if (id.startsWith("mcp__plugin_sphica_") && ![...toolId.values()].includes(id))
+      fail({
+        where: relative,
+        what: `disallowed-tools names ${id}, which no Sphica server registers`,
+        why: "a removal of a tool that does not exist hides a renamed tool that stays available",
+        fix: `remove ${id}, or name the tool as the server registers it`,
+      });
+  }
+  // A Skill that removes any record tool keeps the whole record server out, so a tool added to that server later cannot slip in
+  if ([...removed].some((id) => id.startsWith("mcp__plugin_sphica_record__")))
+    for (const t of sphicaTools.get("record") ?? []) {
+      const id = toolId.get(t);
+      if (!removed.has(id))
+        fail({
+          where: relative,
+          what: `disallowed-tools removes record tools but not ${id}`,
+          why: "the Skill must not write records, and a record tool left out stays callable while it runs",
+          fix: `add ${id} to disallowed-tools`,
+        });
+    }
 
   // Codex ignores disable-model-invocation, so explicit-only invocation also needs openai.yaml.
   const policy = path.join(skillDirectory, name, "agents/openai.yaml");

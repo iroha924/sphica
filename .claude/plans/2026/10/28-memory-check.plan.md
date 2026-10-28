@@ -49,13 +49,21 @@ approved_at: 2026-10-28
   - CLAUDE.md・AGENTS.md・`~/.claude/CLAUDE.md`、それに 5c93fa25 で直した古い行（#216 の 10-12 のコメントにある唯一の実例）の計 231 行: 却下された選択肢への一致は 0 件。古い行は拾えなかった
 - 同じ古い行の言葉で `search` を流すと（kinds decision + constraint、active）、それと食い違う `read-codex-comments-myself` が唯一のヒットとして出た（2026-10-28）
 - Claude Code の auto memory は `~/.claude/projects/<project>/memory/`（`MEMORY.md` と topic file）。`<project>` は git リポジトリから決まるがエンコードは非公開。`autoMemoryDirectory`（どの設定スコープでも可）と、`CLAUDE_CONFIG_DIR` に並べた `CLAUDE_CODE_PROJECT_DIR_NAME` で変わる（https://code.claude.com/docs/en/memory 、2026-10-28 取得）。メモリのディレクトリはシステムプロンプトでエージェントに伝えられる（このセッションで観測。ドキュメントには記載なし）
-- Claude Code の Skill の `allowed-tools` は事前承認で、ツールを制限しない。`disallowed-tools` は Skill の実行中にツールを外す（https://code.claude.com/docs/en/skills 、2026-10-28 取得）。MCP ツールにワイルドカードが効くかは未検証
+- Claude Code の Skill の `allowed-tools` は事前承認で、ツールを制限しない。`disallowed-tools` は Skill の実行中にツールを外す（https://code.claude.com/docs/en/skills 、2026-10-28 取得）。MCP ツールにワイルドカードが効くかは未検証（名前で並べるので使わない）
 - Codex の memories は `$CODEX_HOME/memories/`（既定は `~/.codex/memories/`）。マシンに 1 つで、リポジトリごとではない。既定ではオフで、ファイル形式は非公開。summaries・durable entries・recent inputs・supporting evidence を含む（https://learn.chatgpt.com/docs/customization/memories 、2026-10-28 取得）。持ち主の `~/.codex/memories/` は空
 - Codex のユーザー指示は、Codex home の `AGENTS.override.md` があればそれを、無ければ `AGENTS.md` を読む（https://learn.chatgpt.com/docs/agent-configuration/agents-md 、Codex が確認）
 - record サーバーの `trace_begin` などの begin は所有者の確認なしに run を書き込む（`server/src/mcp-record.ts`、`server/src/extract.ts`）。`forget_apply` の確認が守るのは削除だけ。Codex の Skill の実行を読み取り専用に保つものは、サーバー側に無い
 - Sphica の DB は、ホストのプロジェクトディレクトリも transcript のパスも持たない（`db/schema.sql` の session）
 - `server/evals/plugin/` に、使い捨ての HOME に fixture DB を置いて Skill を流す plugin eval がある（`bun run eval:plugin`。verify と CI の外）
-- 未検証: Bash を外した Claude Code で、Read / Glob / Grep が `~` や既定パスを開けるか、巨大なファイル・外へのリンク・リンクされたディレクトリ・CRLF・日本語や空白を含むパスをどう扱うか（S1 で測る）
+- S1 の実測（2026-10-28、Claude Code 2.1.312、`claude -p` でプロジェクトの Skill を呼んだ）
+  - `disallowed-tools` に書いた Write・Edit・Bash・NotebookEdit は、呼ぶと `Permission to use <tool> has been denied.` で止まり、ファイルは変わらなかった。同じ Skill から外すと Bash と Write は通った（対照）
+  - record サーバーのツールは名前で書くと外れる（`trace_begin` は `No such tool available`）。書かなかった `trace_pending` は呼べた
+  - Read と Glob は `~` を展開する（`~/.claude/CLAUDE.md` を読めた）
+  - Read は 256KB を超えるファイルを読む前に断り、中身を返さない（2.9MB の 1 行のファイル、7.3MB のファイルとも）
+  - Read はファイルのシンボリックリンクをたどって外のファイルを読む。Glob と Grep は、ファイルのリンクもディレクトリのリンクも返さない
+  - Glob は結果を 100 件で切る。`~/.codex` に `*` を渡すと中まで再帰して 51,282 件に当たり、先頭 100 件だけが返った
+  - CRLF のファイルも、日本語と空白を含むパスも普通に読めた
+  - auto memory のディレクトリはシステムプロンプトに書かれていた
 
 ## 方針
 
@@ -71,17 +79,17 @@ approved_at: 2026-10-28
 | ホスト | 場所 | 決め方 |
 |---|---|---|
 | Claude Code | auto memory | システムプロンプトで伝えられたディレクトリか、引数で渡されたもの。どちらも無ければ確かめていないものとして報告する |
-| Claude Code | ユーザーの CLAUDE.md、Codex home | 引数で渡されたもの。渡されなければ既定の場所（S1 で開けると分かった場合だけ）を読み、「既定の場所。ホストが読んでいるものとは確かめていない」と書く |
+| Claude Code | ユーザーの CLAUDE.md、Codex home | 引数で渡されたもの。渡されなければ既定の場所（`~/.claude/CLAUDE.md`、`~/.codex`）を読み、「既定の場所。ホストが読んでいるものとは確かめていない」と書く |
 | Codex | memories、ユーザーの指示 | 環境変数の `CODEX_HOME`（無ければ `~/.codex`）。`AGENTS.override.md` があればそれを、無ければ `AGENTS.md`。Claude のファイルは引数で渡されたときだけ |
 | 両方 | リポジトリの指示ファイル | `rule-files.ts` と同じ集合。マーカー付きの行も含める |
 
 - パスの形から config dir や home を逆算しない
 - 上限（試しに使う上限であって目標値ではない。持ち主の試行の結果で決め直し、変えるなら plan を直す）
-  - 1 つの場所につき 50 ファイル、1 ファイル 64 KiB、合計 512 KiB
-  - Codex の memories はディレクトリを深さ 3 までたどり、通常のファイルだけを読む。メモリのディレクトリの中のリンクされたディレクトリはたどらない
+  - 1 つの場所につき 50 ファイル、合計 512 KiB（読んだ分で数える）。1 ファイルの上限は Read 自身の 256KB で、超えるファイルは読まずに not checked に入れる。offset / limit で分けて読まない
+  - 一覧は Glob で、場所ごとに範囲を絞ったパターンを使う（auto memory は `*.md`、Codex の memories は `*`・`*/*`・`*/*/*` で深さ 3 まで）。Glob はリンクを返さないので、メモリのディレクトリの中のリンクは読まない（数も分からないので、その旨だけ書く）。Glob が 100 件で切れたら、その場所は一部しか見ていないと書く
   - 1 回の実行で `search` は 80 回まで、`read` は 40 回まで。続きのページも `read` に数え、一度読んだ記録は使い回す
   - 上限に達して残った候補は「確かめていない」に入れる
-  - 上限をどう守るかは S1 の実測に合わせて書く。Read 自身の上限を読む前の歯止めとし、バイト数とファイル数は読んだ分で数えると明記する。Bash もサーバーの新しい経路も足さない
+  - Bash もサーバーの新しい経路も足さない
 - 一覧が取れなかったときは場所と理由を書く。件数が分からないものに件数を作らない
 
 ### 照合
@@ -184,8 +192,7 @@ README.md と README.ja.md の両方に 1 段落ずつ書く。
 - 判断がぶれて、同じ入力でも結果が変わる → 3 回の結果を並べて持ち主に見せる。ぶれが大きければ、分類の基準を本文で絞る
 - Codex で注入に従って書き込む → ケース 5 で見つかったら README と本文に書き、持ち主に採否を聞く。ホストで保証する手段は無い
 - 実行が重い（時間・費用） → 上限を試行の結果で決め直す。範囲を狭めるなら plan を直して Go を取り直す
-- S1 で、既定の場所を Bash 抜きでは開けないと分かる → 引数で渡されたときだけ読む仕様に狭める
-- `disallowed-tools` が MCP ツールの名前に効かない → S1 で一緒に確かめる。効かなければ Codex と同じ扱いにして README に書き、持ち主に聞く
+- Claude Code の更新で `disallowed-tools` の挙動が変わる → ケース 5 が落ちて分かる。落ちたら README と本文を直し、持ち主に聞く
 
 ## 未解決
 
@@ -193,3 +200,4 @@ README.md と README.ja.md の両方に 1 段落ずつ書く。
 
 ## 変更履歴
 2026-10-28 / バージョンを上げる時期を採用後から最初の package のコミットへ移し、不採用時は Skill を外す代わりに PR を merge せずに閉じる / pre-commit の hook（`scripts/check-mcp-version.mjs`）が main と同じバージョンのまま package の入力を変えるコミットを拒むため / 不要（範囲は変わらない。tasks の Go で示す）
+2026-10-28 / S1 の実測を前提に入れ、上限（1 ファイルは Read の 256KB、一覧は範囲を絞った Glob、リンクは読まない）と既定の場所の読み方を確定した / 計画どおり実測に合わせて仕様を決めた。範囲は広げていない / 不要

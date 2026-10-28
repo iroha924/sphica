@@ -22,21 +22,23 @@ base: main
 
 Bash を外したファイルツールの実測に合わせて Skill を書き、書き込みツールの外し漏れを機械で止める。
 
-- [ ] T01: ファイルツールの実測と memory-check Skill
+- [x] T01: ファイルツールの実測と memory-check Skill
   - 種別: 追加
   - 計画: S1, S2, S8
   - 依存: なし
   - 変更: `.claude/plans/2026/10/28-memory-check.plan.md`, `plugin/skills/memory-check/SKILL.md`, `plugin/skills/memory-check/agents/openai.yaml`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `pane/.claude-plugin/plugin.json`
   - 完了条件: `mise exec -- bun run verify:ai` → 終了コード 0。実測の結果が plan の「前提」にあり、Skill の上限と読む場所の記述がそれと合う。`bun run release:plan -- --base v0.6.68` → `plugin`、VERSION_SOURCES がすべて 0.6.69
   - コミット: `feat(skills): add memory-check to list memory lines against live records (T01)`
+  - 結果: `claude -p` でプロジェクトの Skill を 4 回流して実測（plan の前提に記載）。`mise exec -- bun run verify:ai` → 0。`bun run release:plan -- --base v0.6.68` → `plugin`、npm / plugin / marketplace / Codex / pane / pane ref がすべて 0.6.69。`mise exec -- bun run verify` → 0（151 pass）。review-shipping: 指摘 1 件（ツールの除外は次のメッセージで解ける）を本文に反映
 
-- [ ] T02: record サーバーのツールが disallowed-tools から漏れたら落とす
+- [x] T02: record サーバーのツールが disallowed-tools から漏れたら落とす
   - 種別: 追加
   - 計画: S3
   - 依存: T01（検査する Skill の frontmatter が要る）
   - 変更: `scripts/check-ai-config.mjs`
   - 完了条件: `mise exec -- bun run verify:ai` → 終了コード 0。Skill の `disallowed-tools` から record サーバーのツールを 1 つ消すと、そのツール名を挙げて落ちる
   - コミット: `test(ai-config): fail when memory-check leaves a record tool available (T02)`
+  - 結果: `node scripts/check-ai-config.mjs` → 0。`record_more` を消すと「disallowed-tools removes record tools but not mcp__plugin_sphica_record__record_more」で落ちた。YAML のリストで書いても 0（両ホストともリストを受け付ける）
 
 ## P2: 評価
 
@@ -79,3 +81,4 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `test(evals): record the owner's memory-check trial (T06)`
 
 ## 記録
+2026-10-28 / T01, T02 / 検査が Skill の本文全体から MCP ツール名を拾うので、disallowed-tools に並べた record のツールが allowed-tools に無いとして落ちた / T02 の検査の変更を T01 と同じコミットに入れた（件名は T01, T02）
