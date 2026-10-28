@@ -655,11 +655,22 @@ const toolId = new Map(
 // The read tools any Skill's turn may reach for: the read server's instructions send an agent to status after an empty search
 const alwaysAllowed = ["status", "search", "read"].map((t) => toolId.get(t));
 
+// Shipped Skills that only read: Claude Code removes these tools while they run (Codex has no such setting)
+const READ_ONLY_SKILLS = new Set(["memory-check"]);
+const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Agent"];
 const skillDirectory = path.join(root, "plugin/skills");
 const pluginSkills = fs
   .readdirSync(skillDirectory, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
+for (const name of READ_ONLY_SKILLS)
+  if (!pluginSkills.includes(name))
+    fail({
+      where: SELF,
+      what: `READ_ONLY_SKILLS names ${name}, which is not in plugin/skills`,
+      why: "a renamed read-only Skill would lose its check without a word",
+      fix: `rename ${name} in READ_ONLY_SKILLS to the Skill's directory name`,
+    });
 for (const name of pluginSkills) {
   const relative = `plugin/skills/${name}/SKILL.md`;
   const source = read(relative);
@@ -740,18 +751,20 @@ for (const name of pluginSkills) {
         fix: `remove ${id}, or name the tool as the server registers it`,
       });
   }
-  // A Skill that removes any record tool keeps the whole record server out, so a tool added to that server later cannot slip in
-  if ([...removed].some((id) => id.startsWith("mcp__plugin_sphica_record__")))
-    for (const t of sphicaTools.get("record") ?? []) {
-      const id = toolId.get(t);
+  // A read-only Skill, or one that removes any record tool, keeps every write tool and the whole record server out, so neither a list
+  // emptied by mistake nor a tool added to that server later can slip in
+  if (READ_ONLY_SKILLS.has(name) || [...removed].some((id) => id.startsWith("mcp__plugin_sphica_record__")))
+    for (const id of [
+      ...(READ_ONLY_SKILLS.has(name) ? WRITE_TOOLS : []),
+      ...(sphicaTools.get("record") ?? []).map((t) => toolId.get(t)),
+    ])
       if (!removed.has(id))
         fail({
           where: relative,
-          what: `disallowed-tools removes record tools but not ${id}`,
-          why: "the Skill must not write records, and a record tool left out stays callable while it runs",
+          what: `disallowed-tools does not remove ${id}`,
+          why: "the Skill must not write files or records, and a tool left out stays callable while it runs",
           fix: `add ${id} to disallowed-tools`,
         });
-    }
 
   // Codex ignores disable-model-invocation, so explicit-only invocation also needs openai.yaml.
   const policy = path.join(skillDirectory, name, "agents/openai.yaml");

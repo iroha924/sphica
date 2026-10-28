@@ -40,6 +40,16 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `test(ai-config): fail when memory-check leaves a record tool available (T02)`
   - 結果: `node scripts/check-ai-config.mjs` → 0。`record_more` を消すと「disallowed-tools removes record tools but not mcp__plugin_sphica_record__record_more」で落ちた。YAML のリストで書いても 0（両ホストともリストを受け付ける）
 
+- [x] T07: Codex のレビュー（002c5352）の指摘 F1〜F3 を直す
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T01（直す Skill の本文）, T02（直す検査）
+  - 変更: `scripts/check-ai-config.mjs`, `plugin/skills/memory-check/SKILL.md`, `README.md`, `README.ja.md`
+  - red: memory-check の disallowed-tools から record サーバーのツールを全部消して `node scripts/check-ai-config.mjs` → 落ちずに終了コード 0
+  - 完了条件: `node scripts/check-ai-config.mjs` → 0。同じ red の操作で record サーバーの 11 ツールを挙げて落ち、Edit だけ消しても落ちる。本文に search / read の失敗時の扱いと、パス・キーにも及ぶ文字の置き換えがある
+  - コミット: `fix(skills): keep memory-check's removals required and cover search failures (T07)`
+  - 結果: `node scripts/check-ai-config.mjs` → red の操作で終了コード 0（実測）。直した後は、全部消すと「disallowed-tools does not remove ...」が 11 件、Edit だけ消すと 1 件で落ち、元に戻すと 0。READ_ONLY_SKILLS の名前が plugin/skills に無ければ落ちる検査も足した。review-shipping（指摘 0 件）の補足を受けて、サブエージェントから書き込めないよう Agent も外し、両 README の記述を合わせた
+
 ## P2: 評価
 
 固定ケースを両ホストで各 3 回流し、結果をリポジトリに残す。
@@ -83,3 +93,5 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 
 ## 記録
 2026-10-28 / T01, T02 / 検査が Skill の本文全体から MCP ツール名を拾うので、disallowed-tools に並べた record のツールが allowed-tools に無いとして落ちた / T02 の検査の変更を T01 と同じコミットに入れた（件名は T01, T02）
+2026-10-28 / T07 / Codex による 002c5352 のレビューが F1（record のツールを全部消すと検査をすり抜ける、再現済み）、F2（status 成功後の search の失敗時の扱いが無い）、F3（パスとキーに文字の置き換えが無い）を出した / 3 件とも採り、修正タスク T07 を足して直した。eval は直した本文で 3 回流し直す
+2026-10-28 / T07 / 変更欄に `README.md`, `README.ja.md` を足した（前: check-ai-config.mjs と SKILL.md だけ） / Agent を外したことを、T05 で書いた README のホストの違いの行に反映するため

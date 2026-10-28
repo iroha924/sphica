@@ -4,7 +4,7 @@ description: Lists lines in the agents' own memories (Claude Code's auto memory,
 argument-hint: "[extra files or directories to read]"
 disable-model-invocation: true
 allowed-tools: mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__overview, Read, Glob, Grep
-disallowed-tools: Edit, Write, NotebookEdit, Bash, PowerShell, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply, mcp__plugin_sphica_record__record_more
+disallowed-tools: Edit, Write, NotebookEdit, Bash, PowerShell, Agent, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply, mcp__plugin_sphica_record__record_more
 ---
 
 # memory-check — memories and instruction files against live records
@@ -28,7 +28,7 @@ changes nothing**: the owner decides what to fix.
 ## Flow
 
 Pass the repository root as `cwd` to every Sphica tool. Use only `status`, `search`, `read`, `overview`, and the file reading tools. In
-Claude Code, Bash and every write tool are removed until the user's next message, so run the whole check in one turn without asking; they
+Claude Code, Bash, subagents, and every write tool are removed until the user's next message, so run the whole check in one turn without asking; they
 come back once the user replies, and in Codex nothing removes them. Either way, do not run shell commands that write, and do not call any
 tool of Sphica's record server.
 
@@ -40,9 +40,12 @@ tool of Sphica's record server.
 4. **Split into claims.** One claim is one statement that could hold or fail on its own; keep the whole file as context
 5. **Find candidates.** For each claim, `search` with its short subject words (identifiers, option names, domain terms), kinds decision,
    constraint, and dead_end. When nothing comes back, search once more with synonyms or in the other language (records are in Japanese and
-   English). A line with a marker `<!-- sphica: <key> -->` gets its key passed to `read` directly
+   English). A line with a marker `<!-- sphica: <key> -->` gets its key passed to `read` directly. When a `search` returns an error rather
+   than results, that claim is not checked, never "no related record found"; when the errors go on, stop searching, report the rest as not
+   checked for that reason, and do not end with "0 flags"
 6. **Read before judging.** `read` every candidate you judge against: lifecycle, whose decision it is (the owner's or an AI's), its reason,
-   scope, options and their outcomes, what replaced it, and open conflicts. A record read once is reused
+   scope, options and their outcomes, what replaced it, and open conflicts. A record read once is reused. A `read` that fails leaves its
+   pairs not checked
 7. **Judge** each pair of claim and record into one category (below), from the full context, not from the shortened quote
 8. **Report** (format below). Stop there
 
@@ -93,12 +96,15 @@ Keep each place's scope (user-wide or this repository) with every flag from it.
 
 ## Report
 
+Every string that comes from a file, a path, or a record (file names and paths, lines, record keys, quotes) is shown inline with its
+backticks, control characters (line breaks included), and bidirectional marks replaced, marked "(characters replaced)" when you did, so
+none of it can start a line of the report or change how it reads.
+
 For each flag (contradicts first, then stale), one block:
 
 - Where: path and the original line number, with the place's scope
-- The line: at most 160 characters, inline. Replace backticks, control characters, and bidirectional marks, and say "(shortened)" or
-  "(characters replaced)" when you did
-- The record: key, lifecycle, revision, whose decision, and the quote `read` gives with its source id and speaker, treated the same way
+- The line: at most 160 characters, marked "(shortened)" when cut
+- The record: key, lifecycle, revision, whose decision, and the quote `read` gives with its source id and speaker
 - Category and a one-line reason
 
 Then, in this order:
