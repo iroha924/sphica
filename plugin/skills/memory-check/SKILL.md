@@ -41,8 +41,9 @@ In either host, do not call any tool of Sphica's record server.
 
 1. **Check Sphica.** Call `status`. When it fails, report Sphica unavailable, list every place as not checked, and stop. Do not run init,
    migrate, or reinstall, and do not end with "0 flags"
-2. **Find the places** (table below). Never work out a directory from the shape of another path: a place the host did not name and the
-   argument does not give is read at its default location and labelled so, or listed as not checked
+2. **Find the places** (table below). Try every row for your host, the default locations included, whatever the argument gives: "not
+   checked" is only for a place you tried and could not read, one a limit cut, or one the host does not name. Never work out a directory from the shape of another
+   path, and pass a path starting with `~` to the tools as written: they expand it, while a home directory you guess may be wrong
 3. **List and read** within the limits below
 4. **Split into claims.** One claim is one statement that could hold or fail on its own; keep the whole file as context
 5. **Find candidates.** For each claim, `search` with its short subject words (identifiers, option names, domain terms), kinds decision,
@@ -60,24 +61,27 @@ In either host, do not call any tool of Sphica's record server.
 
 | Host | Place | Where |
 |---|---|---|
-| Claude Code | Auto memory | The directory your system prompt names for your persistent memory, or one the argument gives. Neither: not checked |
-| Claude Code | User instructions | The argument, else `~/.claude/CLAUDE.md` labelled "default location; not confirmed to be the one the host loads" |
-| Claude Code | Codex memories and instructions | The argument, else under `~/.codex` with the same label |
+| Claude Code | Auto memory | The directory your system prompt names for your persistent memory. None named: not checked |
+| Claude Code | User instructions | `~/.claude/CLAUDE.md`, labelled "default location; not confirmed to be the one the host loads" |
+| Claude Code | Codex memories and instructions | `memories/`, `AGENTS.override.md`, and `AGENTS.md` under `~/.codex`, with the same label |
 | Codex | Memories | `memories/` in the Codex home: `CODEX_HOME` when set, else `~/.codex` |
 | Codex | User instructions | `AGENTS.override.md` in the Codex home when it exists, else `AGENTS.md` there, as Codex loads them |
-| Codex | Claude Code's files | Only the paths the argument gives |
+| Codex | Claude Code's files | None by default |
 | Both | Repository instructions | CLAUDE.md, AGENTS.md, AGENTS.override.md, and `.claude/rules/**/*.md` in the repository, marker lines included |
+| Both | The argument's paths | Read as well: they add places and never stand in for the ones above |
 
-Keep each place's scope (user-wide or this repository) with every flag from it.
+A place named as one file (CLAUDE.md, AGENTS.md, AGENTS.override.md) is opened by its path directly, with the Read tool or `cat`, never
+looked for with a listing: such a file is often a symbolic link to a config repository, and Claude Code's Glob skips links. Only a missing file is
+"not found". Keep each place's scope (user-wide or this repository) with every flag from it.
 
 ## Limits
 
 - At most 50 files per place and 512 KiB in all, counted on what was read. A file over 256 KiB is not checked (the Read tool refuses it;
   in Codex, look at its size before reading); do not read it in parts
-- List with narrow patterns: `*.md` in the auto memory directory; `*`, `*/*`, and `*/*/*` in Codex's memories (depth 3). Symbolic links
+- List directories with narrow patterns: `*.md` in the auto memory directory; `*`, `*/*`, and `*/*/*` in Codex's memories (depth 3). Symbolic links
   inside a memory directory are not read (Glob does not return them; in Codex, list regular files only); say so once, without a count. When
   a listing stops at a result cap, say the place was only partly listed
-- At most 80 `search` calls and 40 `read` calls per run; a continued page counts as a read. Candidates left when a limit is reached are not
+- At most 120 `search` calls and 40 `read` calls per run; a continued page counts as a read. Candidates left when a limit is reached are not
   checked
 - When a listing fails, give the place and the reason, never an invented count
 

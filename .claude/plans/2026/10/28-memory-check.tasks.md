@@ -96,10 +96,20 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - 計画: S5
   - 依存: T04（直すスクリプト）
   - 変更: `server/evals/memory-check/codex.ts`
-  - red: `node -e` で codex.ts の judge の集計式に `[true, null, null]` を渡す → `true`（失敗した 2 票を数えず 1 票で通る）
+  - red: `node -e` → codex.ts の judge の集計式に [true, null, null] を渡すと `true`（失敗した 2 票を数えず 1 票で通る）
   - 完了条件: 同じ集計で `[true, null, null]` → `null`、`[true, true, null]` → `true`。judge の子プロセスに SPHICA_DB・SPHICA_HOME・CODEX_HOME を渡さない。ファイルが変わった回は判定によらず落ちる。`mise exec -- bun run verify` → 0
   - コミット: `fix(evals): require a judge quorum and fail memory-check runs that change files (T09)`
   - 結果: `node -e` の集計で red は `true`、直した後は `[true,null,null]` → `null`、`[true,true,null]` → `true`、`[false,false,true]` → `false`。記録済みの 21 回はすべて有効な 3 票が PASS でファイルの変更も無いので、新しい規則でも結果は同じ（流し直していない）
+
+- [x] T10: 持ち主の試行と固定ケースで見つかった読み方の欠陥を直し、search の上限を上げる
+  - 種別: 修正
+  - 計画: S2, S4, S5
+  - 依存: T08（直す本文）, T09（流し直す Codex の eval）
+  - 変更: `plugin/skills/memory-check/SKILL.md`, `.claude/plans/2026/10/28-memory-check.plan.md`, `server/evals/plugin/cases/memory-check-symlink/`, `server/evals/memory-check/claude-runs.json`, `server/evals/memory-check/codex-runs.json`
+  - red: `bun run eval:plugin --case memory-check-symlink --ablation none --runs 3` → 直す前の本文で 3 回とも落ちる（2026-10-28 実測）。持ち主の試行では Claude Code が実在する `~/.codex/AGENTS.md`（リンク）を「見つからない」と報告し、Codex が search 80 回で打ち切った。固定ケース 8 を足すと、引数を渡した回で Claude Code が既定の場所を読まずに 3 回とも落ち、`~` を推測したホームに置き換えて読めない回もあった
+  - 完了条件: `bun run eval:plugin --case 'memory-check-*' --ablation none --runs 1` を 3 回 → 8 ケースすべて pass。`node server/evals/memory-check/codex.ts --runs 3` → 24/24 pass。`node scripts/check-ai-config.mjs` → 0
+  - コミット: `fix(skills): open named memory files by path and read the argument's paths as extra places (T10)`
+  - 結果: `bun run eval:plugin --case 'memory-check-*' --ablation none --runs 1` → 3 回とも 8/8 pass（$0.87〜0.89、88〜112 秒）。`node server/evals/memory-check/codex.ts --runs 3` → 24/24 pass、MCP は read サーバーの status・search・read だけ、ファイルと記録の表の変化は 0。途中の流し直しでは、Claude Code が `~/.codex` を飛ばす回（3 回中 2 回）と、eval の環境で Read が拒否されて何も読めない回があった。後者でも Skill は not checked と報告し、flag 0 件では終えていない。review-shipping の指摘 2 件（リンクを飛ばすのは Claude Code の Glob だけ、not checked の使いどころの食い違い）は文言だけ直した。上の eval はこの 2 件を直す前の本文で流した
 
 ## P3: 試行と採否
 
@@ -122,3 +132,5 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T04 / 変更欄に `knip.json` を足した（前: codex.ts と codex-runs.json だけ） / knip が新しい入口の codex.ts を未使用のファイルとして落としたため
 2026-10-28 / T08 / Codex による 8c512d68 のレビューは指摘なし / 記録のみ
 2026-10-28 / T09 / GitHub の Codex が 85c17196 に 3 件（judge の環境の分離、judge の定足数、ファイル変更で落とす）を出した / 3 件とも直した。judge の HOME は Claude のログインに要るので残し、ツール・設定・MCP の無い起動で届かないことを見送りの理由として PR 本文に書く
+2026-10-28 / T10 / ケース 8 は初め Claude Code に `~/.codex/AGENTS.md` を読ませる形だったが、Claude Code が Codex の場所を飛ばす回があり判定がぶれた / 各ホストが自分の場所として読むユーザーの指示ファイル（`~/.claude/CLAUDE.md`、Codex home の AGENTS.md）をどちらもリンクにする形に組み替えた。飛ばす件は既知の制約として PR と #216 に書く
+2026-10-28 / T09 / red の欄が検査器の書式（`<command>` → <期待>）に合っていなかった。T09 のコミットの前に検査の出力を見落とした / 中身は変えず書式だけを直した
