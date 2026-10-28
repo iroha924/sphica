@@ -121,6 +121,16 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
   - コミット: `fix(evals): watch more of what memory-check must leave alone and keep read tools required (T11)`
   - 結果: `node scripts/check-ai-config.mjs` → red の操作で終了コード 0（実測）、直した後は「allowed-tools lacks」3 件で落ちる。`node server/evals/memory-check/codex.ts --runs 3` → 新しい検査で 24/24 pass、MCP は read サーバーだけ、ファイル（Codex home の AGENTS.md・memories を含む）と記録の表の中身の変化は 0、judge は 24 回とも有効な 3 票が PASS、残したコマンドに書き込みらしいもの（`>`・rm・mv・tee・sed -i・touch）は無い
 
+- [x] T12: ファイル変更の監視にシンボリックリンクを含める
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T11（直す監視）
+  - 変更: `server/evals/memory-check/codex.ts`
+  - red: `node -e` → 直す前の snapshot と同じく通常のファイルとディレクトリだけを数えると、リンクの `.codex/AGENTS.md` を消しても差分が出ない（Codex の再レビューが読んで確認）
+  - 完了条件: `node -e` で一時ディレクトリにリンクを作り、snapshot と同じ規則でリンクを消す前後を比べる → 差分が出る。`mise exec -- bun run verify` → 0
+  - コミット: `fix(evals): record symbolic links in memory-check's file snapshot (T12)`
+  - 結果: `node -e`（同じ規則の snapshot で、リンクを消す前後を比べる）→ 直す前の規則では差分 0、直した後は 1
+
 ## P3: 試行と採否
 
 同じ PR head で持ち主が両ホストで試し、結果を残して採否を決める。
@@ -147,3 +157,4 @@ Bash を外したファイルツールの実測に合わせて Skill を書き�
 2026-10-28 / T09 / red の欄が検査器の書式（`<command>` → <期待>）に合っていなかった。T09 のコミットの前に検査の出力を見落とした / 中身は変えず書式だけを直した
 2026-10-28 / T10 / Codex による b26eb506 のレビュー: F1（ケース 8 はどちらか片方のファイルで通るので、Claude Code が `~/.codex/AGENTS.md` を読み落としても合格する） / 見送り。Claude Code が `~/.codex` を飛ばすことは既知の制約として書き、ケースは各ホストが自分の場所のリンクを開けることを見る。引数のパスはほかの 7 ケースが `~/notes` の行の判定で見ている
 2026-10-28 / T11 / 手元の Codex による全差分のレビュー（high）が P2 を 5 件出した: Codex home の入力を監視していない、記録の表を行数でしか比べない、書いてすぐ消すシェルコマンドを見逃す、読み取りの必須ツールを disallowed-tools に移すとすり抜ける（再現済み）、失敗した judge の出力を票に数える（再現済み） / 4 件を直した。3 件目はコマンドの一覧を結果に残すところまでにし、シェルの構文を解釈する判定は見送った（自前の解釈は直すたびに別の欠陥が出た記録がある）
+2026-10-28 / T12 / Codex による bd79dce5 の再レビュー: 5 件中 4 件は直ったと確認、新しい欠陥なし。残り 1 件（監視がシンボリックリンクを見ない）を直した。指摘が細部に絞られたので、レビューの往復はここで止める

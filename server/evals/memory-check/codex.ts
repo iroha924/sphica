@@ -89,6 +89,8 @@ function snapshot(dir: string, skip: string[], keep: string[]): Map<string, stri
       const kept = keep.some((k) => under(full, k) || under(k, full));
       if (!kept && skip.some((s) => under(full, s))) continue;
       if (e.isDirectory()) visit(full);
+      // A link is recorded by where it points, so removing or retargeting one shows even when its target is untouched
+      else if (e.isSymbolicLink()) out.set(path.relative(dir, full), `link:${fs.readlinkSync(full)}`);
       else if (e.isFile())
         out.set(
           path.relative(dir, full),
