@@ -8,6 +8,6 @@
     "@stryker-mutator/tap-runner": "10.0.0"
   },
   "overrides": {
-    "qs": "6.16.0"
+    "qs": "6.16.1"
   }
 }
