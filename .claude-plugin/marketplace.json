@@ -13,7 +13,7 @@
       "source": {
         "source": "npm",
         "package": "sphica",
-        "version": "0.6.68"
+        "version": "0.6.69"
       },
       "author": {
         "name": "iroha924",
@@ -27,7 +27,7 @@
         "source": "git-subdir",
         "url": "https://github.com/iroha924/sphica.git",
         "path": "pane",
-        "ref": "v0.6.68"
+        "ref": "v0.6.69"
       },
       "author": {
         "name": "iroha924",

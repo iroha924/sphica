@@ -655,11 +655,22 @@ const toolId = new Map(
 // The read tools any Skill's turn may reach for: the read server's instructions send an agent to status after an empty search
 const alwaysAllowed = ["status", "search", "read"].map((t) => toolId.get(t));
 
+// Shipped Skills that only read: Claude Code removes these tools while they run (Codex has no such setting)
+const READ_ONLY_SKILLS = new Set(["memory-check"]);
+const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Agent"];
 const skillDirectory = path.join(root, "plugin/skills");
 const pluginSkills = fs
   .readdirSync(skillDirectory, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
+for (const name of READ_ONLY_SKILLS)
+  if (!pluginSkills.includes(name))
+    fail({
+      where: SELF,
+      what: `READ_ONLY_SKILLS names ${name}, which is not in plugin/skills`,
+      why: "a renamed read-only Skill would lose its check without a word",
+      fix: `rename ${name} in READ_ONLY_SKILLS to the Skill's directory name`,
+    });
 for (const name of pluginSkills) {
   const relative = `plugin/skills/${name}/SKILL.md`;
   const source = read(relative);
@@ -680,6 +691,13 @@ for (const name of pluginSkills) {
   // allowed-tools pre-approves tools for the Skill's own turn; a tool the body names but the list lacks is denied in a headless run.
   // Reviewers under reviewers/ get their tools from the launch table in SKILL.md, so their names are checked through SKILL.md.
   const referenceDir = path.join(skillDirectory, name, "references");
+  // disallowed-tools names each tool, since whether a wildcard reaches MCP tools there is unverified
+  const removed = new Set(
+    String(fields["disallowed-tools"] ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
   const body = [
     source,
     ...(fs.existsSync(referenceDir)
@@ -699,7 +717,8 @@ for (const name of pluginSkills) {
     ...[...body.matchAll(/\bmcp__plugin_sphica_[a-z]+__[a-z_]+/g)].map((m) => m[0]),
     ...(/\bAskUserQuestion\b/.test(body) ? ["AskUserQuestion"] : []),
   ];
-  for (const id of new Set([...alwaysAllowed, ...named]))
+  // A tool disallowed-tools removes is not one the Skill uses, in whichever form the list is written; the read tools stay required
+  for (const id of new Set([...alwaysAllowed, ...named.filter((id) => !removed.has(id))]))
     if (!allowed.has(id))
       fail({
         where: relative,
@@ -715,6 +734,37 @@ for (const name of pluginSkills) {
         why: "an approval for a tool that does not exist hides a renamed or removed tool",
         fix: `remove ${id}, or name the tool as the server registers it`,
       });
+
+  for (const id of removed) {
+    if (allowed.has(id))
+      fail({
+        where: relative,
+        what: `${id} is in both allowed-tools and disallowed-tools`,
+        why: "the Skill would approve a tool it says it never uses",
+        fix: `remove ${id} from one of them`,
+      });
+    if (id.startsWith("mcp__plugin_sphica_") && ![...toolId.values()].includes(id))
+      fail({
+        where: relative,
+        what: `disallowed-tools names ${id}, which no Sphica server registers`,
+        why: "a removal of a tool that does not exist hides a renamed tool that stays available",
+        fix: `remove ${id}, or name the tool as the server registers it`,
+      });
+  }
+  // A read-only Skill, or one that removes any record tool, keeps every write tool and the whole record server out, so neither a list
+  // emptied by mistake nor a tool added to that server later can slip in
+  if (READ_ONLY_SKILLS.has(name) || [...removed].some((id) => id.startsWith("mcp__plugin_sphica_record__")))
+    for (const id of [
+      ...(READ_ONLY_SKILLS.has(name) ? WRITE_TOOLS : []),
+      ...(sphicaTools.get("record") ?? []).map((t) => toolId.get(t)),
+    ])
+      if (!removed.has(id))
+        fail({
+          where: relative,
+          what: `disallowed-tools does not remove ${id}`,
+          why: "the Skill must not write files or records, and a tool left out stays callable while it runs",
+          fix: `add ${id} to disallowed-tools`,
+        });
 
   // Codex ignores disable-model-invocation, so explicit-only invocation also needs openai.yaml.
   const policy = path.join(skillDirectory, name, "agents/openai.yaml");
