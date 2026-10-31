@@ -55,9 +55,22 @@ base: main
   - 結果: 直す前に `sed -n 2p .github/workflows/zizmor.yml` → 「Findings do not fail the job (they are read as SARIF). It does not run for fork PRs, …」で、ワークフロー全体を指していた（red を確認）
   - 結果: 直した後に `sed -n 2p .github/workflows/zizmor.yml` → 「zizmor's findings do not fail its job …, and that job does not run for fork PRs, …」。`mise exec -- bun run english` → 通った
 
+- [x] T04: lockfile を `--no-narrow` で作り直し、key を SHA にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（作り直す lockfile と、それを照合する actions-lock ジョブが入っている）
+  - 変更: `.github/workflows/actions.lock`
+  - red: `gh workflow run scorecard.yml --ref ci/actions-lockfile` → HTTP 422「Invalid dependency lockfile … references actions not present in the lockfile: step-security/harden-runner@dc2769ab…」。PR #398 の check・zizmor・pr-body・release の run がすべて startup_failure
+  - 完了条件: `gh actions-lock --no-narrow --no-interactive` の後 `git diff --stat` → `.github/workflows/actions.lock` だけが変わる。`gh actions-lock --verify --json` → exit 0、`valid: true`、error 0
+  - コミット: `fix(ci): key actions.lock entries by commit SHA to match the uses lines (T04)`
+  - 結果: 直す前の `gh workflow run scorecard.yml --ref ci/actions-lockfile` → HTTP 422（上の red のとおり）。`gh run list --branch ci/actions-lockfile` → run 41173511786 ほか 3 本が startup_failure
+  - 結果: `gh actions-lock --no-narrow --no-interactive` → exit 0。`git diff --stat` → `.github/workflows/actions.lock` の 62 行（31 行の入れ替え）だけ。key が `owner/repo@<40 桁 SHA>`、`ref` が完全なタグになった
+  - 結果: `gh actions-lock --verify` → exit 0。`--json` で `valid: true`、warning は `sha-as-ref` 21 と `container-image` 1、error 0
+
 ## 記録
 
 2026-10-31 / T02 / ASSURANCE.md の該当行が完了条件の「:53 付近と :77」から 1 行ずれて :54 と :78 になった（:53 の直後に項を足したため） / 欄は変えず、結果に実際の行番号を書いた
 2026-10-31 / T01 / Codex のタスクごとのレビュー（8d613c65、high）は指摘 0 件。sandbox ではオンラインの `--verify` が認証エラー（exit 2）で流せず、同じ照合は手元で exit 0 を確かめた / 直すものなし
 2026-10-31 / 全体 / 全差分の Codex レビュー（main..36512741、high）は P3 が 2 件。F1・F2 とも計画の記述の誤りで、受け入れて plan を直した（変更履歴）。実装の変更はなし
 2026-10-31 / 全体 / review-shipping は 2 件。zizmor.yml の冒頭コメントが古くなっていた指摘は T03 で直した。scorecard.yml と osv-scanner.yml が PR では走らない指摘は、plan に完了条件 A8 を足して受け入れた
+2026-10-31 / T04 / PR #398 の最初の push で、key がタグの lockfile と SHA の行の組み合わせを GitHub が拒んだ（plan の前提が事実と食い違った） / 持ち主に 3 案を示して「--no-narrow で続ける」の Go を受け、修正タスク T04 を足した
