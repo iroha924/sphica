@@ -44,6 +44,17 @@ base: main
   - 結果: `mise exec -- bun run verify:ai` → exit 0（AI config と links が通った）。`mise exec -- bun run english` → 通った
   - 結果: `rg -n "lockfile" ASSURANCE.md` → :54 に lockfile の項（reusable workflow、コンテナイメージ、step が取るツールを対象外と明記）、:78 の表の Supply chain compromise の行に workflow lockfile
 
+- [x] T03: zizmor.yml の冒頭コメントを、fork の PR を除くのが zizmor ジョブだけだと分かる形に直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（actions-lock ジョブが fork の PR でも走る形で入っている）
+  - 変更: `.github/workflows/zizmor.yml`
+  - red: `sed -n 2p .github/workflows/zizmor.yml` → 「It does not run for fork PRs」とワークフロー全体の話として書いてあり、actions-lock と actionlint のジョブ（fork の PR でも走る）と食い違う
+  - 完了条件: `sed -n 2p .github/workflows/zizmor.yml` → fork の PR を除くのが zizmor のジョブだけだと読める。`mise exec -- bun run english` → 通る
+  - コミット: `ci: say only the zizmor job skips fork PRs (T03)`
+  - 結果: 直す前に `sed -n 2p .github/workflows/zizmor.yml` → 「Findings do not fail the job (they are read as SARIF). It does not run for fork PRs, …」で、ワークフロー全体を指していた（red を確認）
+  - 結果: 直した後に `sed -n 2p .github/workflows/zizmor.yml` → 「zizmor's findings do not fail its job …, and that job does not run for fork PRs, …」。`mise exec -- bun run english` → 通った
+
 ## 記録
 
 2026-10-31 / T02 / ASSURANCE.md の該当行が完了条件の「:53 付近と :77」から 1 行ずれて :54 と :78 になった（:53 の直後に項を足したため） / 欄は変えず、結果に実際の行番号を書いた
