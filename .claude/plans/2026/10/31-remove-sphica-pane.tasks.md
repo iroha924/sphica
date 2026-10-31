@@ -60,3 +60,6 @@ README は以前入れた人への案内だけを残し、規範と release の 
 ## 記録
 
 - 2026-10-31: T01 のコミット欄を `chore(release): drop sphica-pane from the marketplace and the release sources, and bump to 0.6.71` から `chore(release): drop sphica-pane from the marketplace and release sources, bump to 0.6.71` に変えた。commit-msg が件名の 100 字超えを止めたため
+- 2026-10-31: T01 の Codex レビュー（bd859ea2）: F1 [P1]「T01 で pane:check を消したのに check.yml の Windows の手順が呼んでいて、T01 単体では Windows CI が落ちる」→ 棄却。事実だが、その呼び出しは T02（d19efd90）で消えていて、bd859ea2 は単独で push も CI もしない。直すには履歴の書き換えが要る
+- 2026-10-31: T02 の Codex レビュー（d19efd90）: 指摘 0 件
+- 2026-10-31: A7 の途中の発見（Claude Code 2.1.316）: `claude plugin marketplace update sphica` の直後は settings.json の enabledPlugins に pane が残る。次に起動した claude が renames を当てて外すが、その 1 回目の `claude plugin list --json` は外す前の enabled true を返し、2 回目から enabled false。どの回もエラーは無い。A9 の list は 2 回流して見る
