@@ -29,6 +29,7 @@ on:
       - scripts/lib/release-finish.mjs
       - scripts/osv-summary.mjs
       - scripts/lib/osv-summary.mjs
+      - .github/workflows/actions.lock
       # A PR that bumps the version is a release PR, so run the same steps before the tag is pushed
       - plugin/package.json
 
