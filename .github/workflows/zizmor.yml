@@ -55,3 +55,24 @@ jobs:
           tar xzf actionlint.tar.gz actionlint
           cd "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/actionlint" -color
+
+  # Every workflow's actions.lock entries against upstream. The runner checks only the jobs it starts, and release.yml's publish job
+  # starts only on a release tag. Runs for fork PRs too: it needs no more than read access.
+  actions-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install gh-actions-lock
+        run: gh extension install github/gh-actions-lock --pin v0.4.0
+      - name: Verify actions.lock
+        run: gh actions-lock --verify

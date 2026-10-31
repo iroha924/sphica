@@ -22,13 +22,17 @@ base: main
 
 全ワークフローが lockfile に載り、CI で lockfile の整合を検査し、保証の説明が実態と合う。
 
-- [ ] T01: actions-lock ジョブと release.yml の起動条件を足し、lockfile を作って入れる
+- [x] T01: actions-lock ジョブと release.yml の起動条件を足し、lockfile を作って入れる
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `.github/workflows/zizmor.yml`, `.github/workflows/release.yml`, `.github/workflows/actions.lock`
   - 完了条件: `gh actions-lock --verify --json` → exit 0、`valid: true`、error 0。`git diff main -- '.github/workflows/*.yml' | rg '^[-+]\s+(- )?uses:'` → 足した actions-lock ジョブの harden-runner と checkout の 2 行だけ
   - コミット: `ci: lock workflow actions with actions.lock and verify it in CI (T01)`
+  - 結果: 使い捨ての worktree（HEAD 08cbe969 に編集後の zizmor.yml と release.yml を写したもの）で `gh actions-lock --no-interactive` → exit 0、actions.lock（90 行）だけを作業ツリーへ写した。worktree 側では 5 本の YAML の `uses:` がタグに書き換わったが、作業ツリーへは写していない
+  - 結果: `gh actions-lock --verify` → exit 0。`--json` で `valid: true`、warning は `sha-as-ref` 21 と `container-image` 1、error 0
+  - 結果: `git diff main -- '.github/workflows/*.yml' | rg '^[-+]\s+(- )?uses:'` → `+` の 2 行（actions-lock ジョブの harden-runner と checkout）だけ
+  - 結果: ステージ後の `mise exec -- bun run release:plan -- --base v0.6.70` → `release kind: none (no release)`
 
 - [ ] T02: ASSURANCE.md に lockfile とその対象外を書く
   - 種別: 変更
