@@ -31,8 +31,6 @@ const filesUnder = (dir, re) =>
 const ENGLISH = [
   ...filesUnder("server/src", /\.tsx?$/),
   ...filesUnder("scripts", /\.(c?js|mjs|m?ts|tsx)$/),
-  ...filesUnder("pane", /\.tsx?$/).filter((f) => !f.startsWith("pane/.claude-plugin/types/")),
-  "server/test/pane-sift.test.ts",
   "server/test/assets.test.ts",
   "server/test/check-mcp-version.test.ts",
   "server/test/comments-check.test.ts",
@@ -61,7 +59,6 @@ const COMMENTS = [
 /** Markdown, YAML, SQL, JSON, and config files Sphica writes. Checked line by line, since they are not JavaScript. */
 const TEXT = [
   ...filesUnder("plugin/skills", /\.(md|json|ya?ml)$/),
-  ...filesUnder("pane", /\.(md|json)$/),
   ".github/pull_request_template.md",
   ...filesUnder(".github/ISSUE_TEMPLATE", /\.(md|ya?ml)$/),
   ...filesUnder(".github/workflows", /\.ya?ml$/),

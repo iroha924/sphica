@@ -84,20 +84,6 @@ codex plugin add sphica@sphica
 
 In Codex, open `/hooks` and mark Sphica's hooks as trusted. Automatic recording does not start until you do. If a plugin update changes the hooks, trust them again. The "Codex hooks" line of `sphica doctor` shows how many are trusted (for Codex 0.160.0).
 
-Optional, Claude Code only: a pane that lists what Sphica handed the agent in this session.
-
-```bash
-claude plugin install sphica-pane@sphica
-```
-
-Run `/sphica-pane` to open it, and press ctrl+x then x to close it. Newest first, it shows the current work and constraints given at session start, the records given before a read, an edit, or a prompt, and the reason when Sphica stopped a shell call.
-
-- It needs Claude Code 2.1.300 or later, the version its checks run on. Older Claude Code fails to load it, and Sphica itself keeps working.
-- It is a Claude Code mod, so it runs with Claude Code's permissions. It only reads what the hooks returned and passes that on unchanged. It writes nothing, reads no files, and sends nothing anywhere.
-- It recognizes Sphica's text by its wording, so text another plugin writes in the same words shows too. Treat it as a view, not a record.
-- Where an organization manages Claude Code, the hooks it reads run only for plugins the organization lists, so the pane stays empty.
-- Codex has no mods. `codex plugin list` shows sphica-pane too, but do not install it there: Codex warns about its hooks file in every session.
-
 **3. Set up in your repository**
 
 ```bash
@@ -209,8 +195,6 @@ claude plugin marketplace update sphica
 claude plugin update sphica@sphica
 ```
 
-If you installed the pane, update it too with `claude plugin update sphica-pane@sphica`. A fix to it comes with the next Sphica release.
-
 Codex:
 
 ```bash
@@ -234,7 +218,7 @@ codex plugin remove sphica@sphica && codex plugin marketplace remove sphica
 npm uninstall -g sphica
 ```
 
-If you installed the pane, remove it first with `claude plugin uninstall sphica-pane@sphica`. Removing the pane alone leaves Sphica working.
+If you installed sphica-pane earlier: Claude Code 2.1.193 or later disables it when you update the marketplace, and older Claude Code lists it as not found in the marketplace. Remove it with `claude plugin uninstall sphica-pane@sphica` (add the same `--scope` if you installed it in a project or local scope). Codex keeps it enabled and warns about its hooks file in every session: remove it with `codex plugin remove sphica-pane@sphica`.
 
 ## Troubleshooting
 

@@ -4,7 +4,7 @@
 
 - For a change that goes into the package, run `bun run release:plan -- --base <previous release commit>` before editing the version, and handle it by the kind it reports <!-- invariant: release-plan -->
   - `none`: no release. A change to `README.md` alone is `none` too: the tarball carries it from the next release on. So is a change to `server/package.json` and `server/bun.lock` alone when the PR's CI found the packed tarball the same as the last release (the release verdict); without that verdict it is `plugin`
-  - `plugin`: a change that goes into the package (MCP, CLI, hooks, plugin Skills and Agents, shared modules, the sphica-pane mod). Bump every version `VERSION_SOURCES` lists to the same version
+  - `plugin`: a change that goes into the package (MCP, CLI, hooks, plugin Skills and Agents, shared modules). Bump every version `VERSION_SOURCES` lists to the same version
 - The only thing published to npm is the tarball `.github/workflows/release.yml` publishes from the `v<version>` tag on the PR head, after the owner approves the `npm-release` environment. Do not run `npm publish` locally. The same run merges the PR and creates the GitHub Release; follow the `plugin-release` Skill's steps around it
 - Before each release step, reopen the `plugin-release` Skill and run its commands exactly as written. The owner approves the `npm-release` environment, the only gate before npm. Claude does not do it in the owner's place, on the page or through the API <!-- invariant: release-owner-steps -->
 

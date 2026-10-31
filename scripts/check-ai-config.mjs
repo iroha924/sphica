@@ -623,6 +623,14 @@ try {
       fix: "remove version from the entry and keep it only inside source",
     });
   }
+  if (marketplace.renames?.["sphica-pane"] !== null) {
+    fail({
+      where: MARKETPLACE,
+      what: `renames["sphica-pane"] is ${JSON.stringify(marketplace.renames?.["sphica-pane"])}, not null`,
+      why: "machines that installed sphica-pane earlier keep it disabled only through this; without it Claude Code shows a load error for it",
+      fix: 'set "renames": { "sphica-pane": null } at the top level',
+    });
+  }
 } catch (error) {
   if (error instanceof CheckFailure) failures.push(error.finding);
   else

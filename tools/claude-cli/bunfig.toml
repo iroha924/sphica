@@ -1,3 +1,0 @@
-# No version published less than 7 days ago, for direct or transitive dependencies (waits out the window hijacked releases target)
-[install]
-minimumReleaseAge = 604800

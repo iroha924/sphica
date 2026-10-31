@@ -33,7 +33,7 @@ Start troubleshooting with `sphica doctor`.
 - Check the CLI separately from MCP. One working does not mean the other works <!-- invariant: exits-separate -->
 - When you change a value, category, or decision, find every reference with `rg` and fix the paired interface too. Add pairs you can list to a check <!-- invariant: rg-pairs -->
 - A new ingestion source writes through the record server's run-bound tools or capture, never a bulk import <!-- invariant: harvest -->
-- A change that goes into the package bumps npm, the 3 plugin manifests, and the sphica-pane manifest with its marketplace ref to the same version, in the same branch (PR) (`VERSION_SOURCES` in `scripts/lib/release-scope.mjs` lists them). A change to `README.md` alone needs no bump and ships with the next release <!-- invariant: version-sync -->
+- A change that goes into the package bumps npm, the 3 plugin manifests, and the marketplace entry to the same version, in the same branch (PR) (`VERSION_SOURCES` in `scripts/lib/release-scope.mjs` lists them). A change to `README.md` alone needs no bump and ships with the next release <!-- invariant: version-sync -->
 - Validate external input at the system boundary. Do not write credentials to tracked files, command arguments, or logs <!-- invariant: boundary-validation -->
 - What we ship runs on Windows too. Do not depend on a POSIX shell, `0600`, a fixed `/tmp`, or execFile of `.cmd` <!-- invariant: windows -->
 - Claude Code and Codex get the same functions as far as each host allows. A change that works in only one host names what the other host lacks, and the README says the difference <!-- invariant: host-parity -->

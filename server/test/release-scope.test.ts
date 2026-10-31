@@ -61,18 +61,13 @@ test("the dependency files a tarball verdict can excuse are package inputs, and 
   for (const file of DEPENDENCY_INPUTS) assert.ok(isPackageInput(file), file);
 });
 
-test("the pane plugin is a package input, and its manifest and marketplace ref carry the release version", () => {
-  assert.equal(releaseKind(["pane/hooks/register.tsx"]), "plugin");
+test("the npm package, the 3 plugin channel manifests, and the marketplace entry carry the release version", () => {
   const files: Record<string, unknown> = {
     "plugin/package.json": { version: "1.2.3" },
     "plugin/.claude-plugin/plugin.json": { version: "1.2.3" },
     "plugin/.codex-plugin/plugin.json": { version: "1.2.3" },
-    "pane/.claude-plugin/plugin.json": { version: "1.2.3" },
     ".claude-plugin/marketplace.json": {
-      plugins: [
-        { name: "sphica", source: { source: "npm", package: "sphica", version: "1.2.3" } },
-        { name: "sphica-pane", source: { source: "git-subdir", url: "u", path: "pane", ref: "v1.2.3" } },
-      ],
+      plugins: [{ name: "sphica", source: { source: "npm", package: "sphica", version: "1.2.3" } }],
     },
   };
   assert.deepEqual(
@@ -82,24 +77,7 @@ test("the pane plugin is a package input, and its manifest and marketplace ref c
       claude: "1.2.3",
       codex: "1.2.3",
       marketplace: "1.2.3",
-      pane: "1.2.3",
-      paneRef: "1.2.3",
     },
   );
   assert.deepEqual([...VERSION_FILES].sort(), Object.keys(files).sort());
-  // A missing entry or a ref that is not a tag reads as no version, which the checks report as a mismatch
-  assert.equal(
-    releaseVersions((f) => (f.endsWith("marketplace.json") ? { plugins: [] } : files[f])).paneRef,
-    undefined,
-  );
-  // The ref is the tag, so it moves with the version and does not count as a change of its own
-  const at = (ref: string) =>
-    JSON.stringify({
-      plugins: [{ name: "sphica-pane", source: { source: "git-subdir", path: "pane", ref } }],
-    });
-  assert.equal(withoutReleaseVersion(at("v1.2.3")), withoutReleaseVersion(at("v1.2.4")));
-  const moved = JSON.stringify({
-    plugins: [{ name: "sphica-pane", source: { source: "git-subdir", path: "panes", ref: "v1" } }],
-  });
-  assert.notEqual(withoutReleaseVersion(at("v1")), withoutReleaseVersion(moved));
 });

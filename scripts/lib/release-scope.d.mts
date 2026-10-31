@@ -10,9 +10,7 @@ export const EXACT_PACKAGE_INPUTS: ReadonlySet<string>;
 export const PACKAGE_PREFIXES: readonly string[];
 export const DEPENDENCY_INPUTS: ReadonlySet<string>;
 export type VersionSource = { file: string; pick: (json: unknown) => string | undefined };
-export const VERSION_SOURCES: Readonly<
-  Record<"package" | "claude" | "codex" | "marketplace" | "pane" | "paneRef", VersionSource>
->;
+export const VERSION_SOURCES: Readonly<Record<"package" | "claude" | "codex" | "marketplace", VersionSource>>;
 export const VERSION_FILES: ReadonlySet<string>;
 export function releaseVersions(
   read: (file: string) => unknown,
