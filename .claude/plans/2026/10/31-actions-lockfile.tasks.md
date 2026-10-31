@@ -34,12 +34,16 @@ base: main
   - 結果: `git diff main -- '.github/workflows/*.yml' | rg '^[-+]\s+(- )?uses:'` → `+` の 2 行（actions-lock ジョブの harden-runner と checkout）だけ
   - 結果: ステージ後の `mise exec -- bun run release:plan -- --base v0.6.70` → `release kind: none (no release)`
 
-- [ ] T02: ASSURANCE.md に lockfile とその対象外を書く
+- [x] T02: ASSURANCE.md に lockfile とその対象外を書く
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `ASSURANCE.md`
   - 完了条件: `mise exec -- bun run verify:ai` → exit 0。`rg -n "lockfile" ASSURANCE.md` → :53 付近と :77 の表に lockfile の記述があり、reusable workflow とコンテナイメージが対象外と書いてある
   - コミット: `docs: describe the actions lockfile and its limits in ASSURANCE (T02)`
+  - 結果: `mise exec -- bun run verify:ai` → exit 0（AI config と links が通った）。`mise exec -- bun run english` → 通った
+  - 結果: `rg -n "lockfile" ASSURANCE.md` → :54 に lockfile の項（reusable workflow、コンテナイメージ、step が取るツールを対象外と明記）、:78 の表の Supply chain compromise の行に workflow lockfile
 
 ## 記録
+
+2026-10-31 / T02 / ASSURANCE.md の該当行が完了条件の「:53 付近と :77」から 1 行ずれて :54 と :78 になった（:53 の直後に項を足したため） / 欄は変えず、結果に実際の行番号を書いた

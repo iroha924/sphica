@@ -51,6 +51,7 @@ Out of scope: another process running as the same user. It can read and write `~
 - Publishing needs the maintainer's approval of a protected environment, and reaches npm through trusted publishing: no npm token is stored anywhere.
 - The run publishes the same tarball it checked, by SHA-512, with provenance and a signed attestation of its SBOM (the list of dependencies bundled into the package). A tarball packed from the same commit on another machine had the same SHA-512 as the released one.
 - Third-party actions are pinned to commit SHAs, workflow tokens have the least permissions that work, and published releases cannot be changed.
+- Every workflow is also locked by GitHub's workflow lockfile (`.github/workflows/actions.lock`), which covers the actions those actions use. When a job starts, GitHub runs only the locked commit, refuses one that no tag or branch of the action's own repository contains (such as a commit that exists only in a fork), and refuses an action whose repository is no longer the one that was locked. A CI job checks the whole lockfile against upstream on every change to the workflows. The lockfile does not cover a reusable workflow called from another repository (the OSV-Scanner one, pinned to a commit SHA instead), container images that an action pulls, or tools that a step downloads.
 - Dependencies are pinned in a lockfile and bundled at build time, so installing the package fetches no further dependency and runs no install script. New versions of a dependency wait seven days before they are taken. OSV-Scanner checks the lockfile on every push to `main`, once a week, and at each release, where the maintainer sees the result before approving; a finding does not stop the release by itself.
 
 ## Secure design principles
@@ -74,7 +75,7 @@ Out of scope: another process running as the same user. It can read and write `~
 | Prompt injection through stored text | Outside text marked as data; adoption only by someone entitled to decide; quotes checked against sources |
 | Path traversal | Paths resolved and checked against the repository before a file is read; links are not followed out of it |
 | Secrets in stored text | Masking of recognizable secrets; `forget` with `secure_delete` |
-| Supply chain compromise | Pinned actions and lockfile, a waiting period for new versions, bundled dependencies, trusted publishing, provenance |
+| Supply chain compromise | Actions pinned to commit SHAs and locked by the workflow lockfile, a dependency lockfile, a waiting period for new versions, bundled dependencies, trusted publishing, provenance |
 | Denial of service by input | Deadlines on git and on hooks; budgets on what delivery reads and returns |
 
 ## What this does not claim
