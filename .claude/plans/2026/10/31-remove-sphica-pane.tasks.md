@@ -48,13 +48,14 @@ pane/、ピン留めした CLI、そのテストと CI の手順、設定の pan
 
 README は以前入れた人への案内だけを残し、規範と release の Skill から pane が消える。
 
-- [ ] T03: README・CLAUDE.md・AGENTS.md・verification.md・plugin-release の pane の記述を直す
+- [x] T03: README・CLAUDE.md・AGENTS.md・verification.md・plugin-release の pane の記述を直す
   - 種別: 変更
   - 計画: S4
   - 依存: なし
   - 変更: `README.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/verification.md`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0。`git grep -n -i "sphica-pane" -- README.md CLAUDE.md AGENTS.md .claude/rules .agents` → README のアンインストールの節だけ
   - コミット: `docs: drop sphica-pane from the README, the rules, and the release Skill`
+  - 結果: `bun run verify:ai` → 0。`git grep -n -i "sphica-pane" -- README.md CLAUDE.md AGENTS.md .claude/rules .agents` → README.md:221 のアンインストールの節の 1 行だけ
 
 ## 記録
 
