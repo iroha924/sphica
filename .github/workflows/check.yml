@@ -151,11 +151,6 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bun install --cwd tools/sandbox --frozen-lockfile --ignore-scripts
 
-      # bun run setup installed the Claude Code CLI that tools/claude-cli pins; bun run check validates and tests the sphica-pane mod with it
-      - name: The pinned Claude Code CLI
-        if: matrix.part == 'static'
-        run: node scripts/claude-cli.mjs --version
-
       # static: Oxlint and Oxfmt, types, the package bundle, and sql:live, which runs the CLI and capture as child processes against a database in a
       # temp HOME. unit: the tests, with sql:reach counting whether every SQL ran against a real SQLite database; on the floor line the tests
       # run without coverage, the part's largest cost there, and reach is counted on the other line. acceptance: the cases.
@@ -325,12 +320,6 @@ jobs:
       # The lint and format launchers start native binaries by path, and contributors on Windows run them in pre-commit
       - name: Lint and format check on Windows
         run: bun run lint
-      # The pane mod runs where Claude Code runs, Windows included
-      - name: Validate and test the pane mod on Windows
-        run: |
-          set -euo pipefail
-          node scripts/claude-cli.mjs --version
-          bun run pane:check
       # Exclusive create and rename over an existing file behave differently on Windows; init's lock and table replace rely on both
       - name: File lock and replace on Windows
         working-directory: server

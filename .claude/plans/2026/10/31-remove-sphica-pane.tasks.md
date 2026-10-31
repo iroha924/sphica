@@ -35,13 +35,14 @@ pane のエントリが消えて renames が残り、版をそろえる対象が
 
 pane/、ピン留めした CLI、そのテストと CI の手順、設定の pane の行が無くなる。
 
-- [ ] T02: pane/ とピン留めした Claude Code CLI、そのテスト・CI・設定の行を消す
+- [x] T02: pane/ とピン留めした Claude Code CLI、そのテスト・CI・設定の行を消す
   - 種別: 削除
   - 計画: S3
   - 依存: T01（check-pane が pane/ と scripts/claude-cli.mjs を使うので、先に消えていないと check が落ちる）
   - 変更: `pane/`, `server/test/pane-sift.test.ts`, `scripts/claude-cli.mjs`, `scripts/claude-cli.d.mts`, `server/test/claude-cli.test.ts`, `tools/claude-cli/`, `package.json`, `.github/workflows/check.yml`, `lefthook.yml`, `.gitignore`, `scripts/check-english.mjs`, `scripts/oxfmt.mjs`, `scripts/oxlint.mjs`, `scripts/check-license-headers.mjs`
   - 完了条件: `git ls-files pane tools/claude-cli` → 空。`bun run setup` → 0。`bun run check` → 0
   - コミット: `chore(pane): remove the pane plugin and the pinned Claude Code CLI that checked it`
+  - 結果: `git ls-files pane tools/claude-cli` → 空。`bun run setup` → 0。`bun run check` → 0（english 177 件、license headers 357 件、knip まで通過）
 
 ## P3: 文書から pane を外す
 

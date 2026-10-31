@@ -16,7 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(root, "server/package.json"));
 const oxfmt = path.join(path.dirname(require.resolve("oxfmt/package.json")), "bin", "oxfmt");
 
-const DIRS = ["server/src", "server/test", "server/evals", "scripts", "pane"];
+const DIRS = ["server/src", "server/test", "server/evals", "scripts"];
 const json = (dir) =>
   fs
     .readdirSync(path.join(root, dir))

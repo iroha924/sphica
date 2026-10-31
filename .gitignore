@@ -12,10 +12,6 @@ server/migrate-*.ts
 # Relying on a global ignore misses on other machines and on other clones.
 .claude/settings.local.json
 
-# Claude Code writes these beside a mod it loads (claude --plugin-dir pane): its own types and a tsconfig.json that extends them.
-pane/.claude-plugin/types/
-pane/tsconfig.json
-
 # scripts/bundle.mjs builds these at publish time.
 plugin/dist/
 plugin/db/

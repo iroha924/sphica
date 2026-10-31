@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "setup": "bun install --cwd server --frozen-lockfile --ignore-scripts && bun install --cwd tools/claude-cli --frozen-lockfile --ignore-scripts && node scripts/install-hooks.mjs",
+    "setup": "bun install --cwd server --frozen-lockfile --ignore-scripts && node scripts/install-hooks.mjs",
     "cli": "node server/src/cli.ts",
     "lint": "node scripts/oxlint.mjs && bun run format:check && node scripts/check-json-keys.mjs",
     "format:check": "node scripts/oxfmt.mjs --check",
