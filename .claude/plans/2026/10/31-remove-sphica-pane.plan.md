@@ -103,3 +103,5 @@ approved_at: 2026-10-31
 なし
 
 ## 変更履歴
+
+- 2026-10-31 / README のアンインストールの案内に、2.1.193 より前の Claude Code では not found と出ることと、Codex では `codex plugin remove sphica-pane@sphica` で消すことを足した（T04） / 差分全体の review-shipping の指摘と、2.1.139・2.1.191・Codex 0.163.0 の実測から / 範囲は README の同じ節の中なので Go は取り直さない

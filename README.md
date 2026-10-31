@@ -218,7 +218,7 @@ codex plugin remove sphica@sphica && codex plugin marketplace remove sphica
 npm uninstall -g sphica
 ```
 
-If you installed sphica-pane earlier, updating the marketplace disables it. Remove it with `claude plugin uninstall sphica-pane@sphica` (add the same `--scope` if you installed it in a project or local scope).
+If you installed sphica-pane earlier: Claude Code 2.1.193 or later disables it when you update the marketplace, and older Claude Code lists it as not found in the marketplace. Remove it with `claude plugin uninstall sphica-pane@sphica` (add the same `--scope` if you installed it in a project or local scope). Codex keeps it enabled and warns about its hooks file in every session: remove it with `codex plugin remove sphica-pane@sphica`.
 
 ## Troubleshooting
 
