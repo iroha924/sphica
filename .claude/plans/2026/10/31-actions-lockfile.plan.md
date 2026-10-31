@@ -88,6 +88,7 @@ PR の CI での正常例（A5）と使い捨ての draft PR での負例（A6�
 - A5: `gh pr checks <作業 PR>` → check.yml・zizmor.yml（actions-lock を含む）・release.yml（dry run）・pr-body.yml の全ジョブが pass。加えて `gh run view <check.yml の run> --log | rg "Download action repository"` と release.yml の dry run の run で同じことを流す → 取得した Action の SHA が lockfile の `commit` と一致する。`actions/attest` は runner で未実走と PR 本文に書く
 - A6: `gh run view <負例の run> --log-failed` → `part` のジョブが「Set up job」で、setup-bun の依存が lockfile に無いことを理由に落ちている。run の URL と失敗の行を作業 PR の本文に残す。続けて `git ls-remote origin <負例のブランチ>` → 空（draft PR は閉じてある）
 - A7: `gh api 'repos/iroha924/sphica/code-scanning/alerts?ref=refs/pull/<作業 PR>/merge&state=open&tool_name=zizmor' --jq '[.[] | select(.rule.id | test("unpinned-uses"))] | length'` → 0
+- A8: `gh workflow run scorecard.yml --ref ci/actions-lockfile` と `gh workflow run osv-scanner.yml --ref ci/actions-lockfile` の後、`gh run view <各 run> --log | rg -n "Download action repository|lockfile"` → 両方の run の各ジョブが「Set up job」を通っている（lockfile で拒まれていない）。scorecard の結果の公開など、それより後のステップがブランチの上で落ちるのは対象外。PR では走らないこの 2 本を merge 前に runner に当てる
 
 ## リスク
 
@@ -103,3 +104,4 @@ PR の CI での正常例（A5）と使い捨ての draft PR での負例（A6�
 なし
 
 ## 変更履歴
+2026-10-31 / 完了条件に A8 を足した / review-shipping の指摘: scorecard.yml（docker の Action と codeql-action のサブパス）と osv-scanner.yml（reusable workflow、lockfile では `[]`）は PR では走らず、runner での照合が merge 後まで分からない / Go 不要（確かめる項目を足すだけで、範囲・公開契約・依存・データは変わらない）
