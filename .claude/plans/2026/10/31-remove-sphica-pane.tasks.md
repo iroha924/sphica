@@ -22,13 +22,14 @@ base: main
 
 pane のエントリが消えて renames が残り、版をそろえる対象が 4 つになり、0.6.71 に上がる。
 
-- [ ] T01: marketplace のエントリを renames に替え、release-scope と pane の検査から pane を外して 0.6.71 に上げる
+- [x] T01: marketplace のエントリを renames に替え、release-scope と pane の検査から pane を外して 0.6.71 に上げる
   - 種別: 変更
   - 計画: S1, S2, S5
   - 依存: なし
   - 変更: `.claude-plugin/marketplace.json`, `scripts/check-ai-config.mjs`, `scripts/lib/release-scope.mjs`, `scripts/lib/release-scope.d.mts`, `scripts/release-plan.mjs`, `scripts/release-status.mjs`, `server/test/release-scope.test.ts`, `server/test/release-plan.test.ts`, `server/test/check-mcp-version.test.ts`, `scripts/check-pane.mjs`, `scripts/lib/pane-report.mjs`, `scripts/lib/pane-report.d.mts`, `server/test/pane-report.test.ts`, `package.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `bun run verify:ai` → 0。`node --test server/test/release-scope.test.ts server/test/release-plan.test.ts server/test/check-mcp-version.test.ts`（server/ で）→ 全件 pass。`bun run release:plan -- --base a58ee28214634317d721f6d64fd4b752ca9732cc` → kind plugin、4 つの版が 0.6.71
-  - コミット: `chore(release): drop sphica-pane from the marketplace and the release sources, and bump to 0.6.71`
+  - コミット: `chore(release): drop sphica-pane from the marketplace and release sources, bump to 0.6.71`
+  - 結果: `bun run verify:ai` → 0。release-scope・release-plan・check-mcp-version のテスト → 29 件 pass。`bun run release:plan -- --base a58ee282…` → kind plugin、npm / plugin / marketplace / Codex がすべて 0.6.71
 
 ## P2: pane の本体とそのための道具を消す
 
@@ -55,3 +56,5 @@ README は以前入れた人への案内だけを残し、規範と release の 
   - コミット: `docs: drop sphica-pane from the README, the rules, and the release Skill`
 
 ## 記録
+
+- 2026-10-31: T01 のコミット欄を `chore(release): drop sphica-pane from the marketplace and the release sources, and bump to 0.6.71` から `chore(release): drop sphica-pane from the marketplace and release sources, bump to 0.6.71` に変えた。commit-msg が件名の 100 字超えを止めたため

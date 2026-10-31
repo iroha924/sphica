@@ -203,7 +203,7 @@ if (json) {
   console.log(`release kind: ${label}`);
   console.log(`compared: ${ref}..index (HEAD ${plan.commit})`);
   console.log(
-    `version: npm ${packageVersion} / plugin ${versions.claude} / marketplace ${versions.marketplace} / Codex ${versions.codex} / pane ${versions.pane} (ref v${versions.paneRef})`,
+    `version: npm ${packageVersion} / plugin ${versions.claude} / marketplace ${versions.marketplace} / Codex ${versions.codex}`,
   );
   if (files.length) console.log(`inputs: ${files.map(shown).join(", ")}`);
   if (verdict) console.log(`release verdict: ${verdict.same ? "same" : "not usable"}: ${verdict.reason}`);
