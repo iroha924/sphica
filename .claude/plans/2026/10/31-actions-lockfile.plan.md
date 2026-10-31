@@ -62,7 +62,7 @@ approved_at: 2026-10-31
 5. 説明の範囲: 「必須の check ジョブ自身の依存の不整合は runner が拒む。全ワークフローの整合は zizmor.yml の actions-lock ジョブで見る（必須ではない）」。lockfile が古いと必須チェックが全部落ちる、とは書かない
 6. `ASSURANCE.md:53` の「Third-party actions are pinned to commit SHAs」を直し、Action とその推移的な依存は lockfile でリポジトリの同一性とタグから辿れるコミットまで照合すること、reusable workflow・コンテナイメージ・run で取るツールは対象外であることを英語で書く。:77 の表の「Pinned actions」も合わせる
 7. Dependabot: 設定は変えない。最初の更新 PR で、SHA と版のコメント、lockfile の commit/ref、推移的な依存、owner_id/repo_id、`--verify`、CI を確かめる。タグの行に変えてきたら自動では取り込まず、方針 1 の手順で SHA の行に戻して lockfile を作り直す（この計画の PR の後のことなので、手順だけを PR 本文に残す）
-8. 負例（runner が本当に照合していることの確認）: 作業 PR の最終 head から使い捨てのブランチを切り、base=main の draft PR を出す。差分は lockfile の `workflows` の `.github/workflows/check.yml` の一覧から `oven-sh/setup-bun@v2.2.0` を外す 1 行だけ（共有の `dependencies` の定義は残す）。合格は、setup-bun を使う `part` などのジョブが「Set up job」で依存が無いことを理由に落ちること（集約の `check` の失敗だけでは足りない）。PR のタイトル・本文・コミットのメッセージに「意図的な検証で、採用も merge もしない」と、目的・欠かせた依存・期待する失敗を書き、関連付けは `Refs` だけ（`Closes`/`Fixes` は使わない）。確かめたら実測（head、run の URL、失敗の理由）を本文に足し、PR を閉じてブランチを消す。作業 PR の本文にも負例の PR・head・run・結果を残す。draft PR の本文と作るコミットは外へ出すものなので、出す前に文面を持ち主に見せる
+8. 負例（GitHub が本当に照合していることの確認）: PR #398 の最初の push（df19c187）で、`uses:` の SHA が lockfile の key に無いワークフローを GitHub が読み込みで拒んだ実測を負例として使う。使い捨ての draft PR で依存を欠かせて確かめ直すことはしない（同じことの繰り返しで、外へ出すものが増えるだけ）
 9. release kind は none の見込み。変更をステージしてから `bun run release:plan -- --base v0.6.70` で確かめる。none でも review-shipping と Codex のレビュー（`codex-review` Skill）を通す
 
 ## 採った案と棄却した案
@@ -88,7 +88,7 @@ PR の CI での正常例（A5）と使い捨ての draft PR での負例（A6�
 - A3: `bun run release:plan -- --base v0.6.70` → kind が none（変更をステージした状態で流す）
 - A4: `mise exec -- bun run verify` → exit 0
 - A5: `gh pr checks <作業 PR>` → check.yml・zizmor.yml（actions-lock を含む）・release.yml（dry run）・pr-body.yml の全ジョブが pass。加えて `gh run view <check.yml の run> --log | rg "Download action repository"` と release.yml の dry run の run で同じことを流す → 取得した Action の SHA が lockfile の `commit` と一致する。`actions/attest` は runner で未実走と PR 本文に書く
-- A6: `gh run view <負例の run> --log-failed` → `part` のジョブが「Set up job」で、setup-bun の依存が lockfile に無いことを理由に落ちている。run の URL と失敗の行を作業 PR の本文に残す。続けて `git ls-remote origin <負例のブランチ>` → 空（draft PR は閉じてある）
+- A6: `gh run list --branch ci/actions-lockfile --json headSha,conclusion` → df19c187 の check・zizmor・pr-body・release の run が `startup_failure`。同じ head での `gh workflow run scorecard.yml --ref ci/actions-lockfile` → HTTP 422「references actions not present in the lockfile」。lockfile に無い依存は、ジョブが始まる前に拒まれる
 - A7: `gh api 'repos/iroha924/sphica/code-scanning/alerts?ref=refs/pull/<作業 PR>/merge&state=open&tool_name=zizmor' --jq '[.[] | select(.rule.id | test("unpinned-uses"))] | length'` → 0
 - A8: `gh workflow run scorecard.yml --ref ci/actions-lockfile` と `gh workflow run osv-scanner.yml --ref ci/actions-lockfile` の後、`gh run view <各 run> --log | rg -n "Download action repository|lockfile"` → 両方の run の各ジョブが「Set up job」を通っている（lockfile で拒まれていない）。scorecard の結果の公開など、それより後のステップがブランチの上で落ちるのは対象外。PR では走らないこの 2 本を merge 前に runner に当てる
 
@@ -110,3 +110,4 @@ PR の CI での正常例（A5）と使い捨ての draft PR での負例（A6�
 2026-10-31 / 前提の 47 行目、A2、リスクの「SHA の行でタグが進む」を直した / 全差分の Codex レビュー F1（lock の key が完全なタグなら SHA の行でも tag-commit-mismatch のエラーになる。v0.4.0 の parity.go で確認）と F2（A2 の期待が T01 の正しい結果と食い違う） / Go 不要（記述と完了条件の期待を実装に合わせるだけ）
 2026-10-31 / lockfile を `--no-narrow` で作り直し、key を SHA にした。前提・方針 1・採った案・リスクを直した / key がタグの lockfile と SHA の行の組み合わせを GitHub がワークフローの読み込みで拒んだ（PR #398 の全 run が startup_failure、dispatch が 422） / 持ち主に 3 案（--no-narrow で続ける / タグの行に移す / 閉じる）を示し、「1」（--no-narrow）の Go を受けた
 2026-10-31 / 前提（タグが動いたときの扱い、narrow の書き換え）とリスクを直した / T04 の Codex レビュー F1（key が SHA なら tag-commit-mismatch にならず、先へ進んだタグは警告。`--relock` は SHA の uses を変えない。v0.4.0 の parity.go と parity_test.go で確認）と F2（「書き換えを止めるフラグは無い」が誤り） / Go 不要（記述を実装と上流のソースに合わせるだけ）
+2026-10-31 / 方針 8 と A6 を、使い捨ての draft PR から、df19c187 で GitHub が拒んだ実測に置き換えた / lockfile に無い依存を GitHub が拒むことは、その実測（4 本の startup_failure と dispatch の 422）で示された。draft PR は同じことを確かめ直すだけで、外へ出すものが増える / Go 不要（確かめ方を、より直接の実測に置き換えるだけ。持ち主には報告済み）

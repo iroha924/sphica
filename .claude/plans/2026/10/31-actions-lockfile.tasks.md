@@ -75,3 +75,5 @@ base: main
 2026-10-31 / 全体 / review-shipping は 2 件。zizmor.yml の冒頭コメントが古くなっていた指摘は T03 で直した。scorecard.yml と osv-scanner.yml が PR では走らない指摘は、plan に完了条件 A8 を足して受け入れた
 2026-10-31 / T04 / PR #398 の最初の push で、key がタグの lockfile と SHA の行の組み合わせを GitHub が拒んだ（plan の前提が事実と食い違った） / 持ち主に 3 案を示して「--no-narrow で続ける」の Go を受け、修正タスク T04 を足した
 2026-10-31 / T04 / Codex のレビュー（c59a587f、high）は P3 が 2 件。F1（タグが動いたときの扱い）と F2（plan と PR 本文に残る worktree の手順と「フラグは無い」）を受け入れ、plan を直した。PR 本文は push の後に直す / 実装の変更はなし
+2026-10-31 / 全体 / 0aba6489 の CI は全項目 pass。A5: check と release の dry run の「Set up job」に「Using locked action versions from the workflow's lockfile」と出て、取得した SHA が lockfile の commit と一致。A8: osv-scanner の dispatch は success、scorecard の dispatch は「Set up job」を通ったあと scorecard-action が「Only the default branch main is supported」で落ちた（対象外）。A7: PR の zizmor のアラートは 0 件
+2026-10-31 / 全体 / GitHub の Codex レビューは df19c187 に対して届き、code review と security review とも指摘なし（+1）。それ以降のコミットには来ていない
