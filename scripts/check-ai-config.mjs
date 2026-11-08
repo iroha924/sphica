@@ -856,7 +856,7 @@ const forkIntake = [
     ".claude/skills/fork-pr/SKILL.md",
     readerStepProblems,
     "the reader is the one reader of a fork's text before the owner approves it (invariant fork-pr-as-data)",
-    "keep the step that starts the fork-reader agent",
+    'keep step 3 starting the fork-reader agent, and start no other reader before "Measured behavior"',
   ],
 ];
 for (const [file, problemsOf, why, fix] of forkIntake) {

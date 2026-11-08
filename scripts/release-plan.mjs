@@ -167,7 +167,7 @@ const actions =
     ? []
     : [
         "fill in the PR's Release notes, pass PR CI (check, pr-body, and the release dry run), and merge main into the branch",
-        "the owner checks the /sphica:review result of the last head; fix or decline each finding and resolve every thread",
+        "read the /sphica:review result of the last head; fix or decline each finding and resolve every thread",
         `git tag v${packageVersion} <PR head> && git push origin v${packageVersion}`,
         "hand the run URL release.yml comments on the PR to the owner",
         "owner: approve the npm-release environment on the run page (the run then publishes, merges, and creates the GitHub Release)",

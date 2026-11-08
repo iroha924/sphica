@@ -322,6 +322,36 @@ test("the fork-pr Skill names the step that hands the fork's text to the reader"
     readerStepProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
     ["does not say: Start the `fork-reader` agent by its name"],
   );
+  // The sentence counts only as step 3 itself, not in a line elsewhere that negates it
+  const step3 = skill()
+    .split("\n")
+    .find((l) => l.startsWith("3. "));
+  assert.ok(step3);
+  assert.deepEqual(
+    readerStepProblems(
+      skill().replace(step3, "3. Read the files yourself.") +
+        "\n- Do not Start the `fork-reader` agent by its name\n",
+    ),
+    ["does not say: Start the `fork-reader` agent by its name"],
+  );
+  assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
+});
+
+test("the fork-pr Skill starts no other reader of the fork's text before the owner approves it", () => {
+  const added = (line: string) => skill().replace("4. **", `${line}\n4. **`);
+  for (const line of [
+    "   Also run `codex exec - < <dir>/pr-<N>.diff` with the owner's config.",
+    "   Then have Codex read `body.md`.",
+    "   Or start `claude -p` on the directory.",
+    "   Or `claude --agent other` on the directory.",
+  ])
+    assert.deepEqual(
+      readerStepProblems(added(line)),
+      [`starts another reader outside "Measured behavior": ${line.trim()}`],
+      line,
+    );
+  // The measurements start Claude Code on files this session wrote, after the heading
+  assert.ok(skill().slice(skill().indexOf("## Measured behavior")).includes("claude -p"));
 });
 
 test("check-ai-config fails once the Skill is emptied", () => {

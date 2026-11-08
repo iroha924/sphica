@@ -6,7 +6,7 @@ description: Takes a pull request from a fork (any pull request whose author is 
 # Take in a pull request from a fork
 
 Reviews here run with the owner's credentials, and a checkout brings the other person's hooks, tool versions, and agent instructions with it.
-So the head of a fork stays text until the owner approves one exact commit, and until then readers that hold fewer tools than this session read that text: the `fork-reader` agent, which has no tool that runs a command, writes a file, or reaches the web.
+So the head of a fork stays text until the owner approves one exact commit, and until then only a reader that holds fewer tools than this session reads that text: the `fork-reader` agent, which has no tool that runs a command, writes a file, or reaches the web.
 This is still a rule, not a sandbox: "What this does not close" lists what stays open.
 
 ## Triggers
@@ -86,13 +86,14 @@ gh api repos/iroha924/sphica/pulls/<N> --jq '.head.sha, .base.ref, .base.sha, .h
    ```
 
    The author is the account that opened the pull request, taken from GitHub, not the name written in the fork's commits, which anyone can set. `<merge base>` is the one from step 2. Write the subject yourself, by this repository's commit rules. Push the branch as it is and open a pull request from it with `Refs #<N>` in its body. Do not merge `main` into it or edit it before that pull request is open: the pre-push hook runs `bun run check` on what is pushed (`bun run verify` for a push to main), and only this tree was approved to run here.
-8. **Review and land the owner's pull request.** From here it is an ordinary pull request of this repository: `/sphica:review` and its record in the body, CI, the `review-shipping` reviewer and the `plugin-release` Skill when it ships, and the owner's final call. The reader's report in step 3 does not stand in for these. Bringing the branch up to date with `main` belongs here. If a release took the version number in the meantime, move the version by the `plugin-release` Skill's steps, starting with `release:plan`, not by editing the four files directly.
+8. **Review and land the owner's pull request.** From here it is an ordinary pull request of this repository: `/sphica:review <number of that pull request>` from the `main` working tree (by number, so its reviewers that run commands stay out of the contributor's tree) and its record in the body, CI, the `review-shipping` reviewer and the `plugin-release` Skill when it ships, and the owner's final call. The reader's report in step 3 does not stand in for these. Bringing the branch up to date with `main` belongs here. If a release took the version number in the meantime, move the version by the `plugin-release` Skill's steps, starting with `release:plan`, not by editing the four files directly.
 9. **Close the loop on the fork's pull request.** Write a comment for the owner to post there that links the pull request carrying the change and names the head commit whose tree was taken in, and show the owner the wording before it is sent. Do not edit the contributor's body: harvest reads the body as its author's words. Close the fork's pull request once the change is on `main`.
 
 ## What this does not close
 
 - The reader can read any file this machine's user can, not only the directory it was given, and the session's hooks run inside it (Sphica's delivery hook runs on each Read)
 - The reader's report comes back to this session as free text. A report can mislead with no command in it
+- Before step 6 one model reads the text, and no second reader checks its report
 - After step 6 this session reads the approved text itself, and harvest later returns the pull request's text to the session that runs it
 - Titles show up in listings (`gh pr list`) before any step runs
 - The deny rules match three spellings of one command. An absolute path or `sh -c` passes them
@@ -107,4 +108,4 @@ When the version differs, measure again, and change this section in a commit of 
 2. `claude --agent fork-reader -p --setting-sources project --output-format stream-json --verbose`: the `tools` of the first `system` event hold no tool that runs a command, edits, writes, or fetches. This is the list when the definition runs as the main thread
 3. `claude -p --setting-sources project --allowedTools "Agent" --output-format stream-json --verbose`, asked to hand a directory of small files to `fork-reader` and to have it also run a command and fetch a URL: the events that carry a `parent_tool_use_id` show a Read of each file, and no call that is not Read, Grep, or Glob
 
-A call that did not happen shows only that the tool was not used. That the tool is absent rests on the hosts' documentation and source for those versions.
+A call that did not happen shows only that the tool was not used. That the tool is absent rests on Claude Code's documentation and source for that version.

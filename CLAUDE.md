@@ -69,7 +69,7 @@ Any other change in behavior needs no plan file: get the owner's Go on the appro
 Hand it over only after `bun run verify` passes.
 
 - `review-shipping`: before a commit that changes package inputs, dependencies, versions, bundle inputs, check scripts, or release machinery, also when the release kind is `none`
-- `/sphica:review`: before merging every PR, with Claude only (answer no when it offers the other model). Use `full` for a PR that touches a hard-to-undo area (the list under "Before implementing"), package inputs, dependencies, version checks, or release machinery. Write its result (findings and how each was handled) in the PR body's "Verification"; `pr-body` checks that it is named there
+- `/sphica:review`: before merging every PR, with Claude only (answer no when it offers the other model, and keep the validator on Claude). Use `full` for a PR that touches a hard-to-undo area (the list under "Before implementing"), package inputs, dependencies, version checks, or release machinery. Write its result (findings and how each was handled) in the PR body's "Verification"; `pr-body` checks that it is named there
 - GitHub's Codex (ChatGPT connector) may still review a PR on its own; nothing waits for it. When it leaves findings, Claude reads them on the PR itself, and comments `@codex review` only when the owner asks.
   For each finding from either review, decide whether to fix or decline it, and resolve its thread. Record declined ones in the PR body's "Declined findings".
   File an issue for a declined finding only when it will really help later (you can say what would make it worth revisiting), and ask the owner first. If none is worth one, finish without mentioning it.

@@ -103,11 +103,26 @@ export function readerProblems(source) {
 /** The sentence of step 3 that hands the text to the reader: naming the agent somewhere else in the Skill does not stand in for it */
 const READER_STEP = "Start the `fork-reader` agent by its name";
 
+/** Where the Skill may start Claude Code itself: the measurements of the deny rules and the reader's tools */
+const MEASURED = "## Measured behavior";
+/** Launchers of another reader, which would hold more tools than the fork-reader agent */
+const OTHER_READER = /\bcodex\b|\bclaude\s+(?:-p\b|--agent\b)/i;
+
 /**
- * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text, so the Skill must keep the step that starts it.
+ * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no other line
+ * before the measurements starts another reader.
  * @param {string} source
  * @returns {string[]}
  */
 export function readerStepProblems(source) {
-  return source.includes(READER_STEP) ? [] : [`does not say: ${READER_STEP}`];
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const end = lines.indexOf(MEASURED);
+  const steps = end === -1 ? lines : lines.slice(0, end);
+  const problems = steps.some((line) => line.startsWith("3. ") && line.includes(READER_STEP))
+    ? []
+    : [`does not say: ${READER_STEP}`];
+  const other = steps.find((line) => OTHER_READER.test(line));
+  if (other !== undefined)
+    problems.push(`starts another reader outside "Measured behavior": ${other.trim()}`);
+  return problems;
 }
