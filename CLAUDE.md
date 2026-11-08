@@ -70,6 +70,7 @@ Hand it over only after `bun run verify` passes.
 
 - `review-shipping`: before a commit that changes package inputs, dependencies, versions, bundle inputs, check scripts, or release machinery, also when the release kind is `none`
 - Codex: before merging a PR that touches a hard-to-undo area (the list under "Before implementing"), package inputs, dependencies, version checks, or release machinery. Ask by following the `codex-review` Skill. Other PRs rely on GitHub's Codex review
+- Codex is unavailable for now: since 2026-11-08 the owner's Codex is on the free plan, and `codex exec` fails (the configured model returns 400 on a ChatGPT account). The local Codex review and `grill-codex` cannot run, so say in the PR body's "Verification" that they were not run and why (`pr-body` reads only that section), and in the report when there is no PR. GitHub's Codex review still runs on this plan
 - GitHub's Codex (ChatGPT connector) reviews a PR when it is created and when someone comments `@codex review`. Claude watches CI, then reads the review's findings on the PR itself; it comments `@codex review` only when the owner asks.
   For each finding, decide whether to fix or decline it, then resolve its thread. Record declined ones in the PR body's "Declined findings".
   File an issue for a declined finding only when it will really help later (you can say what would make it worth revisiting), and ask the owner first. If none is worth one, finish without mentioning it.
