@@ -1,5 +1,5 @@
-# Checks that the Verification section of the PR body mentions the Codex review (only that the word is there). The body is written by the author whose work
-# was reviewed, so this checks the record, not the review: the owner reads the Codex review before approving a release.
+# Checks that the Verification section of the PR body names the sphica:review result (only that the words are there). The body is written by the author
+# whose work was reviewed, so this checks the record, not the review: the owner reads the result before approving a release.
 # The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
 # A pull request from a fork is skipped: it is never merged itself, its author cannot run the review, and the pull request of this
 # repository that carries the change in holds the record.
@@ -20,15 +20,15 @@ jobs:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
-      - name: The Verification section mentions the Codex review
+      - name: The Verification section names the sphica:review result
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
-          # The template's comments also mention Codex, so drop HTML comments before taking the section.
+          # The template's comments also name sphica:review, so drop HTML comments before taking the section.
           # PRs opened before the English template use the Japanese heading.
           # english-exempt: the Japanese Verification heading of PRs opened before the English template
           printf '%s\n' "$BODY" | tr -d '\r' | perl -0pe 's/<!--.*?-->//gs' | awk '/^## (Verification|検証)[ \t]*$/{f=1;next} /^## /{f=0} f' > verification.txt
-          grep -q "Codex" verification.txt || {
-            echo "The Verification section of the PR body does not mention the Codex review (see review in CLAUDE.md and the codex-review Skill)"
+          grep -qF "sphica:review" verification.txt || {
+            echo "The Verification section of the PR body does not name the sphica:review result (see Review in CLAUDE.md)"
             exit 1
           }

@@ -100,83 +100,14 @@ export function readerProblems(source) {
   return problems;
 }
 
-const REVIEW_MARK = "<!-- fork-review-command -->";
 /** The sentence of step 3 that hands the text to the reader: naming the agent somewhere else in the Skill does not stand in for it */
 const READER_STEP = "Start the `fork-reader` agent by its name";
-/** Codex features that act outside its sandbox or hand work on. `multi_agent` alone leaves the kind of delegation the model's catalog entry picks */
-const REVIEW_OFF = [
-  "apps",
-  "plugins",
-  "remote_plugin",
-  "hooks",
-  "multi_agent",
-  "multi_agent_v2",
-  "browser_use",
-  "browser_use_external",
-  "computer_use",
-  "image_generation",
-];
-const REVIEW_FLAGS = [
-  "-s read-only",
-  "--ignore-rules",
-  "--ephemeral",
-  "--ignore-user-config",
-  ...REVIEW_OFF.map((name) => `--disable ${name}`),
-  "-c agents.enabled=false",
-  "-c 'web_search=\"disabled\"'",
-  '-c model_reasoning_effort="high"',
-];
-/** Where the Skill may name the command besides the marked line: another Skill's name, the places that configure Codex, and two commands that only print */
-const REVIEW_NAMED = [
-  "codex-review",
-  "~/.codex/config.toml",
-  "~/.codex/hooks.json",
-  "/etc/codex",
-  " .codex ",
-  "`codex --version`",
-  "`codex features list`",
-];
-const REVIEW_COMMAND = `codex exec ${REVIEW_FLAGS.join(" ")} - < <request file> > <output file> 2>&1`;
 
 /**
- * The fork-pr Skill starts Codex on a fork's diff with one command, written once under a mark, and that command is the one above
- * word for word: a flag kept in the prose but dropped from the command, or one added to it, changes what Codex holds.
+ * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text, so the Skill must keep the step that starts it.
  * @param {string} source
  * @returns {string[]}
  */
-export function reviewCommandProblems(source) {
-  const text = source.replaceAll("\r\n", "\n");
-  const problems = [];
-  if (!text.includes(READER_STEP)) problems.push(`does not say: ${READER_STEP}`);
-  const marks = text.split(REVIEW_MARK).length - 1;
-  if (marks !== 1) return [...problems, `must hold the mark ${REVIEW_MARK} once (found ${marks})`];
-  const block = /^\n[ \t]*```bash\n([\s\S]*?)\n[ \t]*```[ \t]*(?:\n|$)/.exec(
-    text.slice(text.indexOf(REVIEW_MARK) + REVIEW_MARK.length),
-  );
-  if (!block) return [...problems, "the mark is not followed at once by a bash code block"];
-  // Any other way of starting Codex written into the Skill, in a block or in the prose, would be followed as readily as the marked one.
-  // So outside the marked block the command's name may stand only in the spellings REVIEW_NAMED lists
-  const marked = new Set((block[1] ?? "").split("\n").map((line) => line.trim()));
-  const others = text
-    .split("\n")
-    .filter((line) => !marked.has(line.trim()))
-    .filter((line) =>
-      /\bcodex\b/.test(REVIEW_NAMED.reduce((rest, known) => rest.replaceAll(known, ""), line)),
-    );
-  if (others.length)
-    problems.push(
-      `names the codex command outside the marked block in a way this check does not know: ${(others[0] ?? "").trim().slice(0, 80)}`,
-    );
-  const command = (block[1] ?? "").trim();
-  // The marked line is left out of the search above wherever it stands, so a second copy has to be counted here
-  const copies = text.split("\n").filter((line) => line.trim() === command).length;
-  if (copies > 1) problems.push(`the marked command is written ${copies} times`);
-  if (command === REVIEW_COMMAND) return problems;
-  const missing = REVIEW_FLAGS.filter((flag) => !` ${command} `.includes(` ${flag} `));
-  return [
-    ...problems,
-    missing.length
-      ? `the marked command lacks ${missing.join(", ")}`
-      : "the marked command differs from the one this check knows",
-  ];
+export function readerStepProblems(source) {
+  return source.includes(READER_STEP) ? [] : [`does not say: ${READER_STEP}`];
 }

@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { withoutComments } from "./lib/english.mjs";
 import { CheckFailure, fail as stop, finding, guard, report } from "./lib/finding.mjs";
-import { readerProblems, reviewCommandProblems, settingsProblems } from "./lib/fork-intake.mjs";
+import { readerProblems, readerStepProblems, settingsProblems } from "./lib/fork-intake.mjs";
 
 guard("AI config", () => failures);
 
@@ -851,12 +851,12 @@ const forkIntake = [
     "the reader reads a fork's text before the owner approves it, so it holds the read tools and nothing that acts (invariant fork-pr-as-data)",
     "keep the frontmatter to one plain value each of name, description, tools, model, effort, and maxTurns, with tools: Read, Grep, Glob",
   ],
-  // Codex reads a fork's diff without the tools that reach outside its sandbox
+  // Only the reader reads a fork's text before the owner approves it
   [
     ".claude/skills/fork-pr/SKILL.md",
-    reviewCommandProblems,
-    "Codex reads a fork's diff with this one command, so a flag dropped or added changes what it can reach (invariant fork-pr-as-data)",
-    `write REVIEW_COMMAND from ${FORK_RULES} once, word for word, in a bash block right after the mark, and keep the step that starts the fork-reader agent`,
+    readerStepProblems,
+    "the reader is the one reader of a fork's text before the owner approves it (invariant fork-pr-as-data)",
+    "keep the step that starts the fork-reader agent",
   ],
 ];
 for (const [file, problemsOf, why, fix] of forkIntake) {
