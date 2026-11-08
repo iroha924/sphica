@@ -90,6 +90,10 @@ test("source files are found by walking the whole checkout, and a symbolic link 
     fs.writeFileSync(path.join(root, "built", "out.js"), "const o = 1;\n");
     // A directory nobody listed is walked too
     fs.writeFileSync(path.join(root, "new-place", "c.cjs"), "const c = 1;\n");
+    // A worktree or submodule checked out inside is another checkout, marked by its own .git file
+    fs.mkdirSync(path.join(root, "src", "nested"));
+    fs.writeFileSync(path.join(root, "src", "nested", ".git"), "gitdir: elsewhere\n");
+    fs.writeFileSync(path.join(root, "src", "nested", "n.ts"), "const n = 1;\n");
     fs.writeFileSync(path.join(outside, "target.ts"), "const secret = 1;\n");
     // A link to a file and links to a directory, in the walked tree and at its top, all leading out of the checkout
     fs.symlinkSync(path.join(outside, "target.ts"), path.join(root, "src", "escape.ts"));
