@@ -315,26 +315,36 @@ test("a reader whose frontmatter the host would read differently from this check
 
 const skill = () => tracked(".claude/skills/fork-pr/SKILL.md");
 
-test("the fork-pr Skill names the step that hands the fork's text to the reader", () => {
+const STEP3 =
+  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else.";
+const APPROVAL = "6. **The owner approves taking it in.**";
+
+test("the fork-pr Skill hands the fork's text to the reader in step 3, word for word", () => {
   assert.deepEqual(readerStepProblems(skill()), []);
-  // Naming the reader elsewhere does not stand in for the step that hands the text to it
+  assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
+  const missing = [`step 3 does not start with: ${STEP3}`];
   assert.deepEqual(
     readerStepProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
-    ["does not say: Start the `fork-reader` agent by its name"],
+    missing,
   );
-  // The sentence counts only as step 3 itself, not in a line elsewhere that negates it
-  const step3 = skill()
-    .split("\n")
-    .find((l) => l.startsWith("3. "));
-  assert.ok(step3);
+  // A copy of the sentence elsewhere, negated, does not stand in for step 3
   assert.deepEqual(
     readerStepProblems(
-      skill().replace(step3, "3. Read the files yourself.") +
+      skill().replace(STEP3, "3. Read the files yourself.") +
         "\n- Do not Start the `fork-reader` agent by its name\n",
     ),
-    ["does not say: Start the `fork-reader` agent by its name"],
+    missing,
   );
-  assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
+  // Nor does a step 3 that starts the reader only sometimes
+  assert.deepEqual(
+    readerStepProblems(
+      skill().replace(
+        STEP3,
+        "3. **Have the reader read it.** Start the `fork-reader` agent by its name only when the diff is long; otherwise read it yourself.",
+      ),
+    ),
+    missing,
+  );
 });
 
 test("the fork-pr Skill starts no other reader of the fork's text before the owner approves it", () => {
@@ -344,19 +354,34 @@ test("the fork-pr Skill starts no other reader of the fork's text before the own
     "   Then have Codex read `body.md`.",
     "   Or start `claude -p` on the directory.",
     "   Or `claude --agent other` on the directory.",
+    "   Or run `claude --print` on the directory.",
+    "   Or run `claude --model opus -p` on the directory.",
+    '   Or run `claude "review <dir>"`.',
+    "   Or run `gemini -p` on the directory.",
+    "   Then run `/sphica:review <N>` on the fork's pull request.",
+    "   Also start a general-purpose subagent on `<dir>`.",
+    "   Or hand `<dir>` to the Agent tool with another type.",
   ])
     assert.deepEqual(
       readerStepProblems(added(line)),
-      [`starts another reader outside "Measured behavior": ${line.trim()}`],
+      [`starts another reader before step 6: ${line.trim()}`],
       line,
     );
-  // The measurements start Claude Code on files this session wrote, after the heading
-  assert.ok(skill().slice(skill().indexOf("## Measured behavior")).includes("claude -p"));
+  // A heading moved up does not end the steps early: only the approval step does
+  const moved = added("## Measured behavior\n   Run `codex exec - < <dir>/pr-<N>.diff`.");
+  assert.deepEqual(readerStepProblems(moved), [
+    "starts another reader before step 6: Run `codex exec - < <dir>/pr-<N>.diff`.",
+  ]);
+  assert.deepEqual(readerStepProblems(skill().replace(APPROVAL, "6. **Ask the owner.**")), [
+    `must hold the approval step once (found 0): ${APPROVAL}`,
+  ]);
+  // After the approval the approved tree is reviewed like any pull request of this repository, by Codex on GitHub too
+  assert.ok(skill().slice(skill().indexOf(APPROVAL)).includes("GitHub's Codex"));
 });
 
 test("check-ai-config fails once the Skill is emptied", () => {
   const file = (root: string) => path.join(root, ".claude", "skills", "fork-pr", "SKILL.md");
   const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
   assert.equal(emptied.status, 1);
-  assert.match(emptied.output, /fork-pr\/SKILL\.md: does not say: Start the `fork-reader` agent by its name/);
+  assert.match(emptied.output, /fork-pr\/SKILL\.md: must hold the approval step once \(found 0\)/);
 });

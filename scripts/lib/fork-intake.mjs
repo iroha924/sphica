@@ -100,29 +100,39 @@ export function readerProblems(source) {
   return problems;
 }
 
-/** The sentence of step 3 that hands the text to the reader: naming the agent somewhere else in the Skill does not stand in for it */
-const READER_STEP = "Start the `fork-reader` agent by its name";
-
-/** Where the Skill may start Claude Code itself: the measurements of the deny rules and the reader's tools */
-const MEASURED = "## Measured behavior";
-/** Launchers of another reader, which would hold more tools than the fork-reader agent */
-const OTHER_READER = /\bcodex\b|\bclaude\s+(?:-p\b|--agent\b)/i;
+/** Step 3 as the Skill writes it: a copy elsewhere, or a step 3 that starts the reader only sometimes, does not stand in for it */
+const STEP3 =
+  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else.";
+/** The steps before the owner's approval run from `## Steps` down to this line */
+const APPROVAL = "6. **The owner approves taking it in.**";
+/** Words that start a reader with more tools than fork-reader, not the `.claude/` directory. A launcher not named here passes */
+const LAUNCHER =
+  /(?<![./])\bcodex\b|(?<![./])\bclaude\b|\bgemini\b|sphica:|\bsubagents?\b|general-purpose|--print\b/i;
+const AGENT_TOOL = /\bAgent\b/;
+/** Spellings that name a launcher without starting a reader: a version check, an instruction file, and the check that the reader is listed */
+const NAMED = ["`claude --version`", "`CLAUDE.md`", "If the Agent tool does not list `fork-reader`"];
 
 /**
- * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no other line
- * before the measurements starts another reader.
+ * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no line from
+ * `## Steps` down to the approval names another launcher.
  * @param {string} source
  * @returns {string[]}
  */
 export function readerStepProblems(source) {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
-  const end = lines.indexOf(MEASURED);
-  const steps = end === -1 ? lines : lines.slice(0, end);
-  const problems = steps.some((line) => line.startsWith("3. ") && line.includes(READER_STEP))
+  const approvals = lines.filter((line) => line.startsWith(APPROVAL)).length;
+  if (approvals !== 1) return [`must hold the approval step once (found ${approvals}): ${APPROVAL}`];
+  const steps = lines.slice(
+    lines.indexOf("## Steps") + 1,
+    lines.findIndex((line) => line.startsWith(APPROVAL)),
+  );
+  const problems = steps.some((line) => line.startsWith(STEP3))
     ? []
-    : [`does not say: ${READER_STEP}`];
-  const other = steps.find((line) => OTHER_READER.test(line));
-  if (other !== undefined)
-    problems.push(`starts another reader outside "Measured behavior": ${other.trim()}`);
+    : [`step 3 does not start with: ${STEP3}`];
+  const other = steps.find((line) => {
+    const rest = NAMED.reduce((text, known) => text.replaceAll(known, ""), line);
+    return LAUNCHER.test(rest) || AGENT_TOOL.test(rest);
+  });
+  if (other !== undefined) problems.push(`starts another reader before step 6: ${other.trim()}`);
   return problems;
 }
