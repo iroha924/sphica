@@ -5,7 +5,7 @@ description: Asks Codex (codex exec) to review or investigate a Sphica diff. Use
 
 # Ask Codex for reviews and investigations
 
-Unavailable for now: since 2026-11-08 the owner's Codex is on the free plan, and `codex exec` fails (the configured model returns 400). Do not run it; say in the PR body or the report that the Codex review was not run and why.
+Unavailable for now: since 2026-11-08 the owner's Codex is on the free plan, and `codex exec` fails (the configured model returns 400). Do not run it; say in the PR body's "Verification" that the local Codex review was not run and why (`pr-body` reads only that section), and in the report when there is no PR.
 
 ## Triggers
 
