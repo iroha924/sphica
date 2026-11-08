@@ -58,7 +58,8 @@ export function sourceFiles(root, skip) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink() || entry.name === ".git" || entry.name === "node_modules") continue;
       if (entry.isDirectory()) {
-        if (!skip.test(`${rel}/`)) walk(rel);
+        // A worktree or submodule inside the checkout carries its own .git and is checked from its own root
+        if (!skip.test(`${rel}/`) && !fs.existsSync(path.join(root, rel, ".git"))) walk(rel);
       } else if (entry.isFile() && commentMarker(rel) && !skip.test(rel)) found.push(rel);
     }
   };
