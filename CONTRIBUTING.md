@@ -55,13 +55,13 @@ Changes to docs that do not ship, tests, and development scripts need no version
 ## Pull requests
 
 - Open the pull request from your fork into `main`, and fill in the template. Delete the sections you cannot fill.
-- In the Verification section, paste the commands you ran and their output, and say what you could not run. The template also asks for a Codex review: leave that out, the maintainer runs it when taking your change in.
+- In the Verification section, paste the commands you ran and their output, and say what you could not run. The template also asks for a `/sphica:review` result: leave that out, the maintainer runs it when taking your change in.
 - CI on a pull request from a fork waits for the maintainer to approve each run.
 
 ## How review works
 
 1. The maintainer reads the diff. Until then nothing from your branch is run on the maintainer's machine, so expect questions about changes to workflows, hooks, tool versions, dependencies, or agent instructions.
-2. CI runs, and the maintainer has the change reviewed by Codex. You may be asked for changes.
+2. CI runs, and the maintainer reviews the change. You may be asked for changes.
 3. The maintainer accepts it. Only the maintainer merges, and not from your pull request directly: the files as your branch has them are taken, as one new commit with your GitHub account as its author, onto a branch in this repository, and that branch's pull request is the one that is reviewed once more and merged. A change that ships is released from it, after the maintainer approves the release.
 4. Your pull request gets a link to that one, and is closed when the change reaches `main`.
 

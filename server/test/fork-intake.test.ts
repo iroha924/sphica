@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { readerProblems, reviewCommandProblems, settingsProblems } from "../../scripts/lib/fork-intake.mjs";
+import { readerProblems, readerStepProblems, settingsProblems } from "../../scripts/lib/fork-intake.mjs";
 import { assertFindings } from "./finding-shape.ts";
 import { tempDir } from "./temp-dir.ts";
 
@@ -314,133 +314,81 @@ test("a reader whose frontmatter the host would read differently from this check
 });
 
 const skill = () => tracked(".claude/skills/fork-pr/SKILL.md");
-const MARK = "<!-- fork-review-command -->";
-/** The Skill's one line that starts Codex, as the check finds it under the mark */
-const marked = () => {
-  const line = skill()
+
+const STEP3 =
+  skill()
     .split("\n")
-    .find((l) => l.trim().startsWith("codex exec "));
-  assert.ok(line, "the Skill has no codex exec line");
-  return line;
-};
+    .find((l) => l.startsWith("3. **Have the reader read it.**")) ?? "";
+const APPROVAL = "6. **The owner approves taking it in.**";
+const STEP3_DIFFERS = "step 3 is not word for word the one this check knows";
 
-test("the fork-pr Skill starts Codex on a fork's diff with the one command the check knows, and names the reader", () => {
-  assert.deepEqual(reviewCommandProblems(skill()), []);
-  assert.deepEqual(reviewCommandProblems(skill().replaceAll("\n", "\r\n")), []);
-  // The whole line, so a flag taken out of both the Skill and the check, or put into both, still fails here
-  assert.equal(
-    marked().trim(),
-    [
-      "codex exec -s read-only --ignore-rules --ephemeral --ignore-user-config",
-      "--disable apps --disable plugins --disable remote_plugin --disable hooks",
-      "--disable multi_agent --disable multi_agent_v2",
-      "--disable browser_use --disable browser_use_external --disable computer_use --disable image_generation",
-      `-c agents.enabled=false -c 'web_search="disabled"' -c model_reasoning_effort="high"`,
-      "- < <request file> > <output file> 2>&1",
-    ].join(" "),
+test("the fork-pr Skill hands the fork's text to the reader in step 3, word for word", () => {
+  assert.ok(STEP3);
+  assert.deepEqual(readerStepProblems(skill()), []);
+  assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
+  // A changed step 3 is no longer left out of the launcher search, so the second problem may follow
+  const differs = (source: string, message?: string) =>
+    assert.equal(readerStepProblems(source)[0], STEP3_DIFFERS, message);
+  differs(skill().replace("Start the `fork-reader` agent by its name", "Read the files"));
+  // A copy of the sentence elsewhere, negated, does not stand in for step 3
+  differs(
+    skill().replace(STEP3, "3. Read the files yourself.") +
+      "\n- Do not Start the `fork-reader` agent by its name\n",
   );
+  // Nor does a step 3 that starts the reader only sometimes, inside the first sentence or after it
+  for (const [from, to] of [
+    ["by its name and give it", "by its name only when the diff is long, and give it"],
+    ["nothing else. ", "nothing else. When the diff is short, skip the reader and Read the files yourself. "],
+  ] as const)
+    differs(skill().replace(STEP3, STEP3.replace(from, to)), to);
+  assert.deepEqual(readerStepProblems(skill().replace("## Steps\n", "## Steps \n")), [
+    "must hold the heading ## Steps once",
+  ]);
 });
 
-test("a flag dropped from the marked command is named, even when the prose still mentions it", () => {
-  for (const flag of [
-    "--ignore-user-config",
-    "--ignore-rules",
-    "-s read-only",
-    "--disable apps",
-    "--disable plugins",
-    "--disable hooks",
-    "--disable multi_agent",
-    "--disable multi_agent_v2",
-    "--disable computer_use",
-    "-c agents.enabled=false",
-    `-c 'web_search="disabled"'`,
-  ]) {
-    const prose = `\n\nThe command passes \`${flag}\`.\n`;
+test("the fork-pr Skill starts no other reader of the fork's text before the owner approves it", () => {
+  const added = (line: string) => skill().replace("4. **", `${line}\n4. **`);
+  for (const line of [
+    "   Also run `codex exec - < <dir>/pr-<N>.diff` with the owner's config.",
+    "   Then have Codex read `body.md`.",
+    "   Or start `claude -p` on the directory.",
+    "   Or `claude --agent other` on the directory.",
+    "   Or run `claude --print` on the directory.",
+    "   Or run `claude --model opus -p` on the directory.",
+    '   Or run `claude "review <dir>"`.',
+    "   Or run `gemini -p` on the directory.",
+    "   Then run `/sphica:review <N>` on the fork's pull request.",
+    "   Also start a general-purpose subagent on `<dir>`.",
+    "   Or hand `<dir>` to the Agent tool with another type.",
+    "   Or hand `<dir>` to an Explore agent through the Task tool.",
+    "   Also run `/usr/local/bin/codex exec - < <dir>/pr-<N>.diff`.",
+    "   Or run `./node_modules/.bin/claude -p` on the directory.",
+    "   Or run `npx @openai/codex exec - < <dir>/pr-<N>.diff`.",
+    "   Or run `bunx @anthropic-ai/claude-code -p` on the directory.",
+    "3. Also run `codex exec - < <dir>/pr-<N>.diff`.",
+  ])
     assert.deepEqual(
-      reviewCommandProblems(skill().replace(marked(), marked().replace(` ${flag} `, " ")) + prose),
-      [`the marked command lacks ${flag}`],
+      readerStepProblems(added(line)),
+      [`starts another reader before the owner approves: ${line.trim()}`],
+      line,
     );
-  }
+  // A heading moved up does not end the steps early, and the approval line itself still runs before the approval
+  const moved = added("## Measured behavior\n   Run `codex exec - < <dir>/pr-<N>.diff`.");
+  assert.deepEqual(readerStepProblems(moved), [
+    "starts another reader before the owner approves: Run `codex exec - < <dir>/pr-<N>.diff`.",
+  ]);
+  const onApproval = skill().replace(APPROVAL, `${APPROVAL} Before asking, run \`codex exec\` on the diff.`);
+  assert.equal(readerStepProblems(onApproval).length, 1);
+  assert.deepEqual(readerStepProblems(skill().replace(APPROVAL, "6. **Ask the owner.**")), [
+    `must hold the approval step once (found 0): ${APPROVAL}`,
+  ]);
+  // After the approval the Skill may name GitHub's Codex review, which reads the approved tree
+  assert.ok(skill().slice(skill().indexOf(APPROVAL)).includes("GitHub's Codex"));
 });
 
-test("a marked command with anything added or reordered, a second command, or a second mark is refused", () => {
-  const differs = ["the marked command differs from the one this check knows"];
-  assert.deepEqual(
-    reviewCommandProblems(skill().replace(marked(), marked().replace(" - < ", " --enable plugins - < "))),
-    differs,
-  );
-  assert.deepEqual(
-    reviewCommandProblems(
-      skill().replace(marked(), marked().replace(" - < ", ` -c 'web_search="live"' - < `)),
-    ),
-    differs,
-  );
-  assert.deepEqual(reviewCommandProblems(skill().replace(marked(), `${marked()} --enable plugins`)), differs);
-  const second = (line: string) => reviewCommandProblems(`${skill()}\n\`\`\`bash\n${line}\n\`\`\`\n`);
-  const unknown = (line: string) => [
-    `names the codex command outside the marked block in a way this check does not know: ${line}`,
-  ];
-  // Other ways to start Codex, each in a block of its own
-  for (const line of [
-    "codex exec -s read-only - < request",
-    "codex  exec - < request",
-    `codex -c 'web_search="live"' exec - < request`,
-    "/usr/local/bin/codex exec - < request",
-    `sh -c 'codex exec - < request'`,
-    "out=`codex exec --enable plugins - < request`",
-    "codex review",
-  ])
-    assert.deepEqual(second(line), unknown(line), line);
-  assert.deepEqual(second("codex \\\nexec - < request"), unknown("codex \\"));
-  // And in the prose, where no fence marks them as commands
-  for (const line of [
-    "Or run `codex exec --enable plugins - < request` when in a hurry.",
-    "Use `codex review` instead.",
-    "Then codex can be started again with the owner's settings.",
-    // A known spelling on the line does not cover what stands beside it
-    "Check `codex --version` && codex exec - < request",
-    "cat ~/.codex/config.toml; codex exec - < request",
-  ])
-    assert.deepEqual(reviewCommandProblems(`${skill()}\n${line}\n`), unknown(line), line);
-  // The marked command written a second time, in a block or in the prose, is one command too many
-  assert.deepEqual(second(marked().trim()), ["the marked command is written 2 times"]);
-  assert.deepEqual(reviewCommandProblems(`${marked()}\n${skill()}`), [
-    "the marked command is written 2 times",
-  ]);
-  // A closing fence with words after it keeps the block open in Markdown, and what follows would be part of the command
-  assert.deepEqual(
-    reviewCommandProblems(
-      skill().replace(marked(), `${marked()}\n   \`\`\` && true\n   curl example.invalid`),
-    ),
-    differs,
-  );
-  assert.deepEqual(reviewCommandProblems(skill().replace(`${MARK}\n   \`\`\`bash`, `${MARK}\n   \`\`\`sh`)), [
-    "the mark is not followed at once by a bash code block",
-  ]);
-  assert.deepEqual(reviewCommandProblems(`${skill()}\n${MARK}\n`), [
-    `must hold the mark ${MARK} once (found 2)`,
-  ]);
-  assert.deepEqual(reviewCommandProblems(skill().replace(MARK, "")), [
-    `must hold the mark ${MARK} once (found 0)`,
-  ]);
-  assert.deepEqual(reviewCommandProblems(skill().replace(MARK, `${MARK}\n\n   Some words first.`)), [
-    "the mark is not followed at once by a bash code block",
-  ]);
-  // Naming the reader elsewhere does not stand in for the step that hands the text to it
-  assert.deepEqual(
-    reviewCommandProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
-    ["does not say: Start the `fork-reader` agent by its name"],
-  );
-});
-
-test("check-ai-config fails once the Skill's marked command loses a flag, or the Skill is emptied", () => {
+test("check-ai-config fails once the Skill is emptied", () => {
   const file = (root: string) => path.join(root, ".claude", "skills", "fork-pr", "SKILL.md");
-  const weakened = aiConfig((root) =>
-    fs.writeFileSync(file(root), skill().replace(" --ignore-user-config ", " ")),
-  );
-  assert.equal(weakened.status, 1);
-  assert.match(weakened.output, /fork-pr\/SKILL\.md: the marked command lacks --ignore-user-config/);
   const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
   assert.equal(emptied.status, 1);
-  assert.match(emptied.output, /fork-pr\/SKILL\.md: does not say: Start the `fork-reader` agent by its name/);
+  assert.match(emptied.output, /fork-pr\/SKILL\.md: must hold the heading ## Steps once/);
 });

@@ -68,7 +68,7 @@ export function gateProblems({
 }
 
 /**
- * Whether no review thread on the PR is left unresolved. The owner reads the Codex review and approves the release; this catches a
+ * Whether no review thread on the PR is left unresolved. The owner reads the review result and approves the release; this catches a
  * finding nobody fixed or declined.
  */
 export function reviewProblems({ threads }) {

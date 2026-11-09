@@ -147,7 +147,7 @@ test("rejects a commit whose release dry run failed or did not run", () => {
   );
 });
 
-// The owner reads the Codex review; the gate only stops a release with a finding nobody fixed or declined
+// The owner reads the review result; the gate only stops a release with a finding nobody fixed or declined
 test("passes only when no review thread is left unresolved", () => {
   assert.deepEqual(reviewProblems({ threads: [] }), []);
   assert.deepEqual(reviewProblems({ threads: [{ isResolved: true }] }), []);

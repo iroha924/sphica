@@ -100,83 +100,41 @@ export function readerProblems(source) {
   return problems;
 }
 
-const REVIEW_MARK = "<!-- fork-review-command -->";
-/** The sentence of step 3 that hands the text to the reader: naming the agent somewhere else in the Skill does not stand in for it */
-const READER_STEP = "Start the `fork-reader` agent by its name";
-/** Codex features that act outside its sandbox or hand work on. `multi_agent` alone leaves the kind of delegation the model's catalog entry picks */
-const REVIEW_OFF = [
-  "apps",
-  "plugins",
-  "remote_plugin",
-  "hooks",
-  "multi_agent",
-  "multi_agent_v2",
-  "browser_use",
-  "browser_use_external",
-  "computer_use",
-  "image_generation",
-];
-const REVIEW_FLAGS = [
-  "-s read-only",
-  "--ignore-rules",
-  "--ephemeral",
-  "--ignore-user-config",
-  ...REVIEW_OFF.map((name) => `--disable ${name}`),
-  "-c agents.enabled=false",
-  "-c 'web_search=\"disabled\"'",
-  '-c model_reasoning_effort="high"',
-];
-/** Where the Skill may name the command besides the marked line: another Skill's name, the places that configure Codex, and two commands that only print */
-const REVIEW_NAMED = [
-  "codex-review",
-  "~/.codex/config.toml",
-  "~/.codex/hooks.json",
-  "/etc/codex",
-  " .codex ",
-  "`codex --version`",
-  "`codex features list`",
-];
-const REVIEW_COMMAND = `codex exec ${REVIEW_FLAGS.join(" ")} - < <request file> > <output file> 2>&1`;
+/** Step 3 as the Skill writes it: a copy elsewhere, or a step 3 that starts the reader only sometimes, does not stand in for it */
+const STEP3 =
+  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else. Do not use a fork of this session for this: a fork holds every tool this session holds. If the Agent tool does not list `fork-reader`, start a new session, and do not read the text yourself in its place (a session has been seen not to list a definition added while it ran). The reader reports in five sections, with a file and line for every claim.";
+/** The steps before the owner's approval run from `## Steps` down to this line, which itself still runs before the approval */
+const APPROVAL = "6. **The owner approves taking it in.**";
+/**
+ * Words that start a reader with more tools than fork-reader, with or without a path or package in front, but not the `.claude/`,
+ * `.codex`, or `.agents/` directories. A launcher not named here passes
+ */
+const LAUNCHER =
+  /(?<!\.)\b(?:codex|claude|gemini|subagents?|agents?|explore)\b|sphica:|general-purpose|--print\b|\btask tool\b/i;
+/** Spellings that name a launcher without starting a reader: a version check, instruction files, and what a pull request may change */
+const NAMED = ["`claude --version`", "`CLAUDE.md`", "`AGENTS.md`", "agent settings"];
 
 /**
- * The fork-pr Skill starts Codex on a fork's diff with one command, written once under a mark, and that command is the one above
- * word for word: a flag kept in the prose but dropped from the command, or one added to it, changes what Codex holds.
+ * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no other line
+ * from `## Steps` down to the approval names another launcher. Only the STEP3 line itself is left out of the launcher search.
  * @param {string} source
  * @returns {string[]}
  */
-export function reviewCommandProblems(source) {
-  const text = source.replaceAll("\r\n", "\n");
-  const problems = [];
-  if (!text.includes(READER_STEP)) problems.push(`does not say: ${READER_STEP}`);
-  const marks = text.split(REVIEW_MARK).length - 1;
-  if (marks !== 1) return [...problems, `must hold the mark ${REVIEW_MARK} once (found ${marks})`];
-  const block = /^\n[ \t]*```bash\n([\s\S]*?)\n[ \t]*```[ \t]*(?:\n|$)/.exec(
-    text.slice(text.indexOf(REVIEW_MARK) + REVIEW_MARK.length),
+export function readerStepProblems(source) {
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  if (lines.filter((line) => line === "## Steps").length !== 1)
+    return ["must hold the heading ## Steps once"];
+  const approvals = lines.filter((line) => line.startsWith(APPROVAL)).length;
+  if (approvals !== 1) return [`must hold the approval step once (found ${approvals}): ${APPROVAL}`];
+  const steps = lines.slice(
+    lines.indexOf("## Steps") + 1,
+    lines.findIndex((line) => line.startsWith(APPROVAL)) + 1,
   );
-  if (!block) return [...problems, "the mark is not followed at once by a bash code block"];
-  // Any other way of starting Codex written into the Skill, in a block or in the prose, would be followed as readily as the marked one.
-  // So outside the marked block the command's name may stand only in the spellings REVIEW_NAMED lists
-  const marked = new Set((block[1] ?? "").split("\n").map((line) => line.trim()));
-  const others = text
-    .split("\n")
-    .filter((line) => !marked.has(line.trim()))
-    .filter((line) =>
-      /\bcodex\b/.test(REVIEW_NAMED.reduce((rest, known) => rest.replaceAll(known, ""), line)),
-    );
-  if (others.length)
-    problems.push(
-      `names the codex command outside the marked block in a way this check does not know: ${(others[0] ?? "").trim().slice(0, 80)}`,
-    );
-  const command = (block[1] ?? "").trim();
-  // The marked line is left out of the search above wherever it stands, so a second copy has to be counted here
-  const copies = text.split("\n").filter((line) => line.trim() === command).length;
-  if (copies > 1) problems.push(`the marked command is written ${copies} times`);
-  if (command === REVIEW_COMMAND) return problems;
-  const missing = REVIEW_FLAGS.filter((flag) => !` ${command} `.includes(` ${flag} `));
-  return [
-    ...problems,
-    missing.length
-      ? `the marked command lacks ${missing.join(", ")}`
-      : "the marked command differs from the one this check knows",
-  ];
+  const problems = steps.includes(STEP3) ? [] : ["step 3 is not word for word the one this check knows"];
+  const other = steps.find(
+    (line) =>
+      line !== STEP3 && LAUNCHER.test(NAMED.reduce((text, known) => text.replaceAll(known, ""), line)),
+  );
+  if (other !== undefined) problems.push(`starts another reader before the owner approves: ${other.trim()}`);
+  return problems;
 }

@@ -25,8 +25,8 @@ and half a year later the same option gets rejected again for the same reason.
 The commands you ran and their output. **Paste output that passed, not "should pass".**
 For a fix, also state that you confirmed the code failed (red) before the fix.
 Mark checks you did not run as "not verified", with the reason.
-Always include the Codex review result (how many findings and how each was handled): GitHub's Codex review on every PR, and the local Codex review when CLAUDE.md "Review" asks for one. Without it, CI (pr-body) fails.
-On a pull request from a fork, leave the Codex review out: the maintainer runs it when taking the change in, and this check does not run there.
+Always include the `/sphica:review` result (how many findings and how each was handled), and GitHub's Codex review when it left one. Without the words sphica:review here, CI (pr-body) fails.
+On a pull request from a fork, leave the review out: the maintainer runs it when taking the change in, and this check does not run there.
 -->
 
 ## Release notes
