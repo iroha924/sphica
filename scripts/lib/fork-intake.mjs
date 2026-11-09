@@ -102,37 +102,40 @@ export function readerProblems(source) {
 
 /** Step 3 as the Skill writes it: a copy elsewhere, or a step 3 that starts the reader only sometimes, does not stand in for it */
 const STEP3 =
-  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else.";
-/** The steps before the owner's approval run from `## Steps` down to this line */
+  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else. Do not use a fork of this session for this: a fork holds every tool this session holds. If the Agent tool does not list `fork-reader`, start a new session, and do not read the text yourself in its place (a session has been seen not to list a definition added while it ran). The reader reports in five sections, with a file and line for every claim.";
+/** The steps before the owner's approval run from `## Steps` down to this line, which itself still runs before the approval */
 const APPROVAL = "6. **The owner approves taking it in.**";
-/** Words that start a reader with more tools than fork-reader, not the `.claude/` directory. A launcher not named here passes */
+/**
+ * Words that start a reader with more tools than fork-reader, with or without a path or package in front, but not the `.claude/`,
+ * `.codex`, or `.agents/` directories. A launcher not named here passes
+ */
 const LAUNCHER =
-  /(?<![./])\bcodex\b|(?<![./])\bclaude\b|\bgemini\b|sphica:|\bsubagents?\b|general-purpose|--print\b/i;
-const AGENT_TOOL = /\bAgent\b/;
-/** Spellings that name a launcher without starting a reader: a version check, an instruction file, and the check that the reader is listed */
-const NAMED = ["`claude --version`", "`CLAUDE.md`", "If the Agent tool does not list `fork-reader`"];
+  /(?<!\.)\b(?:codex|claude|gemini|subagents?|agents?|explore)\b|sphica:|general-purpose|--print\b|\btask tool\b/i;
+/** Spellings that name a launcher without starting a reader: a version check, instruction files, and what a pull request may change */
+const NAMED = ["`claude --version`", "`CLAUDE.md`", "`AGENTS.md`", "agent settings"];
 
 /**
- * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no line from
- * `## Steps` down to the approval names another launcher.
+ * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no other line
+ * from `## Steps` down to the approval names another launcher. Step 3 is held to STEP3 instead, so the launcher search skips it.
  * @param {string} source
  * @returns {string[]}
  */
 export function readerStepProblems(source) {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
+  if (lines.filter((line) => line === "## Steps").length !== 1)
+    return ["must hold the heading ## Steps once"];
   const approvals = lines.filter((line) => line.startsWith(APPROVAL)).length;
   if (approvals !== 1) return [`must hold the approval step once (found ${approvals}): ${APPROVAL}`];
   const steps = lines.slice(
     lines.indexOf("## Steps") + 1,
-    lines.findIndex((line) => line.startsWith(APPROVAL)),
+    lines.findIndex((line) => line.startsWith(APPROVAL)) + 1,
   );
-  const problems = steps.some((line) => line.startsWith(STEP3))
-    ? []
-    : [`step 3 does not start with: ${STEP3}`];
-  const other = steps.find((line) => {
-    const rest = NAMED.reduce((text, known) => text.replaceAll(known, ""), line);
-    return LAUNCHER.test(rest) || AGENT_TOOL.test(rest);
-  });
-  if (other !== undefined) problems.push(`starts another reader before step 6: ${other.trim()}`);
+  const problems = steps.includes(STEP3) ? [] : ["step 3 is not word for word the one this check knows"];
+  const other = steps.find(
+    (line) =>
+      !line.startsWith("3. ") &&
+      LAUNCHER.test(NAMED.reduce((text, known) => text.replaceAll(known, ""), line)),
+  );
+  if (other !== undefined) problems.push(`starts another reader before the owner approves: ${other.trim()}`);
   return problems;
 }

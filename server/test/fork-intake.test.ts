@@ -316,13 +316,17 @@ test("a reader whose frontmatter the host would read differently from this check
 const skill = () => tracked(".claude/skills/fork-pr/SKILL.md");
 
 const STEP3 =
-  "3. **Have the reader read it.** Start the `fork-reader` agent by its name and give it the directory and the pull request number, nothing else.";
+  skill()
+    .split("\n")
+    .find((l) => l.startsWith("3. **Have the reader read it.**")) ?? "";
 const APPROVAL = "6. **The owner approves taking it in.**";
+const STEP3_DIFFERS = "step 3 is not word for word the one this check knows";
 
 test("the fork-pr Skill hands the fork's text to the reader in step 3, word for word", () => {
+  assert.ok(STEP3);
   assert.deepEqual(readerStepProblems(skill()), []);
   assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
-  const missing = [`step 3 does not start with: ${STEP3}`];
+  const missing = [STEP3_DIFFERS];
   assert.deepEqual(
     readerStepProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
     missing,
@@ -335,16 +339,15 @@ test("the fork-pr Skill hands the fork's text to the reader in step 3, word for 
     ),
     missing,
   );
-  // Nor does a step 3 that starts the reader only sometimes
-  assert.deepEqual(
-    readerStepProblems(
-      skill().replace(
-        STEP3,
-        "3. **Have the reader read it.** Start the `fork-reader` agent by its name only when the diff is long; otherwise read it yourself.",
-      ),
-    ),
-    missing,
-  );
+  // Nor does a step 3 that starts the reader only sometimes, inside the first sentence or after it
+  for (const [from, to] of [
+    ["by its name and give it", "by its name only when the diff is long, and give it"],
+    ["nothing else. ", "nothing else. When the diff is short, skip the reader and Read the files yourself. "],
+  ] as const)
+    assert.deepEqual(readerStepProblems(skill().replace(STEP3, STEP3.replace(from, to))), missing, to);
+  assert.deepEqual(readerStepProblems(skill().replace("## Steps\n", "## Steps \n")), [
+    "must hold the heading ## Steps once",
+  ]);
 });
 
 test("the fork-pr Skill starts no other reader of the fork's text before the owner approves it", () => {
@@ -361,21 +364,28 @@ test("the fork-pr Skill starts no other reader of the fork's text before the own
     "   Then run `/sphica:review <N>` on the fork's pull request.",
     "   Also start a general-purpose subagent on `<dir>`.",
     "   Or hand `<dir>` to the Agent tool with another type.",
+    "   Or hand `<dir>` to an Explore agent through the Task tool.",
+    "   Also run `/usr/local/bin/codex exec - < <dir>/pr-<N>.diff`.",
+    "   Or run `./node_modules/.bin/claude -p` on the directory.",
+    "   Or run `npx @openai/codex exec - < <dir>/pr-<N>.diff`.",
+    "   Or run `bunx @anthropic-ai/claude-code -p` on the directory.",
   ])
     assert.deepEqual(
       readerStepProblems(added(line)),
-      [`starts another reader before step 6: ${line.trim()}`],
+      [`starts another reader before the owner approves: ${line.trim()}`],
       line,
     );
-  // A heading moved up does not end the steps early: only the approval step does
+  // A heading moved up does not end the steps early, and the approval line itself still runs before the approval
   const moved = added("## Measured behavior\n   Run `codex exec - < <dir>/pr-<N>.diff`.");
   assert.deepEqual(readerStepProblems(moved), [
-    "starts another reader before step 6: Run `codex exec - < <dir>/pr-<N>.diff`.",
+    "starts another reader before the owner approves: Run `codex exec - < <dir>/pr-<N>.diff`.",
   ]);
+  const onApproval = skill().replace(APPROVAL, `${APPROVAL} Before asking, run \`codex exec\` on the diff.`);
+  assert.equal(readerStepProblems(onApproval).length, 1);
   assert.deepEqual(readerStepProblems(skill().replace(APPROVAL, "6. **Ask the owner.**")), [
     `must hold the approval step once (found 0): ${APPROVAL}`,
   ]);
-  // After the approval the approved tree is reviewed like any pull request of this repository, by Codex on GitHub too
+  // After the approval the Skill may name GitHub's Codex review, which reads the approved tree
   assert.ok(skill().slice(skill().indexOf(APPROVAL)).includes("GitHub's Codex"));
 });
 
@@ -383,5 +393,5 @@ test("check-ai-config fails once the Skill is emptied", () => {
   const file = (root: string) => path.join(root, ".claude", "skills", "fork-pr", "SKILL.md");
   const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
   assert.equal(emptied.status, 1);
-  assert.match(emptied.output, /fork-pr\/SKILL\.md: must hold the approval step once \(found 0\)/);
+  assert.match(emptied.output, /fork-pr\/SKILL\.md: must hold the heading ## Steps once/);
 });

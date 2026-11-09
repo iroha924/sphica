@@ -856,7 +856,7 @@ const forkIntake = [
     ".claude/skills/fork-pr/SKILL.md",
     readerStepProblems,
     "the reader is the one reader of a fork's text before the owner approves it (invariant fork-pr-as-data)",
-    "keep step 3 as STEP3 in scripts/lib/fork-intake.mjs, and name no other launcher before the approval step",
+    `keep step 3 as STEP3 in ${FORK_RULES}, and name no other launcher before or on the approval step`,
   ],
 ];
 for (const [file, problemsOf, why, fix] of forkIntake) {
