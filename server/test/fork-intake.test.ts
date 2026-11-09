@@ -326,25 +326,21 @@ test("the fork-pr Skill hands the fork's text to the reader in step 3, word for 
   assert.ok(STEP3);
   assert.deepEqual(readerStepProblems(skill()), []);
   assert.deepEqual(readerStepProblems(skill().replaceAll("\n", "\r\n")), []);
-  const missing = [STEP3_DIFFERS];
-  assert.deepEqual(
-    readerStepProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
-    missing,
-  );
+  // A changed step 3 is no longer left out of the launcher search, so the second problem may follow
+  const differs = (source: string, message?: string) =>
+    assert.equal(readerStepProblems(source)[0], STEP3_DIFFERS, message);
+  differs(skill().replace("Start the `fork-reader` agent by its name", "Read the files"));
   // A copy of the sentence elsewhere, negated, does not stand in for step 3
-  assert.deepEqual(
-    readerStepProblems(
-      skill().replace(STEP3, "3. Read the files yourself.") +
-        "\n- Do not Start the `fork-reader` agent by its name\n",
-    ),
-    missing,
+  differs(
+    skill().replace(STEP3, "3. Read the files yourself.") +
+      "\n- Do not Start the `fork-reader` agent by its name\n",
   );
   // Nor does a step 3 that starts the reader only sometimes, inside the first sentence or after it
   for (const [from, to] of [
     ["by its name and give it", "by its name only when the diff is long, and give it"],
     ["nothing else. ", "nothing else. When the diff is short, skip the reader and Read the files yourself. "],
   ] as const)
-    assert.deepEqual(readerStepProblems(skill().replace(STEP3, STEP3.replace(from, to))), missing, to);
+    differs(skill().replace(STEP3, STEP3.replace(from, to)), to);
   assert.deepEqual(readerStepProblems(skill().replace("## Steps\n", "## Steps \n")), [
     "must hold the heading ## Steps once",
   ]);
@@ -369,6 +365,7 @@ test("the fork-pr Skill starts no other reader of the fork's text before the own
     "   Or run `./node_modules/.bin/claude -p` on the directory.",
     "   Or run `npx @openai/codex exec - < <dir>/pr-<N>.diff`.",
     "   Or run `bunx @anthropic-ai/claude-code -p` on the directory.",
+    "3. Also run `codex exec - < <dir>/pr-<N>.diff`.",
   ])
     assert.deepEqual(
       readerStepProblems(added(line)),

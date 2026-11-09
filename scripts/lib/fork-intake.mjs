@@ -116,7 +116,7 @@ const NAMED = ["`claude --version`", "`CLAUDE.md`", "`AGENTS.md`", "agent settin
 
 /**
  * Until the owner approves a head, the fork-reader agent is the one reader of the fork's text: step 3 starts it, and no other line
- * from `## Steps` down to the approval names another launcher. Step 3 is held to STEP3 instead, so the launcher search skips it.
+ * from `## Steps` down to the approval names another launcher. Only the STEP3 line itself is left out of the launcher search.
  * @param {string} source
  * @returns {string[]}
  */
@@ -133,8 +133,7 @@ export function readerStepProblems(source) {
   const problems = steps.includes(STEP3) ? [] : ["step 3 is not word for word the one this check knows"];
   const other = steps.find(
     (line) =>
-      !line.startsWith("3. ") &&
-      LAUNCHER.test(NAMED.reduce((text, known) => text.replaceAll(known, ""), line)),
+      line !== STEP3 && LAUNCHER.test(NAMED.reduce((text, known) => text.replaceAll(known, ""), line)),
   );
   if (other !== undefined) problems.push(`starts another reader before the owner approves: ${other.trim()}`);
   return problems;
