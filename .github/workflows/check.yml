@@ -74,7 +74,8 @@ jobs:
     name: "part (${{ matrix.node }}, ${{ matrix.part }})"
     needs: same-tree
     if: ${{ !cancelled() && !(needs.same-tree.result == 'success' && needs.same-tree.outputs.tested == 'true') }}
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on ubuntu-26.04 the sandbox cannot start (its seccomp step cannot write /proc/self/setgroups in the nested user namespace)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # If one part fails, the others' results are kept.
     strategy:
