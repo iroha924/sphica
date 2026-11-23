@@ -31,13 +31,14 @@ transcript 1 本から、ライブの capture と同じ形の記録を作れる�
   - コミット: `feat(history): read past Claude Code and Codex sessions into capture records (T01)`
   - 結果: `node --test test/history.test.ts` → 7 pass。`bun run verify` → exit 0（受け入れ 151/151）
 
-- [ ] T02: 持ち主の手元での突き合わせ（ライブの記録と、取り込み直した記録）
+- [x] T02: 持ち主の手元での突き合わせ（ライブの記録と、取り込み直した記録）
   - 種別: 追加
   - 計画: S1, S4
   - 依存: T01（読み取りの関数が要る）
-  - 変更: `server/evals/history/compare.ts`
+  - 変更: `server/evals/history/compare.ts`, `knip.json`
   - 完了条件: `node server/evals/history/compare.ts --db <持ち主の DB の写し>` → Claude Code と Codex それぞれ、ライブで記録済みのセッションの持ち主の発言の一致数とずれの理由ごとの件数が出て、理由のないずれが 0。Codex で理由のないずれが残れば、記録節に書いて Codex を外す
   - コミット: `test(history): compare imported sessions with the live capture (T02)`
+  - 結果: 持ち主の DB の写し（2026-11-23）で `node server/evals/history/compare.ts --db <写し>` → Codex は 4 セッションで持ち主の発言 4/4・返答 4/4 が id と本文まで一致。Claude Code は 2 セッションで持ち主の発言 41 件一致、ライブだけ 24 件（ホストの system-reminder のイベント 19、通知 1、human の origin の無い行 4。理由のないものは 0）、取り込みだけ 4 件（ライブに記録が無い。うち 1 件は写しの後に打った発言）。返答は 128 件一致、取り込みだけ 4 件。プロンプトのブロックを空行でつないでいたのをライブと同じ改行 1 つに直して 2 件のずれが消えた
 
 ## P2: 実行
 
