@@ -31,9 +31,11 @@ import { type Audit, auditClosing, auditQuotes, auditSections } from "./audit-qu
 import {
   callsDir,
   callsRejectedDir,
+  flush,
   queueReport,
   readState,
   rejectedDir,
+  spool,
   spoolDir,
   unregisteredDir,
 } from "./capture.ts";
@@ -52,6 +54,7 @@ import {
 import { dbFile, inTransaction, type Reads, SCHEMA_REVISION } from "./db.ts";
 import { refusalText, workerPlace } from "./git.ts";
 import { ghUser } from "./github.ts";
+import { readLogs, unrecorded } from "./history.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
 import { checkLocalName, identify, nameLocal, repositoryRoot } from "./project.ts";
@@ -478,7 +481,50 @@ async function bindGitHub(): Promise<void> {
  * First-time setup: the database, then the project dir belongs to (a repository without a remote needs --name). Safe to run again.
  * A bad --name and a name that differs from the one already given stop before anything is written.
  */
-async function init(flags: { cwd?: string; name?: string }): Promise<void> {
+/** How long one import may spend sending its records; a large history can take more than a hook's send */
+const IMPORT_SEND_MS = 120_000;
+
+/**
+ * The repository's past sessions from both hosts' own logs, queued and sent the way live capture sends them. A session the database
+ * holds already is skipped whole, so running it again adds nothing. Prints counts, never a message.
+ */
+async function importPast(place: { key: string; legacyKey?: string; root: string }): Promise<void> {
+  const { logs, unreadable } = readLogs({
+    key: place.legacyKey ?? place.key,
+    match: place.key,
+    root: place.root,
+  });
+  const left: Record<string, number> = {};
+  const readable = logs.filter((l) => {
+    if (l.excluded) left[l.excluded] = (left[l.excluded] ?? 0) + 1;
+    return !l.excluded;
+  });
+  const { fresh, known } = await withDb("reader", (db) => unrecorded(db, readable));
+  // Counted once per message id, as the send writes a repeated one once
+  const messages = new Set<string>();
+  for (const log of fresh)
+    for (const r of log.records) {
+      spool(r);
+      if (r.kind === "message") messages.add(`${r.host}\0${r.session}\0${r.id}`);
+    }
+  const queued = messages.size;
+  const sent = fresh.length ? await flush(dbFile(), IMPORT_SEND_MS) : { sent: 0, deferred: 0, rejected: 0 };
+  const out = [
+    `${plural(fresh.length, "past session")} imported (${sent.sent} of ${queued} messages written)`,
+    ...(known ? [`${known} already recorded, so not read again`] : []),
+    ...Object.entries(left).map(([why, n]) => `${n} left out: ${why}`),
+    ...(unreadable ? [`${plural(unreadable, "log file")} could not be read`] : []),
+  ];
+  console.log(indent(`${mark(sent.sent < queued ? "warn" : "ok")} ${out.join("; ")}`));
+  if (sent.sent < queued)
+    console.log(
+      indent(
+        `${mark("warn")} the rest stays queued and is sent by the next hook; sphica doctor shows the queue`,
+      ),
+    );
+}
+
+async function init(flags: { cwd?: string; name?: string; history?: boolean }): Promise<void> {
   const cwd = flags.cwd ?? process.cwd();
   if (!fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
     throw new Error(`${cwd} is not a directory`);
@@ -521,7 +567,14 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
           `${mark(added ? "ok" : "none")} ${inline(place.name)} ${added ? "registered" : "already registered"} (${inline(place.key)}, ${inline(place.root)})`,
         ),
       );
+      if (added && !flags.history)
+        console.log(
+          indent(
+            `${mark("none")} past sessions in the hosts' logs can be imported with sphica init --history`,
+          ),
+        );
     });
+    if (flags.history) await importPast(place);
   });
 }
 
@@ -652,9 +705,15 @@ const root = buildRouteMap({
             placeholder: "name",
             optional: true,
           },
+          history: {
+            kind: "boolean",
+            brief:
+              "Also import this repository's past Claude Code and Codex sessions from the hosts' own logs",
+            optional: true,
+          },
         },
       },
-      func: (flags: { cwd?: string; name?: string }) => init(flags),
+      func: (flags: { cwd?: string; name?: string; history?: boolean }) => init(flags),
     }),
     doctor: buildCommand({
       docs: {

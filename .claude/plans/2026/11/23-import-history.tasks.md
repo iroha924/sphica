@@ -44,13 +44,14 @@ transcript 1 本から、ライブの capture と同じ形の記録を作れる�
 
 `sphica init --history` で取り込め、2 回目は何も増えない
 
-- [ ] T03: `init --history` の配線、既にあるセッションの飛ばし、spool への積み込みと送信、出力
+- [x] T03: `init --history` の配線、既にあるセッションの飛ばし、spool への積み込みと送信、出力
   - 種別: 追加
   - 計画: S3
   - 依存: T01（読み取りの関数が要る）
-  - 変更: `server/src/cli.ts`, `server/src/history.ts`, `server/test/history-live.test.ts`
+  - 変更: `server/src/cli.ts`, `server/src/history.ts`, `server/src/capture.ts`, `server/test/history-live.test.ts`, `scripts/lib/bundle-budget.mjs`
   - 完了条件: `cd server && node --test test/history-live.test.ts` → 一時 HOME で `sphica init --history` を 2 回流し、1 回目で入り、2 回目は 0 件増。`--history` 無しの init は件数の 1 行だけを出す
-  - コミット: `feat(cli): import past sessions with sphica init --history (T03)`
+  - コミット: `feat(cli): import past sessions with sphica init --history (cli.js 647.3 KB) (T03)`
+  - 結果: `node --test test/history-live.test.ts` → 2 pass（両ホストのログの発見と記録済みの除外、init --history の 2 回目が 0 件増）。持ち主の DB の写しと実物のログで `SPHICA_HOME=<一時> node server/src/cli.ts init --history` → 12 秒、取り込み 0、記録済み 6、codex exec 635 を除外、セッション数 933 のまま。`bun run verify` → exit 0（受け入れ 151/151）。cli.js が 647,250 バイトになり予算を 636,000 から 652,000 に上げた
 
 ## P3: 文書とリリース
 
@@ -65,6 +66,8 @@ README と Skill が新しい旗と、ホストごとの違いを説明する
   - コミット: `docs(history): describe sphica init --history (T04)`
 
 ## 記録
+
+- 2026-11-23 / T03 / `--history` 無しの init で件数を数えるには全ログを読む（実測 12 秒）ので、新しく登録したときだけ `--history` を案内する 1 行にした（plan の「件数の 1 行」から変更） / 完了条件の欄はそのまま、出力の文面だけ変えた
 
 - 2026-11-23 / T01, T04 / pre-commit は package の入力を変える最初のコミットで版の上げを求める / 0.6.73 への上げを T04 から T01 に移した（T01 の変更欄に版の 4 ファイルを足し、T04 から外した）
 

@@ -3,9 +3,14 @@
 
 // Past sessions read from the hosts' own logs into the records live capture queues, so an import goes through the same send, views, and
 // checks. Only what the log marks as the owner's own words is taken as the owner's; a line without that mark is never the owner's.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import zlib from "node:zlib";
 import { answersOf, messageOf, type Spooled, type TurnBase } from "./capture.ts";
+import type { Reads } from "./db.ts";
 import type { Host } from "./knowledge.ts";
-import { relativeTo } from "./project.ts";
+import { identify, relativeTo } from "./project.ts";
 
 /** Where the session's repository is: its project key as capture writes it, and its root for relative paths */
 export type Place = { key: string; root: string };
@@ -255,4 +260,112 @@ export function fromCodex(lines: readonly string[], place: Place): SessionLog {
     }
   }
   return result(null);
+}
+
+/** Where each host keeps its logs: Claude Code under `~/.claude/projects`, Codex under `$CODEX_HOME/sessions` */
+export type Homes = { claude: string; codex: string };
+const hostHomes = (): Homes => ({
+  claude: path.join(os.homedir(), ".claude"),
+  codex: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+});
+
+/** The repository the import is for: `key` is what its records carry, `match` the key a directory's repository is compared with */
+export type Target = Place & { match: string };
+
+/** Files of `dir` and its subdirectories whose name matches, sorted; a missing directory has none */
+const filesUnder = (dir: string, name: RegExp, deep: boolean): string[] => {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (deep || d === dir) walk(p);
+      } else if (e.isFile() && name.test(e.name)) out.push(p);
+    }
+  };
+  walk(dir);
+  return out.sort();
+};
+
+/** Whether a log ran in the target repository: in a directory still there whose repository has its key, or under its root */
+function belongs(cwd: string | null, target: Target): boolean {
+  if (!cwd) return false;
+  if (fs.existsSync(cwd)) return identify(cwd)?.key === target.match;
+  const rel = path.relative(target.root, cwd);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * The logs both hosts keep for the target repository. A Claude Code session is its own file directly in a project directory (its
+ * subagents sit in a folder beside it and are not read); a Codex session is a rollout, compressed with zstd from 2026 on.
+ */
+export function readLogs(
+  target: Target,
+  homes: Homes = hostHomes(),
+): { logs: SessionLog[]; unreadable: number; elsewhere: number } {
+  const logs: SessionLog[] = [];
+  let unreadable = 0;
+  let elsewhere = 0;
+  const lines = (file: string): string[] | null => {
+    try {
+      let buf = fs.readFileSync(file);
+      if (file.endsWith(".zst")) buf = zlib.zstdDecompressSync(buf);
+      return buf.toString("utf8").split("\n");
+    } catch {
+      return null;
+    }
+  };
+  const take = (files: string[], read: (l: string[], p: Place) => SessionLog) => {
+    for (const file of files) {
+      const l = lines(file);
+      if (!l) {
+        unreadable++;
+        continue;
+      }
+      const log = read(l, target);
+      if (belongs(log.cwd, target)) logs.push(log);
+      else elsewhere++;
+    }
+  };
+  const projects = path.join(homes.claude, "projects");
+  for (const dir of safeDirs(projects)) take(filesUnder(dir, /\.jsonl$/, false), fromClaude);
+  take(filesUnder(path.join(homes.codex, "sessions"), /^rollout-.*\.jsonl(?:\.zst)?$/, true), fromCodex);
+  return { logs, unreadable, elsewhere };
+}
+
+const safeDirs = (dir: string): string[] => {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(dir, e.name))
+      .sort();
+  } catch {
+    return [];
+  }
+};
+
+/** The logs whose session the database does not hold yet, and how many it does: a session recorded before, live or by an import, is never read again */
+export async function unrecorded(
+  db: Reads,
+  logs: readonly SessionLog[],
+): Promise<{ fresh: SessionLog[]; known: number }> {
+  const ids = [...new Set(logs.map((l) => l.session).filter(Boolean))];
+  const known = new Set<string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = await db
+      .selectFrom("session")
+      .select(["host", "external_id"])
+      .where("external_id", "in", ids.slice(i, i + 500))
+      .execute();
+    for (const r of rows) known.add(`${r.host}\0${r.external_id}`);
+  }
+  const fresh = logs.filter((l) => !known.has(`${l.host}\0${l.session}`));
+  return { fresh, known: logs.length - fresh.length };
 }

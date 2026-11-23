@@ -198,7 +198,7 @@ function put(dir: string, record: unknown): string {
   return path.join(dir, name);
 }
 
-function spool(record: Spooled): void {
+export function spool(record: Spooled): void {
   put(spoolDir(), record);
 }
 
