@@ -93,6 +93,8 @@ sphica init
 
 `~/.sphica/sphica.db` を作り、リポジトリを登録します。何度流しても大丈夫です（DB と登録は、すでにあればそのまま使います）。`origin` の remote が無いリポジトリは名前を付けます: `sphica init --name <名前>`。
 
+リポジトリの過去のセッションもホストのログから取り込むなら、`sphica init --history` を流します。Claude Code の `~/.claude/projects` の transcript と、Codex の `~/.codex/sessions` の rollout を読み、記録と同じ形で書きます。取り込むのは、あなたの発言、ターンごとの最後の返答、AskUserQuestion の答え、編集ツールが変えたファイルです（git status で分かるファイルは取り込みません）。あなたの発言として扱うのは、ログがあなたのものと示している行だけです。サブエージェント、ヘッドレスの実行（`claude -p`）、`codex exec` の実行はすべて外します。Codex のログでは、あなたが起動した exec とエージェントが起動した exec を区別できないためです。あなたが自分で起動した exec も記録するライブの記録より、範囲が狭くなります。DB にすでにあるセッションは飛ばすので、何度流しても増えません。Claude Code は `cleanupPeriodDays`（既定 30 日）より古い transcript を消すので、入れたら早めに取り込んでください。取り込んだセッションは `/sphica:trace pending` に並びます。セッション開始時の自動の trace は、最近のものしか拾いません。
+
 `gh` にログインしていれば、init はそのアカウントをあなたの GitHub アカウントとして登録します。これで、コントリビューターとして出した他人のリポジトリの PR でも、あなたの発言で判断を採用できます（登録の後に harvest した PR が対象です）。登録するのは最初の 1 つだけです。登録を変えるコマンドは無いので、変えるときは DB を別の場所へ移してから init を流し直してください。`gh` が無くても init はセットアップを終え、登録できなかった理由を表示します。登録したアカウントは `sphica doctor` で確かめられます。
 
 **4. 確かめる**
@@ -229,6 +231,7 @@ npm uninstall -g sphica
 | コマンド | すること |
 |---|---|
 | `sphica init` | DB を作り、`gh` にログインしている GitHub アカウントを登録し、今のリポジトリを登録する |
+| `sphica init --history` | リポジトリの過去の Claude Code と Codex のセッションも、ホストのログから取り込む |
 | `sphica doctor` | バージョン、DB、記録、登録したプロジェクトを確かめる |
 | `sphica doctor --reindex` | `doctor` が全文検索のインデックスが壊れていると表示したときに、作り直す |
 | `sphica doctor --audit-quotes` | 保存済みの採用や理由のうち、引用された言葉を根拠にしているものを一覧にする。読むだけで、何も変えない |

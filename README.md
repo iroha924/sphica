@@ -93,6 +93,8 @@ sphica init
 
 This creates `~/.sphica/sphica.db` and registers the repository. Running it again keeps the database and the registration as they are. If the repository has no `origin` remote, give it a name: `sphica init --name <name>`.
 
+To also import the repository's past sessions from the hosts' own logs, run `sphica init --history`. It reads Claude Code's transcripts under `~/.claude/projects` and Codex's rollouts under `~/.codex/sessions`, and writes them the way recording does: your messages, each turn's last reply, AskUserQuestion answers, and files an edit tool changed (not the files git status would have shown). Only lines a log marks as yours are taken as yours. Subagents, headless runs (`claude -p`), and every `codex exec` run are left out: a Codex log cannot tell an exec you started from one an agent started, so this is narrower than live recording, which keeps the exec runs you start yourself. A session already in the database is skipped, so running it again adds nothing. Claude Code deletes transcripts older than `cleanupPeriodDays` (30 days by default), so import soon after installing. Imported sessions wait in `/sphica:trace pending`; session start traces only recent ones on its own.
+
 If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor (in pull requests harvested after binding). Only the first account is bound, and there is no command to change it: move the database aside and run init again. Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
 
 **4. Check the setup**
@@ -236,6 +238,7 @@ Run `sphica doctor` first. It shows which part is out of date or not working. Co
 | Command | What it does |
 |---|---|
 | `sphica init` | Create the database, bind the GitHub account `gh` is signed in to, and register the current repository |
+| `sphica init --history` | Also import the repository's past Claude Code and Codex sessions from the hosts' own logs |
 | `sphica doctor` | Check versions, the database, recording, and each registered project |
 | `sphica doctor --reindex` | Rebuild the full-text index when `doctor` says it is broken |
 | `sphica doctor --audit-quotes` | List saved adoptions and reasons that rest on quoted words. It only reads: nothing is changed |

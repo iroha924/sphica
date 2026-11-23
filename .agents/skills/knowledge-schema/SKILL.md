@@ -111,6 +111,7 @@ Four boundaries (the header of schema.sql):
 | Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources); states and replacement rows through `reconcile.ts` |
 | Record tool hook (Claude Code) | capture | `observeRecordCall` in `server/src/capture.ts`, through the `capture_tool_call` view; what it could not write, by the next send from `spool/calls/` |
 | `sphica init` | owner, then ingest | `server/src/admin.ts` creates the DB; `cli.ts` registers the project |
+| `sphica init --history` | capture | `server/src/history.ts` reads the hosts' logs into the records capture queues (`messageOf` builds the same ids); `cli.ts` queues them with `spool` and sends them with `flush`. A session the database holds is skipped whole |
 | `sphica doctor --reindex` | owner | `reindex()` in `admin.ts` |
 | `sphica init` on an older revision | owner | `migrate()` in `admin.ts` |
 | `/sphica:forget` | forget | the record server's `forget_apply` → `forget.ts`, only after the owner confirms |

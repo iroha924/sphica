@@ -57,15 +57,18 @@ transcript 1 本から、ライブの capture と同じ形の記録を作れる�
 
 README と Skill が新しい旗と、ホストごとの違いを説明する
 
-- [ ] T04: README（英日）、plugin-release / knowledge-schema の Skill、受け入れケース、バージョン
+- [x] T04: README（英日）、plugin-release / knowledge-schema の Skill、受け入れケース、バージョン
   - 種別: 追加
   - 計画: S5, S6
   - 依存: T03（旗の名前と出力が決まっている必要がある）
-  - 変更: `README.md`, `README.ja.md`, `.claude/skills/knowledge-schema/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`, `server/evals/acceptance/cases.json`
+  - 変更: `README.md`, `README.ja.md`, `.agents/skills/knowledge-schema/SKILL.md`
   - 完了条件: `caffeinate -i mise exec -- bun run verify` → exit 0、`bun run release:plan -- --base v0.6.72` → `release kind: plugin`、版が 0.6.73 でそろう
   - コミット: `docs(history): describe sphica init --history (T04)`
+  - 結果: `bun run verify` → exit 0（受け入れ 151/151）。`bun run release:plan -- --base v0.6.72` → `release kind: plugin`、npm・plugin・marketplace・Codex がすべて 0.6.73
 
 ## 記録
+
+- 2026-11-23 / T04 / 受け入れケースは hook を再生する driver の上にあり、CLI の init は通らない。init --history の挙動は子プロセスのテスト（T03）が持つ / 変更欄から `server/evals/acceptance/cases.json` を外した。plugin-release の Skill は CLI の 3 コマンドの記述のままで正しいので外した
 
 - 2026-11-23 / T03 / `--history` 無しの init で件数を数えるには全ログを読む（実測 12 秒）ので、新しく登録したときだけ `--history` を案内する 1 行にした（plan の「件数の 1 行」から変更） / 完了条件の欄はそのまま、出力の文面だけ変えた
 
