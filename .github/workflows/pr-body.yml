@@ -1,8 +1,7 @@
-# Checks that the Verification section of the PR body names the sphica:review result (only that the words are there). The body is written by the author
-# whose work was reviewed, so this checks the record, not the review: the owner reads the result before approving a release.
-# The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
-# A pull request from a fork is skipped: it is never merged itself, its author cannot run the review, and the pull request of this
-# repository that carries the change in holds the record.
+# Checks the PR body: the Verification section names the sphica:review result (only that the words are there; the owner reads it before a
+# release), and every issue GitHub linked to the PR, which the release run closes, is declared on a line of its own (scripts/lib/pr-body.mjs).
+# The body is untrusted: it is passed through an environment variable and never expanded into shell expressions. Fork PRs are skipped:
+# they are never merged themselves, and the pull request of this repository that carries the change in holds the record.
 name: pr-body
 
 on:
@@ -31,6 +30,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.15"
+          package-manager-cache: false
       - name: The Verification section names the sphica:review result
         env:
           BODY: ${{ github.event.pull_request.body }}

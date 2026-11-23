@@ -12,19 +12,43 @@ const REFERENCES = new RegExp(String.raw`^(?:${ITEM}[ \t]*)+$`, "i");
 const CLOSING_ITEM = new RegExp(String.raw`^${KEYWORD}$`, "i");
 
 /**
- * Issue numbers the body declares as closed: closing items on lines made only of references. A keyword inside a sentence declares
- * nothing, so the issue it links counts as undeclared.
+ * Issue numbers the body declares as closed: closing items on a line made only of references that starts a block (the first line, or
+ * after a blank line, a heading, or another such line), outside code fences and HTML comments. A keyword inside a sentence, also on the
+ * wrapped next line of one, declares nothing, so the issue it links counts as undeclared.
  * @param {string} body
  * @returns {number[]}
  */
 export function declaredClosing(body) {
-  const text = body.replace(/\r\n?/g, "\n").replace(/<!--(?:-?>|[\s\S]*?-->)/g, "");
+  // Remove comments until none is left; an opening marker left over hides the rest of the body on GitHub
+  let text = body.replace(/\r\n?/g, "\n");
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(/<!--(?:-?>|[\s\S]*?-->)/g, "");
+  }
+  const open = text.indexOf("<!--");
+  if (open !== -1) text = text.slice(0, open);
   const declared = [];
+  // A fence opens with 3 or more backticks or tildes and closes only with the same character, at least as many (CommonMark)
+  let fence = null;
+  let startsBlock = true;
   for (const raw of text.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (fence !== null) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && marker[2].trim() === "")
+        fence = null;
+      startsBlock = fence === null;
+      continue;
+    }
+    if (marker && !(marker[1][0] === "`" && marker[2].includes("`"))) {
+      fence = marker[1];
+      continue;
+    }
     const line = raw.trim();
-    if (!REFERENCES.test(line)) continue;
-    for (const m of line.matchAll(new RegExp(ITEM, "gi")))
-      if (CLOSING_ITEM.test(m[1] ?? "")) declared.push(Number(m[2]));
+    const references = REFERENCES.test(line);
+    if (references && startsBlock)
+      for (const m of line.matchAll(new RegExp(ITEM, "gi")))
+        if (CLOSING_ITEM.test(m[1] ?? "")) declared.push(Number(m[2]));
+    startsBlock = line === "" || /^#{1,6}([ \t]|$)/.test(line) || (references && startsBlock);
   }
   return declared;
 }

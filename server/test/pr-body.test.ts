@@ -26,12 +26,13 @@ test("every closing keyword, in any case and with a colon, declares an issue on 
   assert.deepEqual(undeclaredClosing(body, [1, 2, 3, 4, 5, 6, 7, 8, 9]), []);
 });
 
-test("lines made only of references declare wherever they stand, and HTML comments declare nothing", () => {
+test("lines made only of references declare where they start a block, and HTML comments declare nothing", () => {
   const body = [
     "<!--",
     "If this PR resolves an issue, put `Closes #12` on one line at the top of the body",
     "-->",
     "_Requested by the owner_",
+    "",
     "Refs #3. Closes #4.",
     "<!-->",
     "Fixes #5, resolves #6",
@@ -42,6 +43,16 @@ test("lines made only of references declare wherever they stand, and HTML commen
   ].join("\r\n");
   assert.deepEqual(declaredClosing(body), [4, 5, 6, 7]);
   assert.deepEqual(undeclaredClosing(body, [4, 5, 6, 7, 12]), [12]);
+});
+
+test("a reference line that continues a sentence, a line in a code fence, and text after an unclosed comment declare nothing", () => {
+  const wrapped = "Refs #394\n\n## Decisions\n\n- zod stays, so this PR does not\n  close #394.\n";
+  assert.deepEqual(undeclaredClosing(wrapped, [394]), [394]);
+  const fenced = "```\nCloses #5\n```\n\nThis does not close #5.\n";
+  assert.deepEqual(declaredClosing(fenced), []);
+  assert.deepEqual(undeclaredClosing(fenced, [5]), [5]);
+  assert.deepEqual(declaredClosing("~~~~\nCloses #6\n~~~\nCloses #7\n~~~~\n\nCloses #8"), [8]);
+  assert.deepEqual(declaredClosing("Closes #9\n\n<!-- left open\n\nCloses #10"), [9]);
 });
 
 test("a declared issue GitHub did not link, and a body with no links, pass; a keyword inside a sentence declares nothing", () => {

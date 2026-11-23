@@ -35,9 +35,9 @@ if (!Array.isArray(linked) || !linked.every((n) => Number.isInteger(n) && n > 0)
 const found = undeclaredClosing(BODY, linked).map((n) =>
   finding({
     where: `#${n}`,
-    what: "GitHub links this issue to the pull request, but the top of the body does not declare it",
+    what: "GitHub links this issue to the pull request, but no line of its own declares it",
     why: "GitHub reads a closing keyword before an issue number anywhere in the body without reading the sentence, and the release run closes every linked issue",
-    fix: "for an issue this closes, put `Closes` and its number alone on a line at the top; otherwise reword the line that names it so no close, fix, or resolve stands right before the number",
+    fix: "for an issue this closes, put `Closes` and its number on a line of its own after a blank line, at the top as the template asks; otherwise reword the sentence that names it so no close, fix, or resolve stands right before the number",
   }),
 );
-if (!report("pr body", found)) console.log("pr body: every linked issue is declared at the top");
+if (!report("pr body", found)) console.log("pr body: every linked issue is declared on a line of its own");
