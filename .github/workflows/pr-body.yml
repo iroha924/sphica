@@ -1,6 +1,5 @@
 # Checks that the Verification section of the PR body names the sphica:review result (only that the words are there). The body is written by the author
 # whose work was reviewed, so this checks the record, not the review: the owner reads the result before approving a release.
-# It also checks that a closing keyword stands before an issue reference only on a line of its own (scripts/lib/pr-body.mjs).
 # The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
 # A pull request from a fork is skipped: it is never merged itself, its author cannot run the review, and the pull request of this
 # repository that carries the change in holds the record.
@@ -17,9 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
-    # Reads the repository for the check script; nothing else is granted
+    # Reads the repository for the check script and the issues GitHub linked to the pull request; nothing else is granted
     permissions:
       contents: read
+      pull-requests: read
+      issues: read
     steps:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
@@ -30,10 +31,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.15"
-      - name: A closing keyword stands before an issue reference only on a line of its own
-        env:
-          BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/check-pr-body-refs.mjs
       - name: The Verification section names the sphica:review result
         env:
           BODY: ${{ github.event.pull_request.body }}
@@ -46,3 +43,13 @@ jobs:
             echo "The Verification section of the PR body does not name the sphica:review result (see Review in CLAUDE.md)"
             exit 1
           }
+      - name: Every issue GitHub linked is declared on a line of its own
+        if: ${{ !cancelled() }}
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          LINKED=$(gh pr view "$PULL" --repo "$REPO" --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]')
+          LINKED="$LINKED" node scripts/check-pr-body-refs.mjs
