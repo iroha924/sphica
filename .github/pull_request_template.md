@@ -6,6 +6,8 @@ are what later searches find. Do not water it down with boilerplate.
 If this PR resolves an issue, put `Closes #12` on one line at the top of the body (merging closes it).
 Use `Refs #12` for related issues it does not resolve. One PR does not always finish an issue,
 so do not mix up Closes and Refs. List several on separate lines. Do not add a heading for them.
+Inside a sentence, never put close, fix, or resolve (in any form) right before an issue number, even in "does not close": GitHub
+links that issue too, so merging closes it. pr-body fails on a linked issue no line of its own declares.
 -->
 
 ## What changed
