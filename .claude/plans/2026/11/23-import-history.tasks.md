@@ -22,13 +22,14 @@ base: main
 
 transcript 1 本から、ライブの capture と同じ形の記録を作れるようになる
 
-- [ ] T01: Claude Code と Codex の transcript から spool の記録を作る純粋な関数
+- [x] T01: Claude Code と Codex の transcript から spool の記録を作る純粋な関数
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/history.ts`, `server/test/history.test.ts`, `server/test/fixtures/history/`
-  - 完了条件: `cd server && node --test test/history.test.ts` → 持ち主の発言、通知と peer の除外、AskUserQuestion、編集、サブエージェントと exec の除外、zstd の各ケースが pass
+  - 変更: `server/src/history.ts`, `server/src/capture.ts`, `server/test/history.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `cd server && node --test test/history.test.ts` → 持ち主の発言、通知と peer の除外、AskUserQuestion、編集、サブエージェントと exec の除外の各ケースが pass
   - コミット: `feat(history): read past Claude Code and Codex sessions into capture records (T01)`
+  - 結果: `node --test test/history.test.ts` → 7 pass。`bun run verify` → exit 0（受け入れ 151/151）
 
 - [ ] T02: 持ち主の手元での突き合わせ（ライブの記録と、取り込み直した記録）
   - 種別: 追加
@@ -58,8 +59,13 @@ README と Skill が新しい旗と、ホストごとの違いを説明する
   - 種別: 追加
   - 計画: S5, S6
   - 依存: T03（旗の名前と出力が決まっている必要がある）
-  - 変更: `README.md`, `README.ja.md`, `.claude/skills/knowledge-schema/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`, `server/evals/acceptance/cases.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `README.md`, `README.ja.md`, `.claude/skills/knowledge-schema/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`, `server/evals/acceptance/cases.json`
   - 完了条件: `caffeinate -i mise exec -- bun run verify` → exit 0、`bun run release:plan -- --base v0.6.72` → `release kind: plugin`、版が 0.6.73 でそろう
-  - コミット: `docs(history): describe sphica init --history and bump to 0.6.73 (T04)`
+  - コミット: `docs(history): describe sphica init --history (T04)`
 
 ## 記録
+
+- 2026-11-23 / T01, T04 / pre-commit は package の入力を変える最初のコミットで版の上げを求める / 0.6.73 への上げを T04 から T01 に移した（T01 の変更欄に版の 4 ファイルを足し、T04 から外した）
+
+- 2026-11-23 / T01 / フィクスチャはファイルにせずテストの中に書いた。zstd はファイルを読む側（T03）のテストに移す / 変更欄から `server/test/fixtures/history/` を外し、ライブと同じ式で id を作るため `capture.ts` の `messageOf` を足した
+- 2026-11-23 / T02 / 突き合わせで、ライブの capture が Claude デスクトップアプリの差し込むイベント（`<system-reminder>` に包まれた side-sessions・CI monitor のイベント）を持ち主の発言として記録していると分かった（19 件）。この計画の範囲外として持ち主に報告する

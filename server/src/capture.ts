@@ -539,6 +539,22 @@ const unconfirmed = (input: HookInput): string | null =>
           "To record a session, start Codex without --ephemeral",
         );
 
+/** The fields every queued record of one turn shares */
+export type TurnBase = Pick<Spooled, "v" | "host" | "session" | "project" | "branch" | "turn">;
+
+/** A message record as capture queues it, or null for an empty body. The import of past sessions builds its ids the same way */
+export function messageOf(
+  base: TurnBase,
+  key: string,
+  speaker: "owner" | "assistant",
+  raw: string,
+  at: string,
+): Extract<Spooled, { kind: "message" }> | null {
+  const kept = fit(clean(raw).trim());
+  if (!kept.body.trim()) return null;
+  return { ...base, at, kind: "message", id: `${key}:${digest(kept.body)}`, speaker, ...kept };
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export async function onHook(
   host: Host,
@@ -585,10 +601,8 @@ export async function onHook(
     at,
   };
   const say = (key: string, speaker: "owner" | "assistant", raw: string, when = at) => {
-    const kept = fit(clean(raw).trim());
-    if (!kept.body.trim()) return;
-    const id = `${key}:${digest(kept.body)}`;
-    spool({ ...base, at: when, kind: "message", id, speaker, ...kept });
+    const record = messageOf(base, key, speaker, raw, when);
+    if (record) spool(record);
   };
 
   const dir = turnDir(host, base.session);
