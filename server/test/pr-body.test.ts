@@ -45,7 +45,7 @@ test("lines made only of references declare where they start a block, and HTML c
   assert.deepEqual(undeclaredClosing(body, [4, 5, 6, 7, 12]), [12]);
 });
 
-test("a reference line that continues a sentence, a line in a code fence, and text after an unclosed comment declare nothing", () => {
+test("a reference line that continues a sentence, a line in a code block, and text after an unclosed comment declare nothing", () => {
   const wrapped = "Refs #394\n\n## Decisions\n\n- zod stays, so this PR does not\n  close #394.\n";
   assert.deepEqual(undeclaredClosing(wrapped, [394]), [394]);
   const fenced = "```\nCloses #5\n```\n\nThis does not close #5.\n";
@@ -53,6 +53,9 @@ test("a reference line that continues a sentence, a line in a code fence, and te
   assert.deepEqual(undeclaredClosing(fenced, [5]), [5]);
   assert.deepEqual(declaredClosing("~~~~\nCloses #6\n~~~\nCloses #7\n~~~~\n\nCloses #8"), [8]);
   assert.deepEqual(declaredClosing("Closes #9\n\n<!-- left open\n\nCloses #10"), [9]);
+  const indented = "Refs #1\n\nExample:\n\n    Closes #12\n\n\tCloses #13\n\nThis does not close #12.";
+  assert.deepEqual(declaredClosing(indented), []);
+  assert.deepEqual(undeclaredClosing(indented, [12]), [12]);
 });
 
 test("a declared issue GitHub did not link, and a body with no links, pass; a keyword inside a sentence declares nothing", () => {

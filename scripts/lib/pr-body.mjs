@@ -13,7 +13,7 @@ const CLOSING_ITEM = new RegExp(String.raw`^${KEYWORD}$`, "i");
 
 /**
  * Issue numbers the body declares as closed: closing items on a line made only of references that starts a block (the first line, or
- * after a blank line, a heading, or another such line), outside code fences and HTML comments. A keyword inside a sentence, also on the
+ * after a blank line, a heading, or another such line), outside code blocks and HTML comments. A keyword inside a sentence, also on the
  * wrapped next line of one, declares nothing, so the issue it links counts as undeclared.
  * @param {string} body
  * @returns {number[]}
@@ -44,7 +44,8 @@ export function declaredClosing(body) {
       continue;
     }
     const line = raw.trim();
-    const references = REFERENCES.test(line);
+    // A line indented 4 or more columns may be an indented code block, which GitHub does not read for references
+    const references = !/^(?: {4}|\t)/.test(raw) && REFERENCES.test(line);
     if (references && startsBlock)
       for (const m of line.matchAll(new RegExp(ITEM, "gi")))
         if (CLOSING_ITEM.test(m[1] ?? "")) declared.push(Number(m[2]));
