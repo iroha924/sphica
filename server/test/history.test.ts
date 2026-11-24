@@ -464,3 +464,39 @@ test("a host block in front of a prompt in one string is left out and the prompt
     ["Mine after it"],
   );
 });
+
+test("the same text queued twice in a turn is one message, the first, and a subagent line does not place the session", () => {
+  const queuedTwice = (at: string) =>
+    claude({
+      type: "attachment",
+      timestamp: at,
+      attachment: {
+        type: "queued_command",
+        commandMode: "prompt",
+        origin: { kind: "human" },
+        prompt: "continue",
+        timestamp: at,
+      },
+    });
+  const log = fromClaude(
+    lines(
+      human("p1", "Start", "2026-11-01T00:00:00.000Z"),
+      queuedTwice("2026-11-01T00:00:01.000Z"),
+      queuedTwice("2026-11-01T00:00:02.000Z"),
+    ),
+    place,
+  );
+  assert.deepEqual(
+    log.records.filter((r) => r.kind === "message" && r.body === "continue").map((r) => r.at),
+    ["2026-11-01T00:00:01.000Z"],
+  );
+  const rootOf = (cwd: string) => (cwd.startsWith("/work/repo") ? "/work/repo" : null);
+  const sub = fromClaude(
+    lines(
+      { ...human("p1", "Elsewhere", "2026-11-01T00:00:00.000Z"), cwd: "/elsewhere" },
+      { ...human("p1", "sub", "2026-11-01T00:00:01.000Z"), cwd: "/work/repo", isSidechain: true },
+    ),
+    { ...place, rootOf },
+  );
+  assert.equal(sub.excluded, "ran in other directories");
+});

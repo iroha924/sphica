@@ -82,6 +82,11 @@ const PROMPT_SEP = "\n";
 const REPLY_SEP = "\n\n";
 
 const ownerless = "no message marked as the owner's";
+/** Each message id once, the first: the same text twice in a turn has one id, and the database refuses its repeat at another time */
+const once = (records: Spooled[]): Spooled[] => {
+  const seen = new Set<string>();
+  return records.filter((r) => r.kind !== "message" || (!seen.has(r.id) && Boolean(seen.add(r.id))));
+};
 /** Why a log none of whose lines ran in the repository is not the repository's */
 const ELSEWHERE = "ran in other directories";
 
@@ -134,14 +139,14 @@ export function fromClaude(lines: readonly string[], place: Place): SessionLog {
       continue;
     }
     session ??= str(line.sessionId);
-    cwd = str(line.cwd) ?? cwd;
-    if (rootAt(cwd)) here = true;
-    branch ??= str(line.gitBranch);
-    if (str(line.entrypoint)?.startsWith("sdk-")) excluded ??= "headless or SDK run";
     if (line.isSidechain === true) {
       count(skipped, "subagent line");
       continue;
     }
+    cwd = str(line.cwd) ?? cwd;
+    if (rootAt(cwd)) here = true;
+    branch ??= str(line.gitBranch);
+    if (str(line.entrypoint)?.startsWith("sdk-")) excluded ??= "headless or SDK run";
     const at = iso(line.timestamp);
     const message = isObject(line.message) ? line.message : null;
     if (line.type === "attachment") {
@@ -212,7 +217,13 @@ export function fromClaude(lines: readonly string[], place: Place): SessionLog {
   if (!session) excluded ??= "no session id";
   // A session with no owner message is not recorded: once recorded it is never read again, so a later reader could not add the owner's words
   if (!owned) excluded ??= ownerless;
-  return { host: "claude-code", session: session ?? "", records: excluded ? [] : records, skipped, excluded };
+  return {
+    host: "claude-code",
+    session: session ?? "",
+    records: excluded ? [] : once(records),
+    skipped,
+    excluded,
+  };
 }
 
 /** Line types of a Claude Code log that carry nothing capture records, counted apart from ones not seen before */
@@ -280,7 +291,7 @@ export function fromCodex(lines: readonly string[], place: Place): SessionLog {
   const result = (excluded: string | null): SessionLog => ({
     host: "codex",
     session,
-    records: excluded ? [] : records,
+    records: excluded ? [] : once(records),
     skipped,
     excluded,
   });
@@ -374,26 +385,28 @@ function linesOf(file: string): string[] | null {
 
 /** The first line of a log without reading the rest, within the bytes live capture reads it from, or null */
 async function firstLineOf(file: string): Promise<string | null> {
-  if (!file.endsWith(".zst")) return linesOf(file)?.[0] ?? null;
-  const source = fs.createReadStream(file);
-  const unzip = zlib.createZstdDecompress();
+  const source = fs.createReadStream(file, { end: file.endsWith(".zst") ? undefined : SESSION_META_BYTES });
+  const unzip = file.endsWith(".zst") ? zlib.createZstdDecompress() : null;
   // A pipe does not pass the source's errors on; without this an unreadable file ends the process
-  source.on("error", (e) => unzip.destroy(e));
-  source.pipe(unzip);
-  let text = "";
+  if (unzip) {
+    source.on("error", (e) => unzip.destroy(e));
+    source.pipe(unzip);
+  }
+  // Counted in bytes, and a line that does not end within them is no first line, as live capture reads it (codexThread)
+  let bytes = Buffer.alloc(0);
   try {
-    for await (const chunk of unzip) {
-      text += (chunk as Buffer).toString("utf8");
-      const end = text.indexOf("\n");
-      if (end >= 0) return text.slice(0, end);
-      if (text.length > SESSION_META_BYTES) return null;
+    for await (const chunk of unzip ?? source) {
+      bytes = Buffer.concat([bytes, chunk as Buffer]);
+      const end = bytes.indexOf(0x0a);
+      if (end >= 0 && end < SESSION_META_BYTES) return bytes.subarray(0, end).toString("utf8");
+      if (bytes.length >= SESSION_META_BYTES) return null;
     }
-    return text || null;
+    return null;
   } catch {
     return null;
   } finally {
     source.destroy();
-    unzip.destroy();
+    unzip?.destroy();
   }
 }
 
@@ -503,15 +516,19 @@ function queuedSessions(): Set<string> {
 export async function unrecorded(
   db: Reads,
   logs: readonly SessionLog[],
+  projectKeys: readonly string[],
 ): Promise<{ fresh: SessionLog[]; known: number; running: number }> {
   const queuedNow = queuedSessions();
   const ids = [...new Set(logs.map((l) => l.session).filter(Boolean))];
   const known = new Set<string>();
   for (const part of chunks(ids)) {
+    // Per project: a session that ran in two repositories is recorded apart in each
     const rows = await db
       .selectFrom("session")
-      .select(["host", "external_id"])
-      .where("external_id", "in", part)
+      .innerJoin("project", "project.id", "session.project_id")
+      .select(["session.host", "session.external_id"])
+      .where("project.key", "in", [...projectKeys])
+      .where("session.external_id", "in", part)
       .execute();
     for (const r of rows) known.add(`${r.host}\0${r.external_id}`);
   }
@@ -533,7 +550,11 @@ export async function unrecorded(
 }
 
 /** How many of the given messages the database holds now, by session and id: what an import actually wrote */
-export async function written(db: Reads, logs: readonly SessionLog[]): Promise<number> {
+export async function written(
+  db: Reads,
+  logs: readonly SessionLog[],
+  projectKeys: readonly string[],
+): Promise<number> {
   let n = 0;
   for (const log of logs) {
     const ids = [...new Set(log.records.flatMap((r) => (r.kind === "message" ? [r.id] : [])))];
@@ -541,7 +562,9 @@ export async function written(db: Reads, logs: readonly SessionLog[]): Promise<n
       const row = await db
         .selectFrom("source")
         .innerJoin("session", "session.id", "source.session_id")
+        .innerJoin("project", "project.id", "session.project_id")
         .select((eb) => eb.fn.count<number>("source.id").as("n"))
+        .where("project.key", "in", [...projectKeys])
         .where("session.host", "=", log.host)
         .where("session.external_id", "=", log.session)
         .where("source.kind", "=", "session_message")

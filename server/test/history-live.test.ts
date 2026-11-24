@@ -137,7 +137,7 @@ function home(claudeDir = ".claude"): { home: string; repo: string; worktree: st
   ];
   fs.writeFileSync(
     path.join(rollout, "rollout-2026-11-01T02-00-00-x-2.jsonl.zst"),
-    zlib.zstdCompressSync(Buffer.from(JSON.stringify(exec[0]))),
+    zlib.zstdCompressSync(Buffer.from(`${JSON.stringify(exec[0])}\n`)),
   );
   return { home, repo, worktree };
 }
@@ -177,7 +177,7 @@ test("logs of the repository and its worktree are found in both homes, with each
       path.join(h, ".sphica", "spool", "1.json"),
       JSON.stringify({ v: 2, kind: "message", session: "c-3", project: KEY }),
     );
-    const { fresh, known, running } = await unrecorded(db.reader, logs);
+    const { fresh, known, running } = await unrecorded(db.reader, logs, [KEY]);
     assert.deepEqual(
       fresh.map((l) => l.session),
       ["c-1"],
@@ -233,6 +233,23 @@ test("a deleted Claude Code worktree under the root keeps its own root, and an u
   const rollouts = path.join(h, ".codex", "sessions", "2026", "11", "02");
   fs.mkdirSync(rollouts, { recursive: true });
   fs.writeFileSync(path.join(rollouts, "rollout-broken.jsonl.zst"), "not zstd");
+  // A first line over the bytes live capture reads it from is no first line, compressed or not
+  const long = JSON.stringify({
+    type: "session_meta",
+    payload: {
+      id: "x-9",
+      cwd: repo,
+      originator: "codex-tui",
+      source: "vscode",
+      thread_source: "user",
+      base_instructions: "あ".repeat(100_000),
+    },
+  });
+  fs.writeFileSync(path.join(rollouts, "rollout-long.jsonl"), `${long}\n`);
+  fs.writeFileSync(
+    path.join(rollouts, "rollout-long.jsonl.zst"),
+    zlib.zstdCompressSync(Buffer.from(`${long}\n`)),
+  );
   const locked = path.join(rollouts, "rollout-locked.jsonl.zst");
   fs.writeFileSync(locked, zlib.zstdCompressSync(Buffer.from("{}")));
   fs.chmodSync(locked, 0o000);
@@ -245,9 +262,63 @@ test("a deleted Claude Code worktree under the root keeps its own root, and an u
       logs.find((l) => l.session === "c-4")?.records.flatMap((r) => (r.kind === "edit" ? [r.path] : [])),
       ["src/b.ts"],
     );
-    assert.equal(unreadable, 2);
+    assert.equal(unreadable, 4);
   } finally {
     fs.chmodSync(locked, 0o600);
+  }
+});
+
+test("a session that ran in two repositories is imported into each, the second after the first", () => {
+  const { home: h, repo } = home();
+  const other = path.join(h, "Projects", "there");
+  fs.mkdirSync(other, { recursive: true });
+  git("init", "-q", other);
+  git("-C", other, "remote", "add", "origin", "https://github.com/o/there.git");
+  const d = path.join(h, ".claude", "projects", "-both");
+  fs.mkdirSync(d, { recursive: true });
+  const row = (cwd: string, r: object) => JSON.stringify({ sessionId: "c-9", cwd, entrypoint: "cli", ...r });
+  fs.writeFileSync(
+    path.join(d, "c-9.jsonl"),
+    [
+      row(repo, {
+        type: "user",
+        promptId: "p1",
+        origin: { kind: "human" },
+        timestamp: "2026-11-01T00:00:00.000Z",
+        message: { content: "Here first" },
+      }),
+      row(other, {
+        type: "user",
+        promptId: "p2",
+        origin: { kind: "human" },
+        timestamp: "2026-11-01T00:01:00.000Z",
+        message: { content: "There next" },
+      }),
+    ].join("\n"),
+  );
+  const run = (...args: string[]) =>
+    execFileSync(process.execPath, [CLI, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...tmpEnv(), PATH: fakeGhPath(), HOME: h, USERPROFILE: h },
+      timeout: 60_000,
+    });
+  run("init", "--cwd", repo, "--history");
+  const there = run("init", "--cwd", other, "--history");
+  assert.match(there, /1 past session imported \(1 of 1 messages written\)/, there);
+  const db = new DatabaseSync(path.join(h, ".sphica", "sphica.db"), { readOnly: true });
+  try {
+    const rows = db
+      .prepare(
+        "select p.key key, s.text text from source s join session x on x.id = s.session_id join project p on p.id = x.project_id where x.external_id = 'c-9' order by s.text",
+      )
+      .all();
+    assert.deepEqual(
+      rows.map((r) => `${r.key} ${r.text}`),
+      ["git:github.com/o/here Here first", "git:github.com/o/there There next"],
+    );
+  } finally {
+    db.close();
   }
 });
 

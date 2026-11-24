@@ -280,7 +280,8 @@ const INJECTED = [
  * with the running turn's id (143 of 148 in transcripts), and turns started by messages from other sessions reuse the previous turn's id
  * (all 127). Ids from the turn id alone collide on the unique constraint, and the later one is silently dropped.
  * **Built from the masked body** (building from the unmasked body would let weak keys be brute-forced by matching the masked body). The same
- * input arriving twice is one row. The same text arriving twice with the same turn id (a repeated addition or response) is one row too.
+ * input arriving twice is one row. The same text twice in one turn (a repeated addition or response) has one id too, so the database
+ * refuses the repeat when it carries another time.
  */
 const digest = (s: string): string => sha256(s).toString("hex").slice(0, 16);
 

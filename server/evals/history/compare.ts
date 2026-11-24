@@ -92,7 +92,9 @@ try {
     const live = await db
       .selectFrom("source")
       .innerJoin("session", "session.id", "source.session_id")
+      .innerJoin("project", "project.id", "session.project_id")
       .select(["source.external_id as id", "source.text as text", "source.author_kind as speaker"])
+      .where("project.key", "in", [place.key, place.legacyKey])
       .where("session.host", "=", log.host)
       .where("session.external_id", "=", log.session)
       .where("source.kind", "=", "session_message")
@@ -134,5 +136,9 @@ try {
 } finally {
   await db.destroy();
 }
-for (const [k, n] of Object.entries(tally).sort()) console.log(`${n}\t${k}`);
-for (const e of examples) console.log(e);
+// Reasons and ids come from the logs, so control characters are shown escaped and cannot redraw the terminal
+const safe = (s: string) =>
+  // oxlint-disable-next-line no-control-regex -- matches the control characters it escapes
+  s.replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+for (const [k, n] of Object.entries(tally).sort()) console.log(`${n}\t${safe(k)}`);
+for (const e of examples) console.log(safe(e));

@@ -492,7 +492,8 @@ async function importPast(place: { key: string; legacyKey?: string; root: string
   });
   const left: Record<string, number> = {};
   for (const l of logs) if (l.excluded) left[l.excluded] = (left[l.excluded] ?? 0) + 1;
-  const { fresh, known, running } = await withDb("reader", (db) => unrecorded(db, logs));
+  const keys = [...new Set([place.key, place.legacyKey ?? place.key])];
+  const { fresh, known, running } = await withDb("reader", (db) => unrecorded(db, logs, keys));
   // Counted once per message id, as the send writes a repeated one once
   const messages = new Set<string>();
   for (const log of fresh)
@@ -502,7 +503,7 @@ async function importPast(place: { key: string; legacyKey?: string; root: string
     }
   const queued = messages.size;
   const sent = fresh.length ? await flush(dbFile(), IMPORT_SEND_MS) : { sent: 0, deferred: 0, rejected: 0 };
-  const done = fresh.length ? await withDb("reader", (db) => written(db, fresh)) : 0;
+  const done = fresh.length ? await withDb("reader", (db) => written(db, fresh, keys)) : 0;
   const out = [
     `${plural(fresh.length, "past session")} imported (${done} of ${queued} messages written)`,
     ...(known ? [`${known} already recorded, so not read again`] : []),
