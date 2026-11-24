@@ -198,7 +198,7 @@ function put(dir: string, record: unknown): string {
   return path.join(dir, name);
 }
 
-function spool(record: Spooled): void {
+export function spool(record: Spooled): void {
   put(spoolDir(), record);
 }
 
@@ -280,7 +280,8 @@ const INJECTED = [
  * with the running turn's id (143 of 148 in transcripts), and turns started by messages from other sessions reuse the previous turn's id
  * (all 127). Ids from the turn id alone collide on the unique constraint, and the later one is silently dropped.
  * **Built from the masked body** (building from the unmasked body would let weak keys be brute-forced by matching the masked body). The same
- * input arriving twice is one row. The same text arriving twice with the same turn id (a repeated addition or response) is one row too.
+ * input arriving twice is one row. The same text twice in one turn (a repeated addition or response) has one id too, so the database
+ * refuses the repeat when it carries another time.
  */
 const digest = (s: string): string => sha256(s).toString("hex").slice(0, 16);
 
@@ -539,6 +540,41 @@ const unconfirmed = (input: HookInput): string | null =>
           "To record a session, start Codex without --ephemeral",
         );
 
+/** The fields every queued record of one turn shares */
+export type TurnBase = Pick<Spooled, "v" | "host" | "session" | "project" | "branch" | "turn">;
+
+/** A message record as capture queues it, or null for an empty body. The import of past sessions builds its ids the same way */
+export function messageOf(
+  base: TurnBase,
+  key: string,
+  speaker: "owner" | "assistant",
+  raw: string,
+  at: string,
+): Extract<Spooled, { kind: "message" }> | null {
+  const kept = fit(clean(raw).trim());
+  if (!kept.body.trim()) return null;
+  return { ...base, at, kind: "message", id: `${key}:${digest(kept.body)}`, speaker, ...kept };
+}
+
+/**
+ * The records of one AskUserQuestion: its questions as the reply's and the answers as the owner's, keyed by the tool use. The questions are
+ * a millisecond before the answers, so they read first whatever order the spool files are sent in. The import builds them the same way
+ */
+export function askedOf(
+  base: TurnBase,
+  input: Pick<HookInput, "tool_response">,
+  toolUse: string,
+  at: string,
+): Extract<Spooled, { kind: "message" }>[] {
+  const said = answersOf(input);
+  if (!said) return [];
+  const id = `${base.turn}:ask:${toolUse}`;
+  return [
+    messageOf(base, `${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString()),
+    messageOf(base, id, "owner", said.answers, at),
+  ].filter((r) => r !== null);
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export async function onHook(
   host: Host,
@@ -585,10 +621,8 @@ export async function onHook(
     at,
   };
   const say = (key: string, speaker: "owner" | "assistant", raw: string, when = at) => {
-    const kept = fit(clean(raw).trim());
-    if (!kept.body.trim()) return;
-    const id = `${key}:${digest(kept.body)}`;
-    spool({ ...base, at: when, kind: "message", id, speaker, ...kept });
+    const record = messageOf(base, key, speaker, raw, when);
+    if (record) spool(record);
   };
 
   const dir = turnDir(host, base.session);
@@ -616,13 +650,7 @@ export async function onHook(
     const tool = input.tool_name ?? "";
     const ti = input.tool_input ?? {};
     if (tool === "AskUserQuestion") {
-      const said = answersOf(input);
-      if (said) {
-        const id = `${turn}:ask:${input.tool_use_id ?? at}`;
-        // A millisecond before the answers, so the questions read first whatever order the spool files are sent in
-        say(`${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString());
-        say(id, "owner", said.answers);
-      }
+      for (const r of askedOf(base, input, input.tool_use_id ?? at, at)) spool(r);
       return { flush: false };
     }
     // Read files are not recorded. They still arrive from hook settings written by older installs.
@@ -849,7 +877,7 @@ const FLUSH_BUDGET_MS = 30_000; // the detached send; far under the 5-minute sta
 export const TOOL_FLUSH_BUDGET_MS = 2_000; // sends an MCP tool waits for
 // Keep the number of variables per statement well below SQLite's limit (32,766). Messages have 11 columns.
 const ROWS = 1000;
-const chunks = <T>(xs: T[], n = ROWS): T[][] =>
+export const chunks = <T>(xs: T[], n = ROWS): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
 /**
@@ -979,7 +1007,7 @@ const REJECTED = new Set([18, 19, 20, 25]);
 const rejected = (e: unknown): boolean => REJECTED.has(sqliteCode(e) ?? -1);
 
 /** Queued records in `from`, oldest first (names start with the time they were stored). */
-const queued = (from: string): { name: string; from: string }[] => {
+export const queued = (from: string): { name: string; from: string }[] => {
   try {
     return fs
       .readdirSync(from)
