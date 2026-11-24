@@ -4,9 +4,11 @@
 // Past sessions read from host logs become the same records live capture queues: only lines the log marks as the owner's are the owner's
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { messageOf } from "../src/capture.ts";
-import { fromClaude, fromCodex } from "../src/history.ts";
+import { EDIT_TOOLS, fromClaude, fromCodex } from "../src/history.ts";
 
 const place = { key: "github.com/example/repo", root: "/work/repo" };
 const lines = (...rows: object[]) => rows.map((r) => JSON.stringify(r));
@@ -120,6 +122,11 @@ test("an AskUserQuestion answer is the owner's and its questions are the reply's
   const log = fromClaude(
     lines(
       human("p1", "Ask me", "2026-11-01T00:00:00.000Z"),
+      assistant(
+        "m1",
+        [{ type: "tool_use", id: "tu1", name: "AskUserQuestion", input: {} }],
+        "2026-11-01T00:00:01.000Z",
+      ),
       claude({
         type: "user",
         promptId: "p1",
@@ -282,4 +289,143 @@ test("codex exec runs, child threads, and logs without a session line are left o
   );
   assert.equal(fromCodex(lines({ type: "event_msg", payload: {} }), place).excluded, "no session line");
   assert.equal(fromCodex([], place).excluded, "no session line");
+});
+
+test("a prompt typed while a turn ran is the owner's under the running turn, and queued notices or reports are not", () => {
+  const log = fromClaude(
+    lines(
+      human("p1", "Start", "2026-11-01T00:00:00.000Z"),
+      claude({
+        type: "attachment",
+        timestamp: "2026-11-01T00:00:01.000Z",
+        attachment: {
+          type: "queued_command",
+          commandMode: "prompt",
+          origin: { kind: "human" },
+          prompt: "Also this",
+          timestamp: "2026-11-01T00:00:01.500Z",
+        },
+      }),
+      claude({
+        type: "attachment",
+        timestamp: "2026-11-01T00:00:02.000Z",
+        attachment: {
+          type: "queued_command",
+          commandMode: "prompt",
+          origin: { kind: "peer" },
+          prompt: "report",
+        },
+      }),
+      claude({
+        type: "attachment",
+        timestamp: "2026-11-01T00:00:03.000Z",
+        attachment: {
+          type: "queued_command",
+          commandMode: "task-notification",
+          origin: { kind: "task-notification" },
+          prompt: "done",
+        },
+      }),
+    ),
+    place,
+  );
+  const owners = log.records.filter((r) => r.kind === "message" && r.speaker === "owner");
+  assert.deepEqual(
+    owners.map((r) => r.kind === "message" && [r.turn, r.body, r.at]),
+    [
+      ["p1", "Start", "2026-11-01T00:00:00.000Z"],
+      ["p1", "Also this", "2026-11-01T00:00:01.500Z"],
+    ],
+  );
+  assert.deepEqual(log.skipped, { "queued peer message": 1, "queued task-notification message": 1 });
+});
+
+test("a block the host wrapped in system-reminder is not the owner's, even on a line of human origin", () => {
+  const log = fromClaude(
+    lines(
+      human(
+        "p1",
+        [
+          { type: "text", text: "<system-reminder>side session event</system-reminder>" },
+          { type: "text", text: "My prompt" },
+        ],
+        "2026-11-01T00:00:00.000Z",
+      ),
+      human("p2", "<system-reminder>only the host</system-reminder>", "2026-11-01T00:01:00.000Z"),
+    ),
+    place,
+  );
+  assert.deepEqual(
+    log.records
+      .filter((r) => r.kind === "message" && r.speaker === "owner")
+      .map((r) => r.kind === "message" && r.body),
+    ["My prompt"],
+  );
+});
+
+test("answers count only from an AskUserQuestion call, never from another tool's result that carries answers", () => {
+  const log = fromClaude(
+    lines(
+      human("p1", "Fetch", "2026-11-01T00:00:00.000Z"),
+      assistant(
+        "m1",
+        [{ type: "tool_use", id: "x1", name: "mcp__other__fetch", input: {} }],
+        "2026-11-01T00:00:01.000Z",
+      ),
+      claude({
+        type: "user",
+        promptId: "p1",
+        timestamp: "2026-11-01T00:00:02.000Z",
+        message: { content: [{ type: "tool_result", tool_use_id: "x1", content: "ok" }] },
+        toolUseResult: { answers: { "Ship it?": "Yes" } },
+      }),
+    ),
+    place,
+  );
+  assert.deepEqual(
+    log.records.filter((r) => r.kind === "message" && r.id.includes(":ask:")),
+    [],
+  );
+});
+
+test("a session with no message marked as the owner's is left out, so a later import can still add the owner's words", () => {
+  const log = fromClaude(
+    lines(
+      claude({
+        type: "user",
+        promptId: "p1",
+        timestamp: "2026-11-01T00:00:00.000Z",
+        message: { content: "no origin" },
+      }),
+      assistant("m1", [{ type: "text", text: "Reply" }], "2026-11-01T00:00:01.000Z"),
+    ),
+    place,
+  );
+  assert.equal(log.excluded, "no message marked as the owner's");
+  assert.deepEqual(log.records, []);
+  const codex = fromCodex(
+    lines(codexMeta({}), {
+      type: "event_msg",
+      timestamp: "2026-11-01T00:00:06.000Z",
+      payload: { type: "task_complete", turn_id: "t1", last_agent_message: "Done" },
+    }),
+    place,
+  );
+  assert.equal(codex.excluded, "no message marked as the owner's");
+});
+
+test("a Codex thread from anything but a terminal or an editor is left out, as is one without a recognizable own thread", () => {
+  assert.equal(fromCodex(lines(codexMeta({ source: "mcp" })), place).excluded, "mcp session");
+  assert.equal(fromCodex(lines(codexMeta({ thread_source: "subagent" })), place).excluded, "child thread");
+});
+
+test("the edit tools read are the ones the capture hook's matcher names", () => {
+  const hooks = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "..", "plugin", "hooks", "hooks.json"),
+    "utf8",
+  );
+  const matcher = /"matcher":\s*"([^"]*MultiEdit[^"]*)"/.exec(hooks)?.[1];
+  assert.ok(matcher, "the capture hook names its edit tools in a matcher");
+  // The same matcher also takes AskUserQuestion, whose answers the import reads apart from edits
+  assert.deepEqual(new Set(matcher.split("|").filter((t) => t !== "AskUserQuestion")), EDIT_TOOLS);
 });

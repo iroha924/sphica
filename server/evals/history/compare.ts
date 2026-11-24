@@ -1,80 +1,87 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Reads this machine's own host logs as the import would, and compares each session live capture already recorded with what the database
-// holds: message ids and texts, per host and speaker. Prints counts and ids only, never a message's text. The database is opened to read.
+// Reads this machine's own host logs with the import's own reader, and compares each session live capture already recorded with what the
+// database holds: message ids and texts, per host and speaker. A message only live capture holds is named by the log line that gives its
+// id (one the import leaves out on purpose, or none). Prints counts and ids only, never a message's text. The database is opened to read.
 //   node server/evals/history/compare.ts --db <copy of the database> [--root <repository root>]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import zlib from "node:zlib";
+import { messageOf } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
-import { fromClaude, fromCodex, type SessionLog } from "../../src/history.ts";
+import { readLogs } from "../../src/history.ts";
+import { identify } from "../../src/project.ts";
 
 const { values } = parseArgs({ options: { db: { type: "string" }, root: { type: "string" } } });
 if (!values.db) throw new Error("--db <copy of the database> is required");
-const root = path.resolve(values.root ?? process.cwd());
-const place = { key: "", root };
+const place = identify(path.resolve(values.root ?? process.cwd()));
+if (!place) throw new Error("--root is not inside a repository");
+const { logs } = await readLogs({ key: place.legacyKey, match: place.key, root: place.root });
 
-const read = (file: string): string[] => {
-  let buf = fs.readFileSync(file);
-  if (file.endsWith(".zst")) buf = zlib.zstdDecompressSync(buf);
-  return buf.toString("utf8").split("\n");
+type Line = {
+  type?: unknown;
+  sessionId?: unknown;
+  promptId?: unknown;
+  isMeta?: unknown;
+  origin?: { kind?: unknown };
+  message?: { content?: unknown };
+  attachment?: { type?: unknown; prompt?: unknown; origin?: { kind?: unknown } };
 };
-const walk = (dir: string, out: string[] = []): string[] => {
-  if (!fs.existsSync(dir)) return out;
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
-    else if (/\.jsonl(\.zst)?$/.test(e.name)) out.push(p);
-  }
-  return out;
-};
-const inside = (cwd: string | null) => cwd !== null && (cwd === root || cwd.startsWith(`${root}${path.sep}`));
+const textOf = (c: unknown): string =>
+  typeof c === "string"
+    ? c
+    : Array.isArray(c)
+      ? c
+          .filter((b): b is { text: string } => b?.type === "text" && typeof b.text === "string")
+          .map((b) => b.text)
+          .join("\n")
+      : "";
 
-const logs: SessionLog[] = [];
-/** Per Claude Code session and turn, how its user lines without the human origin start, to name why live capture kept one the import did not */
-const unmarked = new Map<string, Map<string, string[]>>();
-const shapeOf = (line: Record<string, unknown>): string => {
-  const content = (line.message as { content?: unknown } | undefined)?.content;
-  const text = typeof content === "string" ? content.trimStart() : "";
-  const tag = /^<([A-Za-z][\w-]*)/.exec(text)?.[1];
-  return tag === "system-reminder"
-    ? "a host event wrapped in system-reminder"
-    : tag
-      ? `a line starting with <${tag}>`
-      : "a line without the human origin";
-};
-const claudeDir = path.join(os.homedir(), ".claude", "projects", root.replace(/[^A-Za-z0-9]/g, "-"));
-for (const f of fs.existsSync(claudeDir) ? fs.readdirSync(claudeDir) : [])
-  if (f.endsWith(".jsonl")) {
-    const lines = read(path.join(claudeDir, f));
-    const log = fromClaude(lines, place);
-    logs.push(log);
-    const turns = new Map<string, string[]>();
-    for (const raw of lines) {
-      let line: Record<string, unknown>;
+/** For each Claude Code session, the owner-message id every user line or queued prompt would give, with the shape of that line */
+const shapes = new Map<string, Map<string, string>>();
+const projects = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "projects");
+for (const dir of fs.existsSync(projects) ? fs.readdirSync(projects, { withFileTypes: true }) : []) {
+  if (!dir.isDirectory()) continue;
+  const d = path.join(projects, dir.name);
+  for (const f of fs.readdirSync(d).filter((n) => n.endsWith(".jsonl"))) {
+    let session = "";
+    let turn: string | null = null;
+    const byId = new Map<string, string>();
+    for (const raw of fs.readFileSync(path.join(d, f), "utf8").split("\n")) {
+      let line: Line;
       try {
-        line = JSON.parse(raw) as Record<string, unknown>;
+        line = JSON.parse(raw) as Line;
       } catch {
         continue;
       }
-      const origin = (line.origin as { kind?: unknown } | undefined)?.kind;
-      if (line.type !== "user" || origin === "human" || typeof line.promptId !== "string") continue;
-      turns.set(line.promptId, [...(turns.get(line.promptId) ?? []), shapeOf(line)]);
+      if (!session && typeof line.sessionId === "string") session = line.sessionId;
+      if (line.type === "user" && typeof line.promptId === "string") turn = line.promptId;
+      const queued = line.type === "attachment" && line.attachment?.type === "queued_command";
+      const content =
+        line.type === "user" ? line.message?.content : queued ? line.attachment?.prompt : undefined;
+      if (content === undefined || !turn) continue;
+      if (Array.isArray(content) && content.some((b) => b?.type === "tool_result")) continue;
+      const origin = String((line.type === "user" ? line.origin : line.attachment?.origin)?.kind ?? "none");
+      const text = textOf(content);
+      const host = /^\s*<system-reminder>/.test(text) ? ", starting with a host system-reminder" : "";
+      const base = { v: 2 as const, host: "claude-code" as const, session, project: "", branch: null, turn };
+      const r = messageOf(base, `${turn}:owner`, "owner", text, "2026-01-01T00:00:00.000Z");
+      if (r)
+        byId.set(
+          r.id,
+          `a ${queued ? "queued prompt" : "user line"} of origin ${origin}${line.isMeta ? " (meta)" : ""}${host}`,
+        );
     }
-    unmarked.set(log.session, turns);
+    shapes.set(session, byId);
   }
-for (const f of walk(path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"), "sessions"))) {
-  const log = fromCodex(read(f), place);
-  if (inside(log.cwd)) logs.push(log);
 }
 
 const db = openReader(values.db);
 const tally: Record<string, number> = {};
-const add = (k: string, n = 1) => {
-  tally[k] = (tally[k] ?? 0) + n;
+const add = (k: string) => {
+  tally[k] = (tally[k] ?? 0) + 1;
 };
 const examples: string[] = [];
 try {
@@ -103,28 +110,25 @@ try {
         ),
       );
       const theirs = new Map(live.filter((r) => r.speaker === speaker).map((r) => [r.id, r.text] as const));
-      const liveTexts = new Set(theirs.values());
       for (const [id, body] of mine) {
         if (theirs.get(id) === body) add(`${log.host} ${speaker}: same id and text`);
-        else if (liveTexts.has(body)) add(`${log.host} ${speaker}: same text, other id`);
         else {
-          add(`${log.host} ${speaker}: only imported (live capture has nothing for it)`);
-          if (examples.length < 20)
+          // Live capture kept the host's block in front of the prompt, which the import leaves out
+          const trimmed = [...theirs.values()].some((text) => text !== body && text.endsWith(body));
+          add(
+            `${log.host} ${speaker}: only imported${trimmed ? ", a live message with the host block left out" : ""}`,
+          );
+          if (examples.length < 30)
             examples.push(`${log.host} ${speaker} only imported: ${log.session} ${id}`);
         }
       }
-      for (const [id, text] of theirs)
-        if (!mine.has(id) && ![...mine.values()].includes(text)) {
-          const shapes = unmarked.get(log.session)?.get(id.split(":")[0] ?? "") ?? [];
-          const why =
-            speaker === "owner" && shapes.length
-              ? `the log has ${[...new Set(shapes)].join(" / ")}`
-              : "no line in the log gives it";
-          add(`${log.host} ${speaker}: only live (${why})`);
-          if (examples.length < 20) examples.push(`${log.host} ${speaker} only live: ${log.session} ${id}`);
+      for (const id of theirs.keys())
+        if (!mine.has(id)) {
+          const shape = speaker === "owner" ? shapes.get(log.session)?.get(id) : undefined;
+          add(`${log.host} ${speaker}: only live, from ${shape ?? "no line of the log"}`);
+          if (examples.length < 30) examples.push(`${log.host} ${speaker} only live: ${log.session} ${id}`);
         }
     }
-    for (const [reason, n] of Object.entries(log.skipped)) add(`${log.host} skipped: ${reason}`, n);
   }
 } finally {
   await db.destroy();

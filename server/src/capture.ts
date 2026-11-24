@@ -555,6 +555,25 @@ export function messageOf(
   return { ...base, at, kind: "message", id: `${key}:${digest(kept.body)}`, speaker, ...kept };
 }
 
+/**
+ * The records of one AskUserQuestion: its questions as the reply's and the answers as the owner's, keyed by the tool use. The questions are
+ * a millisecond before the answers, so they read first whatever order the spool files are sent in. The import builds them the same way
+ */
+export function askedOf(
+  base: TurnBase,
+  input: Pick<HookInput, "tool_response">,
+  toolUse: string,
+  at: string,
+): Extract<Spooled, { kind: "message" }>[] {
+  const said = answersOf(input);
+  if (!said) return [];
+  const id = `${base.turn}:ask:${toolUse}`;
+  return [
+    messageOf(base, `${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString()),
+    messageOf(base, id, "owner", said.answers, at),
+  ].filter((r) => r !== null);
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export async function onHook(
   host: Host,
@@ -630,13 +649,7 @@ export async function onHook(
     const tool = input.tool_name ?? "";
     const ti = input.tool_input ?? {};
     if (tool === "AskUserQuestion") {
-      const said = answersOf(input);
-      if (said) {
-        const id = `${turn}:ask:${input.tool_use_id ?? at}`;
-        // A millisecond before the answers, so the questions read first whatever order the spool files are sent in
-        say(`${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString());
-        say(id, "owner", said.answers);
-      }
+      for (const r of askedOf(base, input, input.tool_use_id ?? at, at)) spool(r);
       return { flush: false };
     }
     // Read files are not recorded. They still arrive from hook settings written by older installs.

@@ -111,7 +111,7 @@ Four boundaries (the header of schema.sql):
 | Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources); states and replacement rows through `reconcile.ts` |
 | Record tool hook (Claude Code) | capture | `observeRecordCall` in `server/src/capture.ts`, through the `capture_tool_call` view; what it could not write, by the next send from `spool/calls/` |
 | `sphica init` | owner, then ingest | `server/src/admin.ts` creates the DB; `cli.ts` registers the project |
-| `sphica init --history` | capture | `server/src/history.ts` reads the hosts' logs into the records capture queues (`messageOf` builds the same ids); `cli.ts` queues them with `spool` and sends them with `flush`. A session the database holds is skipped whole |
+| `sphica init --history` | reader, then capture | `server/src/history.ts` reads the hosts' logs into the records capture queues (`messageOf` and `askedOf` build the same ids); `cli.ts` checks with reader which sessions are recorded, queues the rest with `spool`, and sends them with `flush`. A session the database holds, or one still in the queue, is skipped whole |
 | `sphica doctor --reindex` | owner | `reindex()` in `admin.ts` |
 | `sphica init` on an older revision | owner | `migrate()` in `admin.ts` |
 | `/sphica:forget` | forget | the record server's `forget_apply` → `forget.ts`, only after the owner confirms |
@@ -140,10 +140,10 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 | Role | Authorizer | Used by |
 |---|---|---|
 | owner | none | creating the DB, reindex, the database check in `doctor` |
-| reader | reads and allowed functions (`READER_FUNCTIONS`) only | the read MCP server (`mcp.ts`), delivery reads, `doctor`'s project list |
+| reader | reads and allowed functions (`READER_FUNCTIONS`) only | the read MCP server (`mcp.ts`), delivery reads, `doctor`'s project list, `init --history`'s check for recorded sessions |
 | ingest | writes only what the record server's code writes: listed tables, listed update columns, deletes of `artifact_link`, and inside triggers only what `INGEST_TRIGGER_WRITES` lists (a test compares it with every trigger body). Sources go through the view `ingest_source`, which cannot take a session message | the record MCP server, project registration |
 | forget | inserts into `forget_batch`, `source_forgotten`, `unit_state`, `unit_replacement` (and ends rows); deletes sources and what cites them; `secure_delete` and `wal_checkpoint` pragmas. Ingest may do none of the forget-only writes | `forget_apply` in the record server |
-| capture | inserts into the capture views only; reads only `project`'s id, key, and name, `session`'s id, and `source`'s id, session, external id, and kind; functions only inside the views' triggers (`TRIGGER_FUNCTIONS`) | capture and delivery logging |
+| capture | inserts into the capture views only; reads only `project`'s id, key, and name, `session`'s id, and `source`'s id, session, external id, and kind; functions only inside the views' triggers (`TRIGGER_FUNCTIONS`) | capture and delivery logging, the send of `init --history` |
 
 - Write connections live only in `server/src/db-write.ts`; `bun run architecture` checks the read MCP server cannot reach them
 - Enable `enableDefensive(true)` on every connection (it stops direct writes to FTS5 shadow tables)
