@@ -415,7 +415,10 @@ test("a session with no message marked as the owner's is left out, so a later im
 });
 
 test("a Codex thread from anything but a terminal or an editor is left out, as is one without a recognizable own thread", () => {
-  assert.equal(fromCodex(lines(codexMeta({ source: "mcp" })), place).excluded, "mcp session");
+  assert.equal(
+    fromCodex(lines(codexMeta({ source: "mcp" })), place).excluded,
+    "session not started from a terminal or an editor",
+  );
   assert.equal(fromCodex(lines(codexMeta({ thread_source: "subagent" })), place).excluded, "child thread");
 });
 
@@ -428,4 +431,36 @@ test("the edit tools read are the ones the capture hook's matcher names", () => 
   assert.ok(matcher, "the capture hook names its edit tools in a matcher");
   // The same matcher also takes AskUserQuestion, whose answers the import reads apart from edits
   assert.deepEqual(new Set(matcher.split("|").filter((t) => t !== "AskUserQuestion")), EDIT_TOOLS);
+});
+
+test("each record keeps to the repository by its own line's directory, so a turn that moves in keeps its reply and one that moves out drops it", () => {
+  const rootOf = (cwd: string) => (cwd.startsWith("/work/repo") ? "/work/repo" : null);
+  const at = (dir: string, row: object) => ({ ...row, cwd: dir });
+  const log = fromClaude(
+    lines(
+      at("/elsewhere", human("p1", "Start outside", "2026-11-01T00:00:00.000Z")),
+      at("/work/repo", assistant("m1", [{ type: "text", text: "Moved in" }], "2026-11-01T00:00:01.000Z")),
+      at("/work/repo", human("p2", "Inside", "2026-11-01T00:01:00.000Z")),
+      at("/elsewhere", assistant("m2", [{ type: "text", text: "Moved out" }], "2026-11-01T00:01:01.000Z")),
+    ),
+    { ...place, rootOf },
+  );
+  assert.deepEqual(
+    log.records.map((r) => r.kind === "message" && `${r.speaker}:${r.body}`),
+    ["owner:Inside", "assistant:Moved in"],
+  );
+  assert.equal(log.skipped["record from another directory"], 2);
+});
+
+test("a host block in front of a prompt in one string is left out and the prompt after it is kept", () => {
+  const log = fromClaude(
+    lines(human("p1", "<system-reminder>host</system-reminder>\nMine after it", "2026-11-01T00:00:00.000Z")),
+    place,
+  );
+  assert.deepEqual(
+    log.records
+      .filter((r) => r.kind === "message" && r.speaker === "owner")
+      .map((r) => r.kind === "message" && r.body),
+    ["Mine after it"],
+  );
 });

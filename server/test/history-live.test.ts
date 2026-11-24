@@ -191,6 +191,66 @@ test("logs of the repository and its worktree are found in both homes, with each
   }
 });
 
+test("a deleted Claude Code worktree under the root keeps its own root, and an unreadable or broken rollout is counted, not fatal", async () => {
+  const { home: h, repo } = home();
+  const gone = path.join(repo, ".claude", "worktrees", "w");
+  const d = path.join(h, ".claude", "projects", "-gone");
+  fs.mkdirSync(d, { recursive: true });
+  const row = (r: object) => JSON.stringify({ sessionId: "c-4", cwd: gone, entrypoint: "cli", ...r });
+  fs.writeFileSync(
+    path.join(d, "c-4.jsonl"),
+    [
+      row({
+        type: "user",
+        promptId: "p1",
+        origin: { kind: "human" },
+        timestamp: "2026-11-01T00:00:00.000Z",
+        message: { content: "In a worktree" },
+      }),
+      row({
+        type: "assistant",
+        timestamp: "2026-11-01T00:00:01.000Z",
+        message: {
+          id: "m1",
+          content: [
+            {
+              type: "tool_use",
+              id: "e1",
+              name: "Write",
+              input: { file_path: path.join(gone, "src", "b.ts") },
+            },
+          ],
+        },
+      }),
+      row({
+        type: "user",
+        promptId: "p1",
+        timestamp: "2026-11-01T00:00:02.000Z",
+        message: { content: [{ type: "tool_result", tool_use_id: "e1", content: "ok" }] },
+      }),
+    ].join("\n"),
+  );
+  const rollouts = path.join(h, ".codex", "sessions", "2026", "11", "02");
+  fs.mkdirSync(rollouts, { recursive: true });
+  fs.writeFileSync(path.join(rollouts, "rollout-broken.jsonl.zst"), "not zstd");
+  const locked = path.join(rollouts, "rollout-locked.jsonl.zst");
+  fs.writeFileSync(locked, zlib.zstdCompressSync(Buffer.from("{}")));
+  fs.chmodSync(locked, 0o000);
+  try {
+    const { logs, unreadable } = await readLogs(
+      { key: KEY, match: KEY, root: repo },
+      { claude: path.join(h, ".claude"), codex: path.join(h, ".codex") },
+    );
+    assert.deepEqual(
+      logs.find((l) => l.session === "c-4")?.records.flatMap((r) => (r.kind === "edit" ? [r.path] : [])),
+      ["src/b.ts"],
+    );
+    assert.equal(unreadable, 2);
+  } finally {
+    fs.chmodSync(locked, 0o600);
+  }
+});
+
 test("Claude Code logs are read from CLAUDE_CONFIG_DIR when it names another config directory", async () => {
   const { home: h, repo } = home("claude-config");
   const { logs } = await readLogs(

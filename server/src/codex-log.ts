@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /** How far into a Codex session log its first line is looked for; the line holds the session's instructions and ran to 23 KB when measured */
-const SESSION_META_BYTES = 256 * 1024;
+export const SESSION_META_BYTES = 256 * 1024;
 
 export type CodexThread = {
   /** The thread's own id: the session's for its own thread, another for a child */

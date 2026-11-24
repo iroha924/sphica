@@ -876,7 +876,7 @@ const FLUSH_BUDGET_MS = 30_000; // the detached send; far under the 5-minute sta
 export const TOOL_FLUSH_BUDGET_MS = 2_000; // sends an MCP tool waits for
 // Keep the number of variables per statement well below SQLite's limit (32,766). Messages have 11 columns.
 const ROWS = 1000;
-const chunks = <T>(xs: T[], n = ROWS): T[][] =>
+export const chunks = <T>(xs: T[], n = ROWS): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
 /**
@@ -1006,7 +1006,7 @@ const REJECTED = new Set([18, 19, 20, 25]);
 const rejected = (e: unknown): boolean => REJECTED.has(sqliteCode(e) ?? -1);
 
 /** Queued records in `from`, oldest first (names start with the time they were stored). */
-const queued = (from: string): { name: string; from: string }[] => {
+export const queued = (from: string): { name: string; from: string }[] => {
   try {
     return fs
       .readdirSync(from)

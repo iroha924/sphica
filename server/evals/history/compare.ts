@@ -6,12 +6,11 @@
 // id (one the import leaves out on purpose, or none). Prints counts and ids only, never a message's text. The database is opened to read.
 //   node server/evals/history/compare.ts --db <copy of the database> [--root <repository root>]
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { messageOf } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
-import { readLogs } from "../../src/history.ts";
+import { hostHomes, readLogs } from "../../src/history.ts";
 import { identify } from "../../src/project.ts";
 
 const { values } = parseArgs({ options: { db: { type: "string" }, root: { type: "string" } } });
@@ -41,7 +40,7 @@ const textOf = (c: unknown): string =>
 
 /** For each Claude Code session, the owner-message id every user line or queued prompt would give, with the shape of that line */
 const shapes = new Map<string, Map<string, string>>();
-const projects = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "projects");
+const projects = path.join(hostHomes().claude, "projects");
 for (const dir of fs.existsSync(projects) ? fs.readdirSync(projects, { withFileTypes: true }) : []) {
   if (!dir.isDirectory()) continue;
   const d = path.join(projects, dir.name);
@@ -103,6 +102,8 @@ try {
       continue;
     }
     add(`${log.host} sessions compared`);
+    for (const [reason, n] of Object.entries(log.skipped))
+      for (let i = 0; i < n; i++) add(`${log.host} skipped: ${reason}`);
     for (const speaker of ["owner", "assistant"] as const) {
       const mine = new Map(
         log.records.flatMap((r) =>
