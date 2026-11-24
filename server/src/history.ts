@@ -106,6 +106,7 @@ export function fromClaude(lines: readonly string[], place: Place): SessionLog {
   let owned = false;
   let here = false;
   const replies = new Map<string, { message: string; texts: string[]; at: string; cwd: string | null }>();
+  let replying: string | null = null;
   const pendingEdits = new Map<string, string>();
   const asks = new Set<string>();
   const rootAt = (dir: string | null): string | null =>
@@ -179,6 +180,12 @@ export function fromClaude(lines: readonly string[], place: Place): SessionLog {
         }
       }
       if (results.length) continue;
+      // Claude Code runs no Stop hook for a turn the owner interrupted, so live capture keeps none of its reply
+      if (textOf(content, PROMPT_SEP).startsWith("[Request interrupted by user")) {
+        if (replying) replies.delete(replying);
+        count(skipped, "interrupted reply");
+        continue;
+      }
       const origin = isObject(line.origin) ? str(line.origin.kind) : null;
       if (line.isMeta === true || origin !== "human") {
         count(skipped, origin ? `${origin} message` : "message without an origin");
@@ -206,6 +213,7 @@ export function fromClaude(lines: readonly string[], place: Place): SessionLog {
         prev.texts.push(text);
         prev.cwd = cwd;
       } else replies.set(turn, { message: id, texts: [text], at, cwd });
+      replying = turn;
       continue;
     }
     if (typeof line.type === "string" && !KNOWN_CLAUDE.has(line.type)) count(skipped, `${line.type} line`);

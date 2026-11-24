@@ -500,3 +500,26 @@ test("the same text queued twice in a turn is one message, the first, and a suba
   );
   assert.equal(sub.excluded, "ran in other directories");
 });
+
+test("a turn the owner interrupted keeps the owner's words but no reply, as live capture records none", () => {
+  const log = fromClaude(
+    lines(
+      human("p1", "Fix the parser", "2026-11-01T00:00:00.000Z"),
+      assistant("m1", [{ type: "text", text: "Half an answer" }], "2026-11-01T00:00:01.000Z"),
+      claude({
+        type: "user",
+        promptId: "p1",
+        timestamp: "2026-11-01T00:00:02.000Z",
+        message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+      }),
+      human("p2", "Try again", "2026-11-01T00:01:00.000Z"),
+      assistant("m2", [{ type: "text", text: "Fixed" }], "2026-11-01T00:01:01.000Z"),
+    ),
+    place,
+  );
+  assert.deepEqual(
+    log.records.flatMap((r) => (r.kind === "message" ? [`${r.speaker} ${r.body}`] : [])),
+    ["owner Fix the parser", "owner Try again", "assistant Fixed"],
+  );
+  assert.equal(log.skipped["interrupted reply"], 1);
+});
